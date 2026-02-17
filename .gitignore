@@ -1,0 +1,44 @@
+# Android
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Local JDK Workaround
+/.jdk17/
+jdk17.tar.gz
+
+# Kotlin
+/bin
+/gen
+
+# Hilt
+/app/hilt_main
+
+# Build Logs & Temporary Artifacts
+*.log
+*.txt
+build/
+app/build/
+.gradle/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.apks
+*.aab
+
+# OS
+.DS_Store
+Thumbs.db
