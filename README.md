@@ -69,6 +69,6 @@ Elysium Vanguard operates with zero external telemetry. Your data clusters remai
 
 ---
 
-## 💎 Crafted by Antigravity
+## 💎 Crafted by **Jordelmir** & **Antigravity**
 
 *Engineered for the elite. Optimized for the future.*
