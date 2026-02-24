@@ -75,6 +75,9 @@ class MusicHubViewModel @Inject constructor(
     private val _boostLevel = MutableStateFlow(1.0f) // 1.0 to 4.0 (Elite Boost)
     val boostLevel: StateFlow<Float> = _boostLevel.asStateFlow()
 
+    private val _activeQueue = MutableStateFlow<List<MusicTrack>>(emptyList())
+    val activeQueue: StateFlow<List<MusicTrack>> = _activeQueue.asStateFlow()
+
     private var mediaSession: MediaSession? = null
     private var dynamicsProcessing: DynamicsProcessing? = null
 
@@ -131,6 +134,9 @@ class MusicHubViewModel @Inject constructor(
                 if (state == Player.STATE_READY) {
                     applyBoostEffect()
                 }
+                if (state == Player.STATE_ENDED) {
+                    skipNext()
+                }
             }
         })
 
@@ -154,8 +160,13 @@ class MusicHubViewModel @Inject constructor(
         exoPlayer.release()
     }
 
-    fun playTrack(track: MusicTrack) {
+    fun playTrack(track: MusicTrack, customQueue: List<MusicTrack>? = null) {
         _currentTrack.value = track
+        
+        // If a custom queue is provided (Favorites, Playlist), use it. 
+        // Otherwise, fallback to the full library.
+        _activeQueue.value = customQueue ?: _songs.value
+
         val mediaItem = MediaItem.fromUri(track.path)
         exoPlayer.setMediaItem(mediaItem)
         exoPlayer.prepare()
@@ -170,26 +181,31 @@ class MusicHubViewModel @Inject constructor(
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         _currentTrack.value = null
+        _activeQueue.value = emptyList()
         _isPlaying.value = false
     }
 
     fun skipNext() {
-        val currentList = _songs.value
+        val currentList = _activeQueue.value.ifEmpty { _songs.value }
+        if (currentList.isEmpty()) return
+
         val currentIndex = currentList.indexOfFirst { it.id == _currentTrack.value?.id }
         if (currentIndex != -1 && currentIndex < currentList.size - 1) {
-            playTrack(currentList[currentIndex + 1])
-        } else if (currentList.isNotEmpty()) {
-            playTrack(currentList[0])
+            playTrack(currentList[currentIndex + 1], currentList)
+        } else {
+            playTrack(currentList[0], currentList)
         }
     }
 
     fun skipPrevious() {
-        val currentList = _songs.value
+        val currentList = _activeQueue.value.ifEmpty { _songs.value }
+        if (currentList.isEmpty()) return
+
         val currentIndex = currentList.indexOfFirst { it.id == _currentTrack.value?.id }
         if (currentIndex != -1 && currentIndex > 0) {
-            playTrack(currentList[currentIndex - 1])
-        } else if (currentList.isNotEmpty()) {
-            playTrack(currentList.last())
+            playTrack(currentList[currentIndex - 1], currentList)
+        } else {
+            playTrack(currentList.last(), currentList)
         }
     }
 

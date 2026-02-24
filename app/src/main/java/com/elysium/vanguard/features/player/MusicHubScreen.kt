@@ -227,11 +227,11 @@ private fun SongsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrack)
             }
             itemsIndexed(songs) { index, track ->
                 SovereignLifeWrapper { // Wrap for life effect
-                   TrackItem(
+                    TrackItem(
                         index = index + 1,
                         track = track,
                         isCurrentlyPlaying = currentTrack?.id == track.id && isPlaying,
-                        onPlay = { viewModel.playTrack(track) },
+                        onPlay = { viewModel.playTrack(track, songs) }, // Pass the full songs list as queue
                         onFavorite = { viewModel.toggleFavorite(track.id) },
                         onAddToPlaylist = { onAddToPlaylist(track) }
                     )
@@ -421,7 +421,7 @@ private fun PlaylistDetailView(viewModel: MusicHubViewModel, playlist: Playlist)
                 index = index + 1,
                 track = track,
                 isCurrentlyPlaying = currentTrack?.id == track.id && isPlaying,
-                onPlay = { viewModel.playTrack(track) },
+                onPlay = { viewModel.playTrack(track, playlist.tracks) }, // Pass the playlist tracks as queue
                 onFavorite = { viewModel.toggleFavorite(track.id) },
                 onAddToPlaylist = { /* Already in playlist */ }
             )
@@ -513,7 +513,7 @@ private fun FavoritesTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTr
                     index = index + 1,
                     track = track,
                     isCurrentlyPlaying = currentTrack?.id == track.id && isPlaying,
-                    onPlay = { viewModel.playTrack(track) },
+                    onPlay = { viewModel.playTrack(track, favorites) }, // Pass the favorites list as queue
                     onFavorite = { viewModel.toggleFavorite(track.id) },
                     onAddToPlaylist = { onAddToPlaylist(track) }
                 )
