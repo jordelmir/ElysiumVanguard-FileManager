@@ -85,6 +85,8 @@ class MusicHubViewModel @Inject constructor(
     private val _recents = MutableStateFlow<List<MusicTrack>>(emptyList())
     val recents: StateFlow<List<MusicTrack>> = _recents.asStateFlow()
 
+    private val _knownSongs = MutableStateFlow<Set<Long>>(emptySet())
+
     private var mediaSession: MediaSession? = null
     private var dynamicsProcessing: DynamicsProcessing? = null
 
@@ -98,9 +100,10 @@ class MusicHubViewModel @Inject constructor(
 
     init {
         loadFavorites()
+        loadKnownSongs()
         loadRecents()
         loadPlaylists()
-        loadLibrary()
+        loadLibrary(isInitial = true)
         setupExoPlayer()
         setupMediaSession()
         
@@ -342,19 +345,56 @@ class MusicHubViewModel @Inject constructor(
     }
 
     fun refreshLibrary() {
-        loadLibrary()
+        loadLibrary(isInitial = false)
     }
 
-    private fun loadLibrary() {
+    private fun loadLibrary(isInitial: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
-            repository.getMusicFiles().collect {
-                _songs.value = it.map { track ->
+            repository.getMusicFiles().collect { allTracks ->
+                val newTracks = mutableListOf<MusicTrack>()
+                val updatedKnownSongs = _knownSongs.value.toMutableSet()
+                
+                allTracks.forEach { track ->
+                    if (!updatedKnownSongs.contains(track.id)) {
+                        updatedKnownSongs.add(track.id)
+                        if (!isInitial) {
+                            newTracks.add(track)
+                        }
+                    }
+                }
+
+                if (newTracks.isNotEmpty()) {
+                    Log.d("MusicHubViewModel", "Auto-discovered ${newTracks.size} new tracks, adding to recents")
+                    // Sort by newest detected if multiple (though for MediaStore observer it usually comes in batches)
+                    newTracks.reversed().forEach { 
+                        addToRecents(it, persist = false) // Don't persist every single call, we'll do once at end
+                    }
+                    saveRecents(_recents.value)
+                }
+
+                if (updatedKnownSongs.size != _knownSongs.value.size) {
+                    _knownSongs.value = updatedKnownSongs
+                    saveKnownSongs(updatedKnownSongs)
+                }
+
+                _songs.value = allTracks.map { track ->
                     track.copy(isFavorite = _favorites.value.contains(track.id))
                 }
                 _isLoading.value = false
             }
         }
+    }
+
+    private fun loadKnownSongs() {
+        val knownJson = prefs.getString("known_songs", "[]")
+        val type = object : TypeToken<Set<Long>>() {}.type
+        val knownSet: Set<Long> = gson.fromJson(knownJson, type) ?: emptySet()
+        _knownSongs.value = knownSet
+    }
+
+    private fun saveKnownSongs(set: Set<Long>) {
+        prefs.edit().putString("known_songs", gson.toJson(set)).apply()
     }
 
     private fun loadFavorites() {
@@ -393,7 +433,7 @@ class MusicHubViewModel @Inject constructor(
         _recents.value = recentsList
     }
 
-    private fun addToRecents(track: MusicTrack) {
+    private fun addToRecents(track: MusicTrack, persist: Boolean = true) {
         val currentRecents = _recents.value.toMutableList()
         // Remove if exists to move to top
         currentRecents.removeAll { it.id == track.id }
@@ -405,7 +445,13 @@ class MusicHubViewModel @Inject constructor(
         val limitedRecents = currentRecents.take(20)
         _recents.value = limitedRecents
         
-        prefs.edit().putString("recents", gson.toJson(limitedRecents)).apply()
+        if (persist) {
+            saveRecents(limitedRecents)
+        }
+    }
+
+    private fun saveRecents(list: List<MusicTrack>) {
+        prefs.edit().putString("recents", gson.toJson(list)).apply()
     }
 
     // PLAYLIST MANAGEMENT
