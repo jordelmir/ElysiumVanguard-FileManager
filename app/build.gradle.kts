@@ -12,6 +12,7 @@ kotlin {
 android {
     namespace = "com.elysium.vanguard"
     compileSdk = 34
+    buildToolsVersion = "34.0.0"
 
     defaultConfig {
         applicationId = "com.elysium.vanguard"

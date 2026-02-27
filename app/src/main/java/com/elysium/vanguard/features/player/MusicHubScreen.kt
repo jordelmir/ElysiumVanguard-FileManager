@@ -58,8 +58,8 @@ fun MusicHubScreen(
     val accentColor = SectionColorManager.musicAccent
     
     val pagerState = rememberPagerState(pageCount = { 5 })
-    val tabs = listOf("PLAYER", "RECENTS", "SONGS", "PLAYLISTS", "FAVORITES")
-    val tabIcons = listOf(Icons.Default.QueueMusic, Icons.Default.History, Icons.Default.MusicNote, Icons.Default.PlaylistPlay, Icons.Default.Favorite)
+    val tabs = listOf("RECENTS", "PLAYER", "SONGS", "PLAYLISTS", "FAVORITES")
+    val tabIcons = listOf(Icons.Default.History, Icons.Default.QueueMusic, Icons.Default.MusicNote, Icons.Default.PlaylistPlay, Icons.Default.Favorite)
     val tabColors = listOf(accentColor, accentColor, accentColor, accentColor, accentColor)
 
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
@@ -154,8 +154,8 @@ fun MusicHubScreen(
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 when (page) {
-                    0 -> NowPlayingTab(viewModel, accentColor)
-                    1 -> RecentsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
+                    0 -> RecentsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
+                    1 -> NowPlayingTab(viewModel, accentColor)
                     2 -> SongsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
                     3 -> PlaylistsTab(
                         viewModel = viewModel,
