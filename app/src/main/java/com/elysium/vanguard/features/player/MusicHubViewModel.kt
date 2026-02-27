@@ -352,37 +352,36 @@ class MusicHubViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             repository.getMusicFiles().collect { allTracks ->
-                val newTracks = mutableListOf<MusicTrack>()
-                val updatedKnownSongs = _knownSongs.value.toMutableSet()
+                val currentKnown = _knownSongs.value.toMutableSet()
+                val newlyDiscovered = mutableListOf<MusicTrack>()
                 
                 allTracks.forEach { track ->
-                    if (!updatedKnownSongs.contains(track.id)) {
-                        updatedKnownSongs.add(track.id)
+                    if (!currentKnown.contains(track.id)) {
+                        currentKnown.add(track.id)
                         if (!isInitial) {
-                            newTracks.add(track)
+                            newlyDiscovered.add(track)
                         }
                     }
                 }
 
-                if (newTracks.isNotEmpty()) {
-                    Log.d("MusicHubViewModel", "Auto-discovered ${newTracks.size} new tracks, adding to recents")
-                    
-                    val currentRecents = _recents.value.toMutableList()
-                    // Add new tracks to the top (reverse them so the last one found is at the very top)
-                    newTracks.reversed().forEach { track ->
-                        currentRecents.removeAll { it.id == track.id }
-                        currentRecents.add(0, track.copy(isFavorite = _favorites.value.contains(track.id)))
-                    }
-                    
-                    // Limit and update state immediately
-                    val limitedRecents = currentRecents.take(20)
-                    _recents.value = limitedRecents
-                    saveRecents(limitedRecents)
+                // Update known songs immediately
+                if (currentKnown.size != _knownSongs.value.size) {
+                    _knownSongs.value = currentKnown
+                    saveKnownSongs(currentKnown)
                 }
 
-                if (updatedKnownSongs.size != _knownSongs.value.size) {
-                    _knownSongs.value = updatedKnownSongs
-                    saveKnownSongs(updatedKnownSongs)
+                // If new tracks were found during background scan/manual sync, push to recents
+                if (newlyDiscovered.isNotEmpty()) {
+                    Log.d("MusicHubViewModel", "🚨 DISCOVERY: ${newlyDiscovered.size} new tracks found!")
+                    val updatedRecents = _recents.value.toMutableList()
+                    // Prepend new tracks to recents (newest first)
+                    newlyDiscovered.reversed().forEach { track ->
+                        updatedRecents.removeAll { it.id == track.id }
+                        updatedRecents.add(0, track.copy(isFavorite = _favorites.value.contains(track.id)))
+                    }
+                    val limitedRecents = updatedRecents.take(20)
+                    _recents.value = limitedRecents
+                    saveRecents(limitedRecents)
                 }
 
                 _songs.value = allTracks.map { track ->
