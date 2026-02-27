@@ -57,10 +57,10 @@ fun MusicHubScreen(
     var showColorDialog by remember { mutableStateOf(false) }
     val accentColor = SectionColorManager.musicAccent
     
-    val pagerState = rememberPagerState(pageCount = { 4 })
-    val tabs = listOf("PLAYER", "SONGS", "PLAYLISTS", "FAVORITES")
-    val tabIcons = listOf(Icons.Default.QueueMusic, Icons.Default.MusicNote, Icons.Default.PlaylistPlay, Icons.Default.Favorite)
-    val tabColors = listOf(accentColor, accentColor, accentColor, accentColor)
+    val pagerState = rememberPagerState(pageCount = { 5 })
+    val tabs = listOf("PLAYER", "RECENTS", "SONGS", "PLAYLISTS", "FAVORITES")
+    val tabIcons = listOf(Icons.Default.QueueMusic, Icons.Default.History, Icons.Default.MusicNote, Icons.Default.PlaylistPlay, Icons.Default.Favorite)
+    val tabColors = listOf(accentColor, accentColor, accentColor, accentColor, accentColor)
 
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var trackToAddByPlaylist by remember { mutableStateOf<MusicTrack?>(null) }
@@ -155,13 +155,14 @@ fun MusicHubScreen(
             ) { page ->
                 when (page) {
                     0 -> NowPlayingTab(viewModel, accentColor)
-                    1 -> SongsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
-                    2 -> PlaylistsTab(
+                    1 -> RecentsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
+                    2 -> SongsTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
+                    3 -> PlaylistsTab(
                         viewModel = viewModel,
                         selectedPlaylist = selectedPlaylist,
                         onPlaylistClick = { viewModel.selectPlaylist(it) }
                     )
-                    3 -> FavoritesTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
+                    4 -> FavoritesTab(viewModel, onAddToPlaylist = { trackToAddByPlaylist = it })
                 }
             }
 
@@ -190,6 +191,48 @@ fun MusicHubScreen(
                 onDismiss = { trackToAddByPlaylist = null },
                 onSelect = { id -> viewModel.addTrackToPlaylist(id, trackToAddByPlaylist!!); trackToAddByPlaylist = null }
             )
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// RECENTS TAB
+// ══════════════════════════════════════════════════════════════
+
+@Composable
+private fun RecentsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrack) -> Unit) {
+    val recents by viewModel.recents.collectAsState()
+    val currentTrack by viewModel.currentTrack.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val accentColor = SectionColorManager.musicAccent
+
+    if (recents.isEmpty()) {
+        AnimatedEmptyState(icon = Icons.Default.History, message = "NO RECENT TRACKS", color = accentColor)
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            item {
+                GlassPillBadge(
+                    text = "RECENTLY PLAYED",
+                    color = accentColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            itemsIndexed(recents) { index, track ->
+                SovereignLifeWrapper {
+                    TrackItem(
+                        index = index + 1,
+                        track = track,
+                        isCurrentlyPlaying = currentTrack?.id == track.id && isPlaying,
+                        onPlay = { viewModel.playTrack(track, recents) },
+                        onFavorite = { viewModel.toggleFavorite(track.id) },
+                        onAddToPlaylist = { onAddToPlaylist(track) }
+                    )
+                }
+            }
         }
     }
 }

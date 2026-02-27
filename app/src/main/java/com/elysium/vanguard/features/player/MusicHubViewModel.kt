@@ -78,13 +78,17 @@ class MusicHubViewModel @Inject constructor(
     private val _activeQueue = MutableStateFlow<List<MusicTrack>>(emptyList())
     val activeQueue: StateFlow<List<MusicTrack>> = _activeQueue.asStateFlow()
 
+    private val _recents = MutableStateFlow<List<MusicTrack>>(emptyList())
+    val recents: StateFlow<List<MusicTrack>> = _recents.asStateFlow()
+
     private var mediaSession: MediaSession? = null
     private var dynamicsProcessing: DynamicsProcessing? = null
 
     init {
-        loadLibrary()
         loadFavorites()
+        loadRecents()
         loadPlaylists()
+        loadLibrary()
         setupExoPlayer()
         setupMediaSession()
     }
@@ -162,6 +166,7 @@ class MusicHubViewModel @Inject constructor(
 
     fun playTrack(track: MusicTrack, customQueue: List<MusicTrack>? = null) {
         _currentTrack.value = track
+        addToRecents(track)
         
         // If a custom queue is provided (Favorites, Playlist), use it. 
         // Otherwise, fallback to the full library.
@@ -349,6 +354,34 @@ class MusicHubViewModel @Inject constructor(
         _songs.value = _songs.value.map { 
             if (it.id == trackId) it.copy(isFavorite = currentFavs.contains(trackId)) else it 
         }
+
+        // Update recents list if the track is there
+        _recents.value = _recents.value.map {
+            if (it.id == trackId) it.copy(isFavorite = currentFavs.contains(trackId)) else it
+        }
+    }
+
+    // RECENTS MANAGEMENT
+    private fun loadRecents() {
+        val recentsJson = prefs.getString("recents", "[]")
+        val type = object : TypeToken<List<MusicTrack>>() {}.type
+        val recentsList: List<MusicTrack> = gson.fromJson(recentsJson, type) ?: emptyList()
+        _recents.value = recentsList
+    }
+
+    private fun addToRecents(track: MusicTrack) {
+        val currentRecents = _recents.value.toMutableList()
+        // Remove if exists to move to top
+        currentRecents.removeAll { it.id == track.id }
+        
+        // Add to top
+        currentRecents.add(0, track.copy(isFavorite = _favorites.value.contains(track.id)))
+        
+        // Limit to 20
+        val limitedRecents = currentRecents.take(20)
+        _recents.value = limitedRecents
+        
+        prefs.edit().putString("recents", gson.toJson(limitedRecents)).apply()
     }
 
     // PLAYLIST MANAGEMENT
