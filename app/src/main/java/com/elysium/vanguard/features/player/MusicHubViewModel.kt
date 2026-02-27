@@ -382,6 +382,14 @@ class MusicHubViewModel @Inject constructor(
                     val limitedRecents = updatedRecents.take(20)
                     _recents.value = limitedRecents
                     saveRecents(limitedRecents)
+                } else if (isInitial && _recents.value.isEmpty() && allTracks.isNotEmpty()) {
+                    // PRO INITIALIZATION: If recents is empty on first run, populate with newest songs
+                    Log.d("MusicHubViewModel", "Initializing Recents with newest songs from device")
+                    val initialRecents = allTracks.take(10).map { 
+                        it.copy(isFavorite = _favorites.value.contains(it.id))
+                    }
+                    _recents.value = initialRecents
+                    saveRecents(initialRecents)
                 }
 
                 _songs.value = allTracks.map { track ->

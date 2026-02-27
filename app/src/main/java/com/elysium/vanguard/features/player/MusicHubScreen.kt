@@ -216,7 +216,7 @@ private fun RecentsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrac
         ) {
             item {
                 GlassPillBadge(
-                    text = "RECENTLY PLAYED",
+                    text = "RECENT TRACKS",
                     color = accentColor
                 )
                 Spacer(modifier = Modifier.height(8.dp))
