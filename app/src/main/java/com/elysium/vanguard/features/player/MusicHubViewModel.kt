@@ -22,6 +22,10 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.Futures
 import android.util.Log
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 
 @HiltViewModel
 class MusicHubViewModel @Inject constructor(
@@ -84,6 +88,14 @@ class MusicHubViewModel @Inject constructor(
     private var mediaSession: MediaSession? = null
     private var dynamicsProcessing: DynamicsProcessing? = null
 
+    private val mediaStoreObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            Log.d("MusicHubViewModel", "MediaStore change detected, refreshing library...")
+            loadLibrary()
+        }
+    }
+
     init {
         loadFavorites()
         loadRecents()
@@ -91,6 +103,13 @@ class MusicHubViewModel @Inject constructor(
         loadLibrary()
         setupExoPlayer()
         setupMediaSession()
+        
+        // PRO SCANNER: Register observer for real-time updates
+        context.contentResolver.registerContentObserver(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            true,
+            mediaStoreObserver
+        )
     }
 
     private fun setupMediaSession() {
@@ -159,6 +178,7 @@ class MusicHubViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        context.contentResolver.unregisterContentObserver(mediaStoreObserver)
         dynamicsProcessing?.release()
         mediaSession?.release()
         exoPlayer.release()
@@ -319,6 +339,10 @@ class MusicHubViewModel @Inject constructor(
         }
         _repeatMode.value = nextMode
         exoPlayer.repeatMode = nextMode
+    }
+
+    fun refreshLibrary() {
+        loadLibrary()
     }
 
     private fun loadLibrary() {

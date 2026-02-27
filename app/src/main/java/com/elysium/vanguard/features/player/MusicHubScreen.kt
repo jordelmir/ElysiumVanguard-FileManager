@@ -262,10 +262,31 @@ private fun SongsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrack)
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             item {
-                GlassPillBadge(
-                    text = "${songs.size} TRACKS LOADED",
-                    color = accentColor
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    GlassPillBadge(
+                        text = "${songs.size} TRACKS LOADED",
+                        color = accentColor
+                    )
+                    
+                    IconButton(
+                        onClick = { viewModel.refreshLibrary() },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(accentColor.copy(alpha = 0.1f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = "Refresh",
+                            tint = accentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
             }
             itemsIndexed(songs) { index, track ->
