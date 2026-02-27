@@ -366,11 +366,18 @@ class MusicHubViewModel @Inject constructor(
 
                 if (newTracks.isNotEmpty()) {
                     Log.d("MusicHubViewModel", "Auto-discovered ${newTracks.size} new tracks, adding to recents")
-                    // Sort by newest detected if multiple (though for MediaStore observer it usually comes in batches)
-                    newTracks.reversed().forEach { 
-                        addToRecents(it, persist = false) // Don't persist every single call, we'll do once at end
+                    
+                    val currentRecents = _recents.value.toMutableList()
+                    // Add new tracks to the top (reverse them so the last one found is at the very top)
+                    newTracks.reversed().forEach { track ->
+                        currentRecents.removeAll { it.id == track.id }
+                        currentRecents.add(0, track.copy(isFavorite = _favorites.value.contains(track.id)))
                     }
-                    saveRecents(_recents.value)
+                    
+                    // Limit and update state immediately
+                    val limitedRecents = currentRecents.take(20)
+                    _recents.value = limitedRecents
+                    saveRecents(limitedRecents)
                 }
 
                 if (updatedKnownSongs.size != _knownSongs.value.size) {
