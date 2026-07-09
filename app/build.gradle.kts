@@ -96,6 +96,16 @@ dependencies {
     // JSON Persistence
     implementation("com.google.code.gson:gson:2.10.1")
 
+    // PHASE 1.2: SAF DocumentFile support for trash restore across folders.
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // PHASE 1.3: WorkManager for daily trash auto-purge.
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+    // PHASE 1.3: Hilt integration for WorkManager workers.
+    implementation("androidx.hilt:hilt-work:1.1.0")
+    ksp("androidx.hilt:hilt-compiler:1.1.0")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

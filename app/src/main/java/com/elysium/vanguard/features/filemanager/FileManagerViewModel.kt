@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.filemanager
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.core.ai.DownloadState
@@ -101,12 +102,13 @@ class FileManagerViewModel @Inject constructor(
         checkPermissionsAndLoad()
         updateStorageStats()
         loadShortcuts()
-        
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(progressReceiver, IntentFilter("com.elysium.vanguard.COMPRESSION_PROGRESS"), Context.RECEIVER_EXPORTED)
-        } else {
-            context.registerReceiver(progressReceiver, IntentFilter("com.elysium.vanguard.COMPRESSION_PROGRESS"))
-        }
+
+        ContextCompat.registerReceiver(
+            context,
+            progressReceiver,
+            IntentFilter("com.elysium.vanguard.COMPRESSION_PROGRESS"),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onCleared() {

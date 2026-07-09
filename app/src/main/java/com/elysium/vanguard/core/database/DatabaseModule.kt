@@ -20,11 +20,19 @@ object DatabaseModule {
             context,
             TitanDatabase::class.java,
             "titan_sovereign.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .addMigrations(TitanDatabase.MIGRATION_1_2)
+            .fallbackToDestructiveMigrationOnDowngrade()
+            .build()
     }
 
     @Provides
     fun provideFileSearchDao(database: TitanDatabase): FileSearchDao {
         return database.fileSearchDao()
+    }
+
+    @Provides
+    fun provideTrashDao(database: TitanDatabase): TrashDao {
+        return database.trashDao()
     }
 }

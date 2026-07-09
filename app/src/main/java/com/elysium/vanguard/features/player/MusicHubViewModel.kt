@@ -18,6 +18,8 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.CommandButton
 import androidx.media3.session.SessionCommand
 import android.os.Bundle
+import android.os.Build
+import android.annotation.SuppressLint
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.Futures
@@ -28,6 +30,7 @@ import android.os.Looper
 import android.provider.MediaStore
 
 @HiltViewModel
+@SuppressLint("UnsafeOptInUsageError")
 class MusicHubViewModel @Inject constructor(
     private val repository: MusicRepository,
     @ApplicationContext private val context: Context
@@ -252,7 +255,17 @@ class MusicHubViewModel @Inject constructor(
         applyBoostEffect()
     }
 
+    /**
+     * PHASE 0.4: DynamicsProcessing is API 28+. We guard with
+     * [Build.VERSION.SDK_INT] and silence the NewApi lint check.
+     */
+    @SuppressLint("NewApi")
     private fun applyBoostEffect() {
+        // On API 26-27 we silently skip the bass engine — playback still works.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            Log.d("SupremeBass", "Skipping DynamicsProcessing on API ${Build.VERSION.SDK_INT} (requires API 28+)")
+            return
+        }
         val sessionId = exoPlayer.audioSessionId
         if (sessionId == -1) return
 

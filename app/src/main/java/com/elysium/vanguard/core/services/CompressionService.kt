@@ -104,6 +104,7 @@ class CompressionService : Service() {
 
     private fun broadcastProgress(percentage: Int, currentFile: String, done: Boolean = false) {
         val intent = Intent("com.elysium.vanguard.COMPRESSION_PROGRESS").apply {
+            setPackage(packageName)
             putExtra("percentage", percentage)
             putExtra("currentFile", currentFile)
             putExtra("done", done)
@@ -137,6 +138,11 @@ class CompressionService : Service() {
     private fun updateNotification(content: String, progress: Int, done: Boolean = false) {
         val notification = createNotification(content, progress, done)
         val manager = getSystemService(NotificationManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val granted = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
         manager.notify(NOTIFICATION_ID, notification)
     }
 

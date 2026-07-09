@@ -1,5 +1,8 @@
+@file:SuppressLint("UnsafeOptInUsageError")
+
 package com.elysium.vanguard.features.player
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -322,7 +325,7 @@ private fun TrackItem(
     var showMenu by remember { mutableStateOf(false) }
     val accentColor = if (isCurrentlyPlaying) TitanColors.NeonCyan else TitanColors.QuantumPink
 
-        SovereignCard(
+    SovereignCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
