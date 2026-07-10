@@ -211,7 +211,23 @@ dependencies {
     // installer to handle .tar.xz / .tar.bz2 / .tar.zst decompress streams
     // before they hit our POSIX-tar extractor. xz is the big one we
     // couldn't decode in pure Kotlin.
+    //
+    // PHASE 10.3: also the foundation of the ZArchiver-grade compression
+    // engine. commons-compress 1.26 has pure-Java support for ZIP, TAR,
+    // TAR.GZ, TAR.BZ2, BZ2, GZIP, and 7Z (read + write + password). For
+    // LZMA2 / XZ / Zstandard we lean on the transitive deps below — they
+    // are tiny pure-Java wrappers (xz) or the official JNI binding (zstd-jni).
     implementation("org.apache.commons:commons-compress:1.26.0")
+    // Pure-Java LZMA2 / XZ codec. Required for .tar.xz round-trip and
+    // for the 7Z LZMA2 compression method.
+    implementation("org.tukaani:xz:1.10")
+    // Zstandard JNI binding. Required for .tar.zst round-trip.
+    implementation("com.github.luben:zstd-jni:1.5.6-1")
+    // commons-codec is a runtime dep of commons-compress 1.26's
+    // Charsets helper (org/apache/commons/codec/Charsets). The Android
+    // build pulls it transitively but the JVM test runtime does not —
+    // declare it explicitly so the unit tests don't NoClassDefFound.
+    testImplementation("commons-codec:commons-codec:1.16.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

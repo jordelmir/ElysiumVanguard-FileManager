@@ -11,10 +11,15 @@ import com.elysium.vanguard.core.ai.ModelDownloadManager
 import com.elysium.vanguard.core.trash.TrashRepository
 import com.elysium.vanguard.core.trash.TrashSource
 import com.elysium.vanguard.core.saf.SafTreeManager
+import com.elysium.vanguard.core.util.ArchiveFormat
+import com.elysium.vanguard.core.util.CompressionEngine
+import com.elysium.vanguard.features.filemanager.components.ArchiveProgress
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
@@ -82,6 +87,14 @@ class FileManagerViewModel @Inject constructor(
 
     private val _compressionProgress = MutableStateFlow<CompressionState?>(null)
     val compressionProgress: StateFlow<CompressionState?> = _compressionProgress.asStateFlow()
+
+    // PHASE 10.3: ZArchiver-grade archive sheet state. The screen binds
+    // the modal bottom sheet to this flow; null means "sheet hidden".
+    private val _archiveSheet = MutableStateFlow<ArchiveSheetState?>(null)
+    val archiveSheet: StateFlow<ArchiveSheetState?> = _archiveSheet.asStateFlow()
+
+    private val _archiveProgress = MutableStateFlow<ArchiveProgress?>(null)
+    val archiveProgress: StateFlow<ArchiveProgress?> = _archiveProgress.asStateFlow()
 
     private val _viewMode = MutableStateFlow(FileViewMode.TACTICAL) // Default to Tactical as requested
     val viewMode: StateFlow<FileViewMode> = _viewMode.asStateFlow()
@@ -389,10 +402,15 @@ class FileManagerViewModel @Inject constructor(
     }
 
     fun compressFiles(files: List<File>, outputFile: File) {
+        // PHASE 10.3: legacy shim — still routes to the foreground service
+        // so the compress task survives backgrounding. The new
+        // [showArchiveSheet] / [runArchiveCompress] is the user-facing
+        // path with format picker + password + in-app progress.
         val intent = Intent(context, com.elysium.vanguard.core.services.CompressionService::class.java).apply {
             action = com.elysium.vanguard.core.services.CompressionService.ACTION_COMPRESS
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_FILES, files.map { it.absolutePath }.toTypedArray())
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_OUTPUT, outputFile.absolutePath)
+            putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_FORMAT, ArchiveFormat.ZIP.name)
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_KEEP_SCREEN_ON, _keepScreenOn.value)
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -403,10 +421,12 @@ class FileManagerViewModel @Inject constructor(
     }
 
     fun decompressFile(zipFile: File, outputDir: File) {
+        // PHASE 10.3: legacy shim — see comment on [compressFiles].
         val intent = Intent(context, com.elysium.vanguard.core.services.CompressionService::class.java).apply {
             action = com.elysium.vanguard.core.services.CompressionService.ACTION_DECOMPRESS
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_FILES, arrayOf(zipFile.absolutePath))
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_OUTPUT, outputDir.absolutePath)
+            putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_FORMAT, ArchiveFormat.ZIP.name)
             putExtra(com.elysium.vanguard.core.services.CompressionService.EXTRA_KEEP_SCREEN_ON, _keepScreenOn.value)
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -415,6 +435,119 @@ class FileManagerViewModel @Inject constructor(
             context.startService(intent)
         }
         _compressionProgress.value = CompressionState(0, "Initializing...", CompressionStatus.RUNNING)
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // PHASE 10.3: ZArchiver-style archive sheet API
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Open the archive bottom sheet in "Compress" mode pre-loaded with
+     * [files] (a mix of files and directories). The sheet shows a
+     * format picker, an archive name field, an optional password, and
+     * an in-app progress bar.
+     */
+    fun showArchiveSheetForCompress(files: List<File>) {
+        if (files.isEmpty()) return
+        _archiveSheet.value = ArchiveSheetState(
+            mode = com.elysium.vanguard.features.filemanager.components.ArchiveMode.Compress,
+            files = files
+        )
+        _archiveProgress.value = null
+    }
+
+    /**
+     * Open the archive bottom sheet in "Extract" mode for [archive].
+     * Format is auto-detected from the extension + magic bytes.
+     */
+    fun showArchiveSheetForExtract(archive: File) {
+        val detected = CompressionEngine.detect(archive)
+        _archiveSheet.value = ArchiveSheetState(
+            mode = com.elysium.vanguard.features.filemanager.components.ArchiveMode.Extract,
+            archive = archive,
+            detectedFormat = detected
+        )
+        _archiveProgress.value = null
+    }
+
+    /** User picked "Compress" from the sheet and tapped the action button. */
+    fun runArchiveCompress(
+        files: List<File>,
+        output: File,
+        format: ArchiveFormat,
+        password: String?
+    ) {
+        _archiveProgress.value = ArchiveProgress(0, "Starting…", done = false)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                CompressionEngine.compress(
+                    files, output, format, password,
+                    object : CompressionEngine.ProgressListener {
+                        override fun onProgress(percentage: Int, currentFile: String) {
+                            _archiveProgress.value = ArchiveProgress(
+                                percentage, currentFile, done = false
+                            )
+                        }
+                    }
+                )
+            }
+            result
+                .onSuccess {
+                    _archiveProgress.value = ArchiveProgress(
+                        100, output.name, done = true
+                    )
+                    loadDirectory(_currentPath.value)
+                    updateStorageStats()
+                }
+                .onFailure {
+                    _archiveProgress.value = ArchiveProgress(
+                        0, "", done = true, error = it.message ?: "Unknown error"
+                    )
+                }
+        }
+    }
+
+    /** User picked "Extract" from the sheet and tapped the action button. */
+    fun runArchiveExtract(
+        archive: File,
+        outputDir: File,
+        password: String?
+    ) {
+        _archiveProgress.value = ArchiveProgress(0, "Starting…", done = false)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                CompressionEngine.decompress(
+                    archive, outputDir, password,
+                    object : CompressionEngine.ProgressListener {
+                        override fun onProgress(percentage: Int, currentFile: String) {
+                            _archiveProgress.value = ArchiveProgress(
+                                percentage, currentFile, done = false
+                            )
+                        }
+                    }
+                )
+            }
+            result
+                .onSuccess {
+                    _archiveProgress.value = ArchiveProgress(
+                        100, outputDir.name, done = true
+                    )
+                    // Refresh the parent directory listing so the user
+                    // sees the new folder / files appear.
+                    loadDirectory(_currentPath.value)
+                }
+                .onFailure {
+                    _archiveProgress.value = ArchiveProgress(
+                        0, "", done = true, error = it.message ?: "Unknown error"
+                    )
+                }
+        }
+    }
+
+    /** Close the archive sheet. Clears progress if not in-flight. */
+    fun dismissArchiveSheet() {
+        _archiveSheet.value = null
+        _archiveProgress.value = null
     }
 
     fun cancelCompression() {
@@ -464,3 +597,16 @@ data class PendingFileOperation(
 enum class FileOperationType {
     COPY, MOVE
 }
+
+/**
+ * PHASE 10.3 — the open state of the archive bottom sheet. The screen
+ * binds to [archiveSheet] and shows / hides the sheet accordingly. The
+ * actual compress / extract work is dispatched to [runArchiveCompress]
+ * / [runArchiveExtract] when the user taps the action button.
+ */
+data class ArchiveSheetState(
+    val mode: com.elysium.vanguard.features.filemanager.components.ArchiveMode,
+    val files: List<File> = emptyList(),
+    val archive: File? = null,
+    val detectedFormat: ArchiveFormat? = null
+)

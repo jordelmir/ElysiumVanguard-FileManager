@@ -331,8 +331,57 @@ fun FileManagerScreen(
                                         onNavigateToAutoTag?.invoke()
                                     }
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("Archive Files (ZIP / 7Z / TAR)…") },
+                                    leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        // PHASE 10.3: pre-load the archive
+                                        // sheet with the currently selected
+                                        // files (or the whole visible listing
+                                        // if no selection is active).
+                                        val toCompress = if (selectedFiles.isNotEmpty()) {
+                                            selectedFiles.map { File(it) }
+                                        } else {
+                                            files.map { File(it.path) }
+                                        }
+                                        viewModel.showArchiveSheetForCompress(toCompress)
+                                    }
+                                )
                             }
                         }
+                    )
+                }
+            },
+            floatingActionButton = {
+                // PHASE 10.3: a single always-visible Archive FAB.
+                // Tap to open the ZArchiver-grade sheet pre-loaded with
+                // the current selection (or the whole listing if no
+                // selection is active). The FAB stays in the bottom-right
+                // corner so it's the first thing the user sees when they
+                // want to "pack" or "unpack" a folder.
+                if (!isSelectionMode) {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            val toCompress = if (selectedFiles.isNotEmpty()) {
+                                selectedFiles.map { File(it) }
+                            } else {
+                                files.map { File(it.path) }
+                            }
+                            viewModel.showArchiveSheetForCompress(toCompress)
+                        },
+                        containerColor = TitanColors.NeonCyan,
+                        contentColor = Color.Black,
+                        icon = { Icon(Icons.Default.Archive, contentDescription = null) },
+                        text = {
+                            Text(
+                                "ARCHIVE",
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.8.sp
+                            )
+                        },
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
@@ -611,6 +660,31 @@ fun FileManagerScreen(
                     sectionName = "FILEMANAGER",
                     onColorSelected = { SectionColorManager.fileAccent = it },
                     onDismiss = { showColorDialog = false }
+                )
+            }
+
+            // PHASE 10.3: ZArchiver-grade archive sheet. The screen
+            // binds to viewModel.archiveSheet; when it's non-null we
+            // mount the modal bottom sheet. Progress is wired to
+            // viewModel.archiveProgress so the in-app progress bar
+            // animates without the user having to look at the
+            // notification shade.
+            val sheetState by viewModel.archiveSheet.collectAsState()
+            val progressState by viewModel.archiveProgress.collectAsState()
+            sheetState?.let { state ->
+                com.elysium.vanguard.features.filemanager.components.ArchiveSheet(
+                    mode = state.mode,
+                    initialFiles = state.files,
+                    initialArchive = state.archive,
+                    detectedFormat = state.detectedFormat,
+                    onDismiss = { viewModel.dismissArchiveSheet() },
+                    onCompress = { files, output, format, password ->
+                        viewModel.runArchiveCompress(files, output, format, password)
+                    },
+                    onExtract = { archive, outDir, password ->
+                        viewModel.runArchiveExtract(archive, outDir, password)
+                    },
+                    progress = progressState
                 )
             }
         }
@@ -1221,6 +1295,14 @@ fun SovereignOptionsDialog(
     val ext = file.name.substringAfterLast(".", "").lowercase()
     val isImage = ext in listOf("jpg", "jpeg", "png", "webp", "bmp", "gif", "heif", "heic")
     val isDocument = ext in listOf("doc", "docx", "txt", "rtf", "csv", "html", "htm", "epub", "mobi")
+    // PHASE 10.3: any of the formats the engine can extract shows the
+    // "Extract" option. Magic-byte detection also fires at click time so
+    // a renamed .zip that's actually a 7Z still gets offered.
+    val isArchive = ext in listOf(
+        "zip", "7z", "tar", "tgz", "tbz2", "txz", "tzst",
+        "gz", "gzip", "bz2", "xz", "zst", "zstd",
+        "tar.gz", "tar.bz2", "tar.xz", "tar.zst"
+    ) || file.name.contains('.') && file.name.substringAfterLast('.').length in 1..4
     val isZip = ext == "zip"
 
     AlertDialog(
@@ -1244,14 +1326,25 @@ fun SovereignOptionsDialog(
                     OptionItem(Icons.Default.Description, "Convert to PDF", TitanColors.NeonRed) { onAction("PDF") }
                 }
                 
-                // Decompress: show for ZIP files
-                if (isZip) {
-                    OptionItem(Icons.Default.FolderOpen, "Decompress ZIP", TitanColors.RadioactiveGreen) { onAction("UNZIP") }
+                // PHASE 10.3: any recognized archive format gets the
+                // ZArchiver-grade extract sheet. Magic-byte detection at
+                // click time means a renamed .zip that's actually a 7Z
+                // still works.
+                if (isArchive) {
+                    OptionItem(
+                        Icons.Default.Unarchive,
+                        "Extract archive…",
+                        TitanColors.RadioactiveGreen
+                    ) { onAction("EXTRACT") }
                 }
-                
-                // Compress: show for all non-ZIP files
-                if (!isZip) {
-                    OptionItem(Icons.Default.Archive, "Compress to ZIP", TitanColors.NeonCyan) { onAction("ZIP") }
+
+                // Compress: show for all non-archive files (and folders).
+                if (!isArchive) {
+                    OptionItem(
+                        Icons.Default.Archive,
+                        "Compress to archive…",
+                        TitanColors.NeonCyan
+                    ) { onAction("COMPRESS") }
                 }
                 
                 OptionItem(Icons.Default.Edit, "Rename", Color.White) { onAction("RENAME") }
@@ -1539,11 +1632,29 @@ private fun handleFileAction(
             }
         }
         "ZIP" -> {
+            // Legacy path: kept for compatibility, sends to the
+            // foreground service. The new [COMPRESS] / [EXTRACT] routes
+            // through the in-app archive sheet with format picker +
+            // password.
             val output = File(file.path + ".zip")
             viewModel.compressFiles(listOf(File(file.path)), output)
         }
         "UNZIP" -> {
             viewModel.decompressFile(srcFile, File(srcFile.parent, srcFile.nameWithoutExtension))
+        }
+        "COMPRESS" -> {
+            // PHASE 10.3: open the ZArchiver-grade archive sheet. The
+            // user picks the format (ZIP, 7Z, TAR, TAR.GZ, TAR.BZ2,
+            // TAR.XZ, TAR.ZST, GZIP, BZ2, XZ, ZST), the archive name,
+            // and an optional password.
+            viewModel.showArchiveSheetForCompress(listOf(File(file.path)))
+        }
+        "EXTRACT" -> {
+            // PHASE 10.3: open the extract sheet. The format is
+            // auto-detected from the magic bytes + the path extension.
+            // The user can override the format and supply a password
+            // if the archive is encrypted.
+            viewModel.showArchiveSheetForExtract(File(file.path))
         }
         "VAULT" -> { /* Secure Vault logic */ }
     }
