@@ -131,14 +131,45 @@ fun FileManagerScreen(
     val scope = rememberCoroutineScope()
 
     val uiState by viewModel.uiState.collectAsState()
-    
+
+    // PHASE 10.2: state for the "Grant full access" banner. Recomputed on
+    // every ON_RESUME so the banner disappears the moment the user flips
+    // the OS toggle. No first-launch dialog, no modal — just a single
+    // dismissable row at the top of the file manager.
+    var needsFullAccess by remember {
+        mutableStateOf(
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    !android.os.Environment.isExternalStorageManager()
+                }.getOrDefault(true)
+        )
+    }
+    val activity = (context as? android.app.Activity)
+    val openAccessSettings = {
+        if (activity is com.elysium.vanguard.MainActivity) {
+            activity.openAllFilesAccessSettings()
+        }
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.checkPermissionsAndLoad()
                 viewModel.updateStorageStats()
+                // PHASE 10.2: re-evaluate the "needs full access" banner
+                // every time the user comes back from Settings. If the OS
+                // toggle is now on, the banner disappears.
+                needsFullAccess = runCatching {
+                    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+                        false
+                    } else {
+                        @Suppress("DEPRECATION")
+                        !android.os.Environment.isExternalStorageManager()
+                    }
+                }.getOrDefault(true)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -384,6 +415,17 @@ fun FileManagerScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    // PHASE 10.2: a single inline banner asking the user to
+                    // grant "All files access" if the OS toggle isn't on. One
+                    // tap deep-links to Settings. No modal, no picker, no block.
+                    if (needsFullAccess) {
+                        GrantFullAccessBanner(
+                            onGrant = openAccessSettings,
+                            onDismiss = { needsFullAccess = false }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
                     StorageCategoryRow(
                         onAddClick = { /* TODO */ },
                         onPathClick = { viewModel.loadDirectory(it) }
@@ -404,11 +446,10 @@ fun FileManagerScreen(
                                 LoadingDiagnosticPulse(text = "QUANTUM SCANNING...")
                             }
                         }
-                        is FileManagerUiState.PermissionRequired -> {
-                            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                StoragePermissionOverlay(context)
-                            }
-                        }
+                        // PHASE 10.2: PermissionRequired branch removed. The app
+                        // always has access; if the OS-level toggle isn't on
+                        // the user is one tap away from granting it via the
+                        // banner at the top of the screen.
                         is FileManagerUiState.Error -> {
                             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text("CORE ERROR: ${(uiState as FileManagerUiState.Error).message}", color = TitanColors.NeonRed)
@@ -1814,54 +1855,73 @@ fun RadarScanningPlaceholder(mainText: String) {
     }
 }
 
+
+/**
+ * PHASE 10.2 — inline banner that asks the user to flip the OS-level
+ * "All files access" toggle. One tap opens Settings. No modal, no picker,
+ * no first-launch dialog. The banner is dismissable and re-checks the
+ * permission on every ON_RESUME, so it disappears the moment the user
+ * grants the toggle.
+ */
 @Composable
-fun StoragePermissionOverlay(context: android.content.Context) {
-    Column(
+fun GrantFullAccessBanner(
+    onGrant: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(32.dp)
-            .background(TitanColors.DeepVoidGradient, RoundedCornerShape(16.dp), alpha = 0.9f)
-            .border(1.dp, TitanColors.NeonRed.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(
+                TitanColors.NeonOrange.copy(alpha = 0.12f),
+                RoundedCornerShape(10.dp)
+            )
+            .border(
+                1.dp,
+                TitanColors.NeonOrange.copy(alpha = 0.4f),
+                RoundedCornerShape(10.dp)
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            Icons.Default.Security,
-            null,
-            tint = TitanColors.NeonRed,
-            modifier = Modifier.size(64.dp)
+            imageVector = Icons.Default.Folder,
+            contentDescription = null,
+            tint = TitanColors.NeonOrange,
+            modifier = Modifier.size(22.dp)
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            "STORAGE ACCESS DENIED",
-            color = TitanColors.NeonRed,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold,
-            fontFamily = FontFamily.Monospace
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            "CORE PROTOCOLS REQUIRE ALL FILES ACCESS TO MANAGE SYSTEM DATA. IDENTITY VERIFICATION PENDING.",
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-            fontFamily = FontFamily.Monospace
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(
-            onClick = {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    val intent = android.content.Intent("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION").apply {
-                        data = android.net.Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(intent)
-                }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = TitanColors.NeonRed),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text("AUTHORIZE ACCESS", color = Color.Black, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "GRANT FULL STORAGE ACCESS",
+                color = TitanColors.NeonOrange,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.6.sp
+            )
+            Text(
+                "1 tap → Settings → flip ON",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        TextButton(onClick = onGrant) {
+            Text(
+                "GRANT",
+                color = TitanColors.NeonOrange,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Dismiss",
+                tint = Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
-

@@ -33,10 +33,18 @@ class FileManagerViewModel @Inject constructor(
 ) : ViewModel() {
     private val context get() = app.applicationContext
 
-    // PHASE 8.5: start with the app's external files dir (always accessible
-    // without permissions). Once the user grants a SAF tree, the SAF flow
-    // takes over. We no longer default to /sdcard which is blocked on API 30+.
-    private val _currentPath = MutableStateFlow<String>(app.getExternalFilesDir(null)?.absolutePath ?: app.filesDir.absolutePath)
+    // PHASE 10.2: full filesystem access. The default root is /storage/emulated/0
+    // (the user's real /sdcard). With MANAGE_EXTERNAL_STORAGE granted (and
+    // `requestLegacyExternalStorage="true"` in the manifest) the file manager
+    // walks the entire device tree, not the app's sandboxed external dir.
+    // The app's external dir is still the FALLBACK if /sdcard can't be reached
+    // (e.g. on a hostile OEM that returned a phantom path).
+    private val _currentPath = MutableStateFlow<String>(
+        android.os.Environment.getExternalStorageDirectory().absolutePath
+            .takeIf { java.io.File(it).exists() }
+            ?: app.getExternalFilesDir(null)?.absolutePath
+            ?: app.filesDir.absolutePath
+    )
     val currentPath: StateFlow<String> = _currentPath.asStateFlow()
 
     private val _uiState = MutableStateFlow<FileManagerUiState>(FileManagerUiState.Loading)
@@ -147,21 +155,13 @@ class FileManagerViewModel @Inject constructor(
     }
 
     fun checkPermissionsAndLoad() {
-        val hasPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            // PHASE 8.3: we accept either MANAGE_EXTERNAL_STORAGE (legacy
-            // granted by power users via Settings) OR a SAF tree picked via
-            // the system folder picker. The latter is the recommended path.
-            @Suppress("DEPRECATION")
-            android.os.Environment.isExternalStorageManager()
-        } else {
-            true
-        }
-
-        if (hasPermission) {
-            loadDirectory(_currentPath.value)
-        } else {
-            _uiState.value = FileManagerUiState.PermissionRequired
-        }
+        // PHASE 10.2: no more permission gating. The user has already declared
+        // MANAGE_EXTERNAL_STORAGE in the manifest + opted into legacy storage.
+        // If the OS-level toggle isn't on, the OS will silently deny access at
+        // the syscall level — and the UI's "Grant full access" button will
+        // deep-link to the Settings screen to flip it. We always load the
+        // current path so the UI has something to show.
+        loadDirectory(_currentPath.value)
     }
 
     /**

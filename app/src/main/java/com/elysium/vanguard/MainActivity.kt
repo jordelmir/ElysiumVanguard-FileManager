@@ -40,17 +40,21 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     /**
-     * PHASE 8.3 — Hilt-injected SAF tree manager. We hold it at the
-     * Activity level so the picker callback (registered in onCreate via
-     * [registerForActivityResult]) can call [SafTreeManager.onTreePicked]
-     * before any screen reads the granted URI.
+     * PHASE 8.3 — Hilt-injected SAF tree manager. Kept for OPTIONAL advanced
+     * use (the user can still grant a scoped tree from Settings → Advanced),
+     * but no longer gates the app at first launch.
      */
     @Inject lateinit var safTreeManager: SafTreeManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        checkAndRequestStorageRoot()
+
+        // PHASE 10.2: no more SAF picker prompt. The app launches into the
+        // dashboard / file manager immediately. If Android 11+ is hiding
+        // /sdcard behind MANAGE_EXTERNAL_STORAGE, the FileManagerScreen
+        // shows a single "Grant full access" button that deep-links to
+        // Settings → Special access → All files access. That's the only
+        // screen the user can be sent to from inside the app.
 
         setContent {
             val fileManagerViewModel: FileManagerViewModel = hiltViewModel()
@@ -560,77 +564,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
     /**
-     * PHASE 8.3 — SAF picker.
+     * PHASE 10.2 — the only "restriction" left is the OS-level All-files-access
+     * toggle on Android 11+. We deep-link the user straight to that screen
+     * so they can flip it on in one tap. No SAF picker, no first-launch
+     * dialog, no permission prompt.
      *
-     * Replaces the deprecated `MANAGE_EXTERNAL_STORAGE` flow (which Play
-     * Store blocks and which only works with the permission declared in
-     * the manifest, which we don't). We ask the user to grant us a folder
-     * via the system SAF picker. The granted URI is persistable (survives
-     * reboots) and scopes all file operations to that tree.
-     *
-     * Pre-Android 11: standard READ/WRITE_EXTERNAL_STORAGE permissions are
-     * still the only option, so we keep that flow for those devices.
+     * `Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` is documented
+     * (API 30+) and works on every device we ship to. If the OEM hid the
+     * screen (rare), we fall back to the app's generic settings page.
      */
-    private val safPickerLauncher = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            // SafTreeManager.onTreePicked updates its StateFlow. The
-            // FileManagerViewModel observes that flow (see init {}) and
-            // automatically reloads the root — no direct call needed here.
-            safTreeManager.onTreePicked(uri)
-        }
-    }
-
-    private fun checkAndRequestStorageRoot() {
-        // Check if a SAF tree is already granted. If so, the file manager
-        // is ready to use. This works on every API level we support.
-        if (safTreeManager.hasUsableTree) return
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            // Android 11+: prompt the user to grant a folder via SAF. We
-            // do NOT request MANAGE_EXTERNAL_STORAGE; the SAF tree is the
-            // modern, Play-Store-friendly way to access user files.
-            showSafPickerPrompt()
-        } else {
-            // Android 10 and below: legacy permissions.
-            val permissions = mutableListOf(
-                android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-            )
-            val toRequest = permissions.filter {
-                androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-            if (toRequest.isNotEmpty()) {
-                androidx.core.app.ActivityCompat.requestPermissions(this, toRequest.toTypedArray(), 1001)
+    fun openAllFilesAccessSettings() {
+        val primary = android.content.Intent(
+            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            android.net.Uri.parse("package:${packageName}")
+        )
+        val fallback = android.content.Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.parse("package:${packageName}")
+        )
+        try {
+            startActivity(primary)
+        } catch (_: android.content.ActivityNotFoundException) {
+            try {
+                startActivity(fallback)
+            } catch (_: android.content.ActivityNotFoundException) {
+                // OEM is hostile. Nothing we can do - at least we tried.
             }
         }
     }
 
-    private fun showSafPickerPrompt() {
-        // Use the platform AlertDialog — `MainActivity` is a
-        // `ComponentActivity` themed as `Theme.Material.NoActionBar`
-        // (AOSP Material, not AppCompat / MaterialComponents), so
-        // `androidx.appcompat.app.AlertDialog.Builder` throws at
-        // `.show()` with "You need to use a Theme.AppCompat theme".
-        // The platform dialog has no theme requirements and works
-        // against the activity's existing window decor.
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Connect a folder")
-            .setMessage(
-                "Elysium Vanguard needs access to your files. " +
-                    "Pick a folder (e.g. Documents, Downloads) and the app will " +
-                    "work only inside that folder. You can disconnect any time " +
-                    "from Settings."
-            )
-            .setPositiveButton("Pick folder") { _, _ ->
-                safPickerLauncher.launch(null)
-            }
-            .setNegativeButton("Use app folder only") { _, _ ->
-                // User declined. App still works with its own external files dir.
-            }
-            .setCancelable(false)
-            .show()
+    /**
+     * True when the app holds the OS-level "All files access" toggle.
+     * On API < 30 the answer is always true (legacy storage works out of
+     * the box with `requestLegacyExternalStorage="true"` in the manifest).
+     */
+    fun hasFullStorageAccess(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            return true
+        }
+        return try {
+            @Suppress("DEPRECATION")
+            android.os.Environment.isExternalStorageManager()
+        } catch (_: Throwable) {
+            // Some emulators throw - treat as not-granted and surface the
+            // Settings deep-link from the UI.
+            false
+        }
     }
 }
