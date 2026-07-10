@@ -27,10 +27,59 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // Return default values for Android stubs (StatFs, Environment,
+            // etc.) so unit tests that touch those APIs don't throw
+            // "Method not mocked" exceptions. The downside is that the
+            // tests can pass against fakes; for true Android integration
+            // coverage, add androidTest/ cases that hit the real Android
+            // runtime.
+            isReturnDefaultValues = true
+        }
+    }
+
+    // PHASE 7.7 (Security Hardening): real release signing config.
+    // Reads from gradle.properties (which is .gitignored) or env vars.
+    // Falls back to the debug keystore so `./gradlew assembleRelease`
+    // keeps working out of the box for local smoke tests, but Play Store
+    // uploads require the env vars to be set in CI.
+    signingConfigs {
+        create("release") {
+            val storeFileProp = providers.gradleProperty("RELEASE_STORE_FILE").orNull
+                ?: System.getenv("RELEASE_STORE_FILE")
+            if (storeFileProp != null) {
+                storeFile = file(storeFileProp)
+                storePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
+                    ?: System.getenv("RELEASE_STORE_PASSWORD")
+                    ?: ""
+                keyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
+                    ?: System.getenv("RELEASE_KEY_ALIAS")
+                    ?: ""
+                keyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
+                    ?: System.getenv("RELEASE_KEY_PASSWORD")
+                    ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true  // PHASE 7.7: remove unused resources → smaller APK
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Use the real release keystore when configured; otherwise
+            // fall back to the debug keystore so local builds still produce
+            // an installable APK (annotated in build log).
+            signingConfig = run {
+                val storeFilePath = providers.gradleProperty("RELEASE_STORE_FILE").orNull
+                    ?: System.getenv("RELEASE_STORE_FILE")
+                if (storeFilePath != null && file(storeFilePath).exists()) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
+            }
         }
     }
     compileOptions {
@@ -42,13 +91,36 @@ android {
     }
     buildFeatures {
         compose = true
+        // PHASE 7.4 (Security Hardening): enable BuildConfig generation so
+        // we can guard log calls with `BuildConfig.DEBUG` and prevent PII
+        // (full user paths) from reaching logcat in release builds.
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.4"
     }
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // META-INF conflicts come from multi-jar deps like Apache SSHD
+            // (cli + contrib + sftp all publish overlapping META-INF entries).
+            // Excluding the standard "noise" files keeps the build green
+            // without dropping anything the app actually needs at runtime.
+            excludes += setOf(
+                "/META-INF/AL2.0",
+                "/META-INF/LGPL2.1",
+                "/META-INF/INDEX.LIST",
+                "/META-INF/DEPENDENCIES",
+                "/META-INF/io.netty.versions.properties",
+                "/META-INF/NOTICE",
+                "/META-INF/NOTICE.txt",
+                "/META-INF/LICENSE",
+                "/META-INF/LICENSE.txt",
+                "/META-INF/license.txt",
+                "/META-INF/NOTICE.md",
+                "/META-INF/LICENSE.md",
+                "/META-INF/ASL2.0",
+                "/META-INF/spring.tooling"
+            )
         }
     }
 }
@@ -81,8 +153,11 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // AI & Media
+    // PHASE 7.8 (Security Hardening): ffmpeg-kit-full (~50 MB) was dead code
+    // (its only consumer, MediaIntelligenceManager, was unused). Removed.
+    // mediapipe-tasks-genai is still wired into FileManagerViewModel's
+    // `performSemanticSearch` flow so we keep it.
     implementation("com.google.mediapipe:tasks-genai:0.10.32")
-    implementation("com.mrljdx:ffmpeg-kit-full:6.1.4")
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("io.coil-kt:coil-video:2.5.0")
     
@@ -105,6 +180,38 @@ dependencies {
     // PHASE 1.3: Hilt integration for WorkManager workers.
     implementation("androidx.hilt:hilt-work:1.1.0")
     ksp("androidx.hilt:hilt-compiler:1.1.0")
+
+    // PHASE 2.1: Tink for vault encryption (Android Keystore-backed AES-256-GCM).
+    implementation("com.google.crypto.tink:tink-android:1.13.0")
+
+    // PHASE 3.7: ZXing core for QR code generation (transfer URL → QR).
+    implementation("com.google.zxing:core:3.5.3")
+
+    // PHASE 2.4: Apache MINA SSHD for SFTP server (real SSH/SFTP from any client).
+    // We only need the core + sftp modules. Exclude osgi (duplicate classes with core)
+    // and spring (pulls in spring-jcl which clashes with jcl-over-slf4j).
+    implementation("org.apache.sshd:apache-sshd:2.10.0") {
+        exclude(group = "org.apache.sshd", module = "sshd-osgi")
+        exclude(group = "org.apache.sshd", module = "sshd-spring-sftp")
+        exclude(group = "org.springframework", module = "spring-jcl")
+    }
+    implementation("org.apache.sshd:sshd-sftp:2.10.0") {
+        exclude(group = "org.apache.sshd", module = "sshd-osgi")
+        exclude(group = "org.apache.sshd", module = "sshd-spring-sftp")
+        exclude(group = "org.springframework", module = "spring-jcl")
+    }
+
+    // PHASE 3.11: ML Kit on-device OCR (text recognition in images).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // PHASE 3.10: ML Kit image labeling (auto-tag photos).
+    implementation("com.google.mlkit:image-labeling:17.0.8")
+
+    // PHASE 9.6.3.2: Apache Commons Compress — used by the custom rootfs
+    // installer to handle .tar.xz / .tar.bz2 / .tar.zst decompress streams
+    // before they hit our POSIX-tar extractor. xz is the big one we
+    // couldn't decode in pure Kotlin.
+    implementation("org.apache.commons:commons-compress:1.26.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

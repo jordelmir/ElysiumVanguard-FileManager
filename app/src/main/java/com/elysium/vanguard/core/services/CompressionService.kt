@@ -44,7 +44,7 @@ class CompressionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
-        
+
         if (action == ACTION_CANCEL) {
             currentJob?.cancel()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -52,8 +52,27 @@ class CompressionService : Service() {
             return START_NOT_STICKY
         }
 
-        val files = intent?.getStringArrayExtra(EXTRA_FILES)?.map { File(it) }
-        val output = intent?.getStringExtra(EXTRA_OUTPUT)?.let { File(it) }
+        // PHASE 7.6 (Security Hardening): the service is `exported="false"`
+        // but defense in depth — never trust caller-supplied paths blindly.
+        // Reject any path that escapes one of the app's allowed roots so a
+        // buggy caller (or a future code path) can't write a zip to /sdcard
+        // and have it picked up by another app.
+        val rawFiles = intent?.getStringArrayExtra(EXTRA_FILES)?.map { File(it) }
+        val outputRaw = intent?.getStringExtra(EXTRA_OUTPUT)?.let { File(it) }
+        val (files, output) = if (rawFiles != null && outputRaw != null) {
+            val allowedRoots = listOf(
+                getExternalFilesDir(null),
+                getExternalFilesDir(null)?.let { File(it, "ocr") },
+                filesDir
+            ).filterNotNull().map { it.canonicalPath }
+            val validatedOutput = validateOutputPath(outputRaw, allowedRoots)
+            val validatedInputs = rawFiles.mapNotNull { f -> validateInputPath(f, allowedRoots) }
+            if (validatedOutput != null && validatedInputs.isNotEmpty()) {
+                validatedInputs to validatedOutput
+            } else {
+                null to null
+            }
+        } else null to null
         val keepScreenOn = intent?.getBooleanExtra(EXTRA_KEEP_SCREEN_ON, false) ?: false
 
         if (files != null && output != null) {
@@ -150,6 +169,29 @@ class CompressionService : Service() {
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ElysiumVanguard:CompressionWakeLock")
         wakeLock?.acquire(10 * 60 * 1000L /*10 minutes*/)
+    }
+
+    /**
+     * PHASE 7.6 (Security Hardening) — reject any input path that escapes
+     * the app's allowed roots. The service runs in-process so an attacker
+     * would need code execution, but defense in depth is cheap.
+     */
+    private fun validateInputPath(file: File, allowedRoots: List<String>): File? {
+        val canonical = try { file.canonicalPath } catch (_: Exception) { return null }
+        if (allowedRoots.any { canonical.startsWith(it) }) return file
+        return null
+    }
+
+    /**
+     * PHASE 7.6 — like [validateInputPath] but for the output zip. We also
+     * require the parent directory to exist and be writable.
+     */
+    private fun validateOutputPath(file: File, allowedRoots: List<String>): File? {
+        val canonical = try { file.canonicalPath } catch (_: Exception) { return null }
+        if (allowedRoots.none { canonical.startsWith(it) }) return null
+        val parent = file.parentFile ?: return null
+        if (!parent.exists() || !parent.canWrite()) return null
+        return file
     }
 
     private fun releaseWakeLock() {

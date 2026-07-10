@@ -40,14 +40,28 @@ import javax.inject.Singleton
  *     cancel its own scope to abort the operation.
  */
 @Singleton
-class TrashRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+open class TrashRepository @Inject constructor(
+    // PHASE 8.9: context is nullable so unit tests can construct the
+    // repository with a null context. The [trashRootDir] lazy looks up
+    // context.filesDir which is the only thing we use it for; the override
+    // hook [getTrashRoot] lets tests point at a different dir.
+    @ApplicationContext private val context: Context?,
     private val trashDao: TrashDao
 ) {
 
     private val trashRootDir: File by lazy {
-        File(context.filesDir, "trash").apply { if (!exists()) mkdirs() }
+        getTrashRoot()
     }
+
+    /**
+     * PHASE 8.9: package-private hook so tests can override the trash
+     * root. Production code calls this once per VM lifetime via the lazy
+     * initializer.
+     */
+    open fun getTrashRoot(): File = File(
+        context?.filesDir ?: error("TrashRepository: Context required but was null"),
+        "trash"
+    ).apply { if (!exists()) mkdirs() }
 
     // -----------------------------------------------------------------------
     // Queries
@@ -84,8 +98,18 @@ class TrashRepository @Inject constructor(
 
             val sizeBytes: Long = when (source) {
                 is TrashSource.FromFile -> {
+                    val bytes = source.file.length()
                     source.file.copyTo(target, overwrite = true)
-                    source.file.length()
+                    // PHASE 8.9: explicitly delete the source so the file
+                    // actually moves (previously this branch only copied,
+                    // leaving the original in place — surfaced by my own
+                    // unit test). If the delete fails we still return
+                    // success because the bytes are safely in the trash;
+                    // the duplicate is logged so the user can clean it.
+                    if (!source.file.delete()) {
+                        android.util.Log.w("TrashRepository", "Source file not deleted after copy: ${source.file.absolutePath}")
+                    }
+                    bytes
                 }
                 is TrashSource.FromDocumentFile -> {
                     val resolved = source.documentFile
@@ -128,12 +152,13 @@ class TrashRepository @Inject constructor(
             }
             val restored = when {
                 item.originalParentUri.startsWith("content://") -> {
-                    val parent = DocumentFile.fromTreeUri(context, Uri.parse(item.originalParentUri))
+                    val ctx = context ?: return@withContext false
+                    val parent = DocumentFile.fromTreeUri(ctx, Uri.parse(item.originalParentUri))
                         ?: return@withContext false
                     val target = parent.findFile(item.originalRelativePath)
                         ?: parent.createFile(item.mimeType ?: "*/*", item.originalRelativePath)
                         ?: return@withContext false
-                    context.contentResolver.openOutputStream(target.uri)?.use { out ->
+                    ctx.contentResolver.openOutputStream(target.uri)?.use { out ->
                         source.inputStream().use { it.copyTo(out) }
                     } ?: return@withContext false
                     true
@@ -195,7 +220,8 @@ class TrashRepository @Inject constructor(
     // -----------------------------------------------------------------------
 
     private fun copyDocumentToFile(doc: DocumentFile, target: File): Long {
-        val resolver = context.contentResolver
+        val resolver = context?.contentResolver
+            ?: throw IllegalStateException("TrashRepository: Context required for SAF copies")
         val input = resolver.openInputStream(doc.uri)
             ?: throw IllegalStateException("Cannot open input stream for ${doc.uri}")
         var copied = 0L

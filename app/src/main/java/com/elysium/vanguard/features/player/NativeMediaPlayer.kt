@@ -59,7 +59,20 @@ fun NativeMediaPlayer(
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            val mediaItem = MediaItem.fromUri(android.net.Uri.fromFile(File(filePath)))
+            // PHASE 7.1 (Security Hardening): Never call `Uri.fromFile` — it
+            // throws `FileUriExposedException` on API 24+ when the resulting
+            // URI is passed across process boundaries (e.g. to ExoPlayer's
+            // internal handlers). Always route through FileProvider for file
+            // paths, or pass through a content:// URI unchanged.
+            val mediaUri = when {
+                filePath.startsWith("content://") -> android.net.Uri.parse(filePath)
+                else -> androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    File(filePath)
+                )
+            }
+            val mediaItem = MediaItem.fromUri(mediaUri)
             setMediaItem(mediaItem)
             prepare()
             playWhenReady = true

@@ -61,7 +61,9 @@ import kotlin.math.roundToInt
 fun DashboardScreen(
     onNavigateToStorage: () -> Unit,
     onNavigateToGallery: () -> Unit,
-    onNavigateToMusic: () -> Unit
+    onNavigateToMusic: () -> Unit,
+    onNavigateToRuntime: (() -> Unit)? = null,
+    onNavigateToTerminal: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -78,7 +80,24 @@ fun DashboardScreen(
         PortalItem("MEDIA VAULT", "PHOTOS · VIDEOS · ALBUMS", Icons.Default.Image, TitanColors.QuantumPink, onNavigateToGallery,
             Brush.linearGradient(listOf(TitanColors.QuantumPink.copy(alpha = 0.15f), TitanColors.PlasmaPurple.copy(alpha = 0.05f)))),
         PortalItem("AUDIO HUB", "MUSIC · PLAYLISTS · BASS", Icons.Default.MusicNote, TitanColors.RadioactiveGreen, onNavigateToMusic,
-            Brush.linearGradient(listOf(TitanColors.RadioactiveGreen.copy(alpha = 0.15f), TitanColors.NeonYellow.copy(alpha = 0.05f))))
+            Brush.linearGradient(listOf(TitanColors.RadioactiveGreen.copy(alpha = 0.15f), TitanColors.NeonYellow.copy(alpha = 0.05f)))),
+        // PHASE 9.6.2 — Sovereign Runtime catalog now opens a
+        // dedicated screen that lets the user pick which distro to
+        // install. The Terminal tile stays for one-tap access to the
+        // local Android shell while rootfs setup is still pending.
+        PortalItem(
+            title = "RUNTIME",
+            subtitle = "INSTALL · OPEN · MANAGE",
+            icon = Icons.Default.Terminal,
+            neonColor = TitanColors.RadioactiveGreen,
+            onClick = onNavigateToRuntime ?: {},
+            gradientBg = Brush.linearGradient(
+                listOf(
+                    TitanColors.RadioactiveGreen.copy(alpha = 0.18f),
+                    TitanColors.PlasmaPurple.copy(alpha = 0.05f)
+                )
+            )
+        )
     )
 
     Box(

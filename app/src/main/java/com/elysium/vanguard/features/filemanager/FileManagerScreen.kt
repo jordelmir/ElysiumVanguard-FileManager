@@ -87,7 +87,17 @@ import java.util.*
 @Composable
 fun FileManagerScreen(
     viewModel: FileManagerViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToVault: (() -> Unit)? = null,
+    onNavigateToTrash: (() -> Unit)? = null,
+    onNavigateToSearch: (() -> Unit)? = null,
+    onNavigateToDuplicates: (() -> Unit)? = null,
+    onNavigateToAnalyzer: (() -> Unit)? = null,
+    onNavigateToServer: (() -> Unit)? = null,
+    onNavigateToSftp: (() -> Unit)? = null,
+    onNavigateToDualPane: (() -> Unit)? = null,
+    onNavigateToOcr: (() -> Unit)? = null,
+    onNavigateToAutoTag: (() -> Unit)? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var isTerminalMode by remember { mutableStateOf(false) } // Terminal Mode State
@@ -195,6 +205,100 @@ fun FileManagerScreen(
                                     imageVector = if (isTerminalMode) Icons.Default.Apps else Icons.Default.Terminal,
                                     contentDescription = "Switch Mode",
                                     tint = TitanColors.NeonCyan
+                                )
+                            }
+                            // PHASE 1+2 — Tools overflow menu
+                            var toolsOpen by remember { mutableStateOf(false) }
+                            IconButton(onClick = { toolsOpen = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Tools",
+                                    tint = TitanColors.NeonCyan
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = toolsOpen,
+                                onDismissRequest = { toolsOpen = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Vault") },
+                                    leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToVault?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Trash") },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = TitanColors.QuantumPink) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToTrash?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Search") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TitanColors.RadioactiveGreen) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToSearch?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Duplicates") },
+                                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TitanColors.NeonYellow) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToDuplicates?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Storage Analyzer") },
+                                    leadingIcon = { Icon(Icons.Default.PieChart, contentDescription = null, tint = TitanColors.ElectricBlue) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToAnalyzer?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Local Server") },
+                                    leadingIcon = { Icon(Icons.Default.QrCode2, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToServer?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("SFTP Server") },
+                                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = TitanColors.NeonYellow) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToSftp?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Dual Pane") },
+                                    leadingIcon = { Icon(Icons.Default.ViewColumn, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToDualPane?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("OCR (Text Recognition)") },
+                                    leadingIcon = { Icon(Icons.Default.DocumentScanner, contentDescription = null, tint = TitanColors.RadioactiveGreen) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToOcr?.invoke()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Auto-Tag Photos") },
+                                    leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = TitanColors.NeonYellow) },
+                                    onClick = {
+                                        toolsOpen = false
+                                        onNavigateToAutoTag?.invoke()
+                                    }
                                 )
                             }
                         }

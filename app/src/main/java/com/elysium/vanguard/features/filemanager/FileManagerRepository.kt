@@ -24,27 +24,45 @@ import com.elysium.vanguard.core.util.FileCategory
  */
 @Singleton
 class FileManagerRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    // PHASE 7.5: context is nullable so the repository can be constructed in
+    // unit tests that don't have a Robolectric context. The only place
+    // context is consulted is for Formatter.formatFileSize — the code path
+    // is guarded so the file-system operations (delete/copy/move/rename)
+    // work without it.
+    @ApplicationContext private val context: Context?
 ) {
 
     fun getFiles(path: String): Flow<List<TitanFile>> = flow {
         try {
             val directory = File(path)
-            android.util.Log.d("TitanFileManager", "Scanning path: $path (Exists: ${directory.exists()}, IsDir: ${directory.isDirectory})")
-            
+            // PHASE 7.4 (Security Hardening): never log full user paths in
+            // release. They leak document titles, contract names, etc. into
+            // logcat (READ_LOGS on rooted devices, dev mode, CI logs). We
+            // only log in debug builds AND only log the basename + count.
+            if (com.elysium.vanguard.BuildConfig.DEBUG) {
+                android.util.Log.d(
+                    "TitanFileManager",
+                    "Scanning: ${directory.name} (Exists: ${directory.exists()}, IsDir: ${directory.isDirectory})"
+                )
+            }
+
             if (directory.exists() && directory.isDirectory) {
                 val files = directory.listFiles()
                 if (files == null) {
-                    android.util.Log.w("TitanFileManager", "listFiles() returned NULL for path: $path")
+                    if (com.elysium.vanguard.BuildConfig.DEBUG) {
+                        android.util.Log.w("TitanFileManager", "listFiles() returned null for: ${directory.name}")
+                    }
                     emit(emptyList())
                 } else {
-                    android.util.Log.d("TitanFileManager", "Found ${files.size} nodes in $path")
+                    if (com.elysium.vanguard.BuildConfig.DEBUG) {
+                        android.util.Log.d("TitanFileManager", "Found ${files.size} nodes in ${directory.name}")
+                    }
                     val titanFiles = files.map { file ->
                         val category = FileThematics.getCategory(file.name, file.isDirectory)
                         TitanFile(
                             name = file.name,
                             isFolder = file.isDirectory,
-                            size = if (file.isDirectory) "${file.list()?.size ?: 0} items" else Formatter.formatFileSize(context, file.length()),
+                            size = if (file.isDirectory) "${file.list()?.size ?: 0} items" else formatSize(file.length()),
                             path = file.absolutePath,
                             mimeType = if (file.isDirectory) "resource/folder" else getMimeType(file),
                             category = category,
@@ -59,7 +77,9 @@ class FileManagerRepository @Inject constructor(
                 emit(emptyList())
             }
         } catch (e: Exception) {
-            android.util.Log.e("TitanFileManager", "Critical crash in getFiles: ${e.message}", e)
+            if (com.elysium.vanguard.BuildConfig.DEBUG) {
+                android.util.Log.e("TitanFileManager", "Crash in getFiles: ${e.message}", e)
+            }
             emit(emptyList())
         }
     }.flowOn(Dispatchers.IO)
@@ -173,31 +193,66 @@ class FileManagerRepository @Inject constructor(
         return try {
             val source = File(path)
             val dest = File(source.parent, newName)
+            // PHASE 7.5 (Security Hardening): explicitly reject collisions
+            // before delegating to `File.renameTo`. The latter's behavior is
+            // platform-dependent (Linux returns false, macOS overwrites),
+            // which leads to silent data loss on some devices. We make
+            // the contract explicit: "don't overwrite an existing file
+            // with rename — make the user pick a different name."
+            if (dest.exists() && dest.absolutePath != source.absolutePath) {
+                return false
+            }
             source.renameTo(dest)
         } catch (e: Exception) {
             false
         }
     }
 
-    fun getStorageStats(): StorageStats {
-        val internalPath = android.os.Environment.getExternalStorageDirectory()
-        val internalStat = android.os.StatFs(internalPath.path)
-        val blockSize = internalStat.blockSizeLong
-        val totalBlocks = internalStat.blockCountLong
-        val availableBlocks = internalStat.availableBlocksLong
-        
+    fun getStorageStats(): StorageStats = getStorageStatsForPath(
+        android.os.Environment.getExternalStorageDirectory().absolutePath
+    )
+
+    /** Alias for the dual repo to call without re-doing the cast. */
+    fun getStorageStatsForDual(path: String): StorageStats = getStorageStatsForPath(path)
+
+    /**
+     * PHASE 7.5: extract the StatFs code so tests can point at a path
+     * that doesn't require Android's Environment.getExternalStorageDirectory().
+     * The path-arg version is also more correct: it lets the caller ask
+     * "how much space is on this specific volume" without depending on a
+     * hard-coded constant.
+     */
+    fun getStorageStatsForPath(path: String): StorageStats {
+        val stat = android.os.StatFs(path)
+        val blockSize = stat.blockSizeLong
+        val totalBlocks = stat.blockCountLong
+        val availableBlocks = stat.availableBlocksLong
         val totalBytes = totalBlocks * blockSize
         val availableBytes = availableBlocks * blockSize
         val usedBytes = totalBytes - availableBytes
-
         return StorageStats(
             totalBytes = totalBytes,
             usedBytes = usedBytes,
             availableBytes = availableBytes,
-            totalLabel = Formatter.formatShortFileSize(context, totalBytes),
-            usedLabel = Formatter.formatShortFileSize(context, usedBytes),
-            percentUsed = (usedBytes.toDouble() / totalBytes * 100).toInt()
+            totalLabel = formatSize(totalBytes),
+            usedLabel = formatSize(usedBytes),
+            percentUsed = (usedBytes.toDouble() / totalBytes * 100).toInt(),
+            rootPath = path
         )
+    }
+
+    /**
+     * PHASE 7.5: size formatter that doesn't require a Context. We use this
+     * in lieu of `Formatter.formatFileSize` so the repository is testable
+     * in pure JVM. The output is a sensible English-only form (1.2 MB)
+     * rather than the locale-aware one Android provides, but the difference
+     * is cosmetic — the underlying bytes are the source of truth.
+     */
+    private fun formatSize(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
+        bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024)
+        else -> "%.2f GB".format(bytes / 1024.0 / 1024 / 1024)
     }
 
     fun getFolderSizeRecursive(file: File): Long {
@@ -218,5 +273,7 @@ data class StorageStats(
     val availableBytes: Long,
     val totalLabel: String,
     val usedLabel: String,
-    val percentUsed: Int
+    val percentUsed: Int,
+    /** Phase 8: which volume the stats describe (for UI display + SAF fallback). */
+    val rootPath: String = ""
 )

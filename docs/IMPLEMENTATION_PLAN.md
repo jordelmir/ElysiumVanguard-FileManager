@@ -1,7 +1,7 @@
 # ElysiumVanguard-FileManager — Plan de Implementación Maestro
 
-**Última actualización:** 2026-07-08
-**Estado actual:** `main` @ `1c634a6` (working tree clean)
+**Última actualización:** 2026-07-09
+**Estado actual:** `main` @ work-in-progress, working tree dirty (Phase 0+1+2+3-partial delivered, sin commit)
 **Versión:** 1.0.0-TITAN
 
 ---
@@ -18,42 +18,60 @@ Todo lo demás (vault, dual-pane, servidor local) son **tabla de la verdad** o *
 
 ---
 
-## 1. Estado actual (snapshot 2026-07-08)
+## 1. Estado actual (snapshot 2026-07-09)
 
 ### Inventario
 
-- **47 archivos Kotlin** en `app/src/main/java/com/elysium/vanguard/`
-- **10,211 LOC** estimadas
-- **Build:** `assembleDebug` ✅ | `lint` ❌ (35 errores / 36 warnings)
-- **APK debug:** 142 MB (inflado por deps no usadas)
-- **Tests:** 0 tests automatizados
-- **Release signing:** No configurado
-- **ProGuard rules:** Mínimo (default + `proguard-rules.pro`)
+- **~110 archivos Kotlin** en `app/src/main/java/com/elysium/vanguard/`
+- **~22,000 LOC** estimadas
+- **Build:** `assembleDebug` ✅ | `assembleRelease` ✅ | `lint` ✅ (0 errores / 48 warnings)
+- **APK debug:** 244 MB (consciente, sin tree-shake agresivo)
+- **APK release (sin firmar):** 221 MB
+- **Tests:** 175 unit tests passing, 0 fallos
+- **Release signing:** Configurado (debug-signed fallback si no hay keystore)
+- **ProGuard rules:** Hilt, Room, Media3, Tink, ZXing, Compose, MINA SSHD, ML Kit
 
 ### Funcionalidad existente
 
 | Feature | Estado | Calidad |
 |---|---|---|
-| Music Hub (player + EQ) | ✅ Implementado | 🟠 Funcional con bugs CRITICAL |
-| Document Viewer (PDF/DOCX/TXT) | ✅ Implementado | 🟠 Funcional con bugs CRITICAL |
-| File Browser (MediaStore) | ✅ Básico | 🟡 Necesita filtros, búsqueda |
+| Music Hub (player + EQ) | ✅ Implementado | 🟢 Funciona post-Phase 0 |
+| Document Viewer (PDF/DOCX/TXT) | ✅ Implementado | 🟢 Funciona post-Phase 0 |
+| File Browser (MediaStore) | ✅ Completo | 🟢 Con búsqueda + filtros |
 | Recents / Favoritos | ✅ Implementado | 🟢 Sólido |
 | Audio Auto-Discovery | ✅ Implementado | 🟢 Sólido |
 | FileProvider | ✅ Configurado | 🟢 Bien hecho |
+| Trash / Undo | ✅ Phase 1 | 🟢 SAF-based, auto-purge |
+| Fuzzy search + filtros | ✅ Phase 1 | 🟢 Smith-Waterman + DSL |
+| Content search (BM25) | ✅ Phase 1 | 🟢 In-memory inverted index |
+| Batch rename | ✅ Phase 1 | 🟢 6 tokens |
+| Duplicates detector | ✅ Phase 1 | 🟢 3-phase hash |
+| Storage analyzer | ✅ Phase 1 | 🟢 Squarified treemap |
+| Operation queue + ETA | ✅ Phase 1 | 🟢 EMA throughput |
+| Conflict resolution | ✅ Phase 1 | 🟢 NAME vs DUPLICATE |
+| Vault AES-256-GCM | ✅ Phase 2 | 🟢 Tink + Keystore |
+| Secure delete | ✅ Phase 2 | 🟡 3-pass overwrite |
+| Local HTTP server + QR | ✅ Phase 2 | 🟢 Pure-Kotlin |
+| Text editor + syntax | ✅ Phase 2 | 🟢 11 lenguajes |
+| Markdown editor | ✅ Phase 2 | 🟢 Live preview |
+| Tags/colores/notas | ✅ Phase 2 | 🟢 Room |
+| Smart folders | ✅ Phase 2 | 🟢 DSL queries |
+| **SFTP server** | ✅ Phase 2 | 🟢 Apache MINA SSHD |
+| **Dual-pane layout** | ✅ Phase 2 | 🟢 Two-panel file browser |
+| **OCR (on-device)** | ✅ Phase 3 | 🟢 ML Kit text recognition |
+| **Auto-tagging** | ✅ Phase 3 | 🟢 ML Kit image labeling |
 
 ### Funcionalidad FALTANTE (brecha)
 
-- ❌ Trash / Undo (pérdida de datos silenciosa)
-- ❌ Búsqueda (cualquier tipo)
-- ❌ Batch operations
-- ❌ Duplicados detection
-- ❌ Vault cifrado
-- ❌ Cloud sync (SFTP, WebDAV, SMB)
-- ❌ Servidor local
-- ❌ Sharing con expiración
-- ❌ On-device AI (search semántico, LLM agent)
-- ❌ Editor de archivos
-- ❌ Tests
+- ❌ SMB server (smbj)
+- ❌ WebDAV server
+- ❌ PDF editor (sign/fill)
+- ❌ On-device semantic search (ONNX embeddings + FAISS)
+- ❌ On-device LLM agent (Phi-3-mini)
+- ❌ Cross-device sync (WebRTC, mDNS)
+- ❌ Time-travel / file versioning
+- ❌ Material You theming
+- ❌ Wear OS / Android Auto companions
 
 ---
 
@@ -63,12 +81,12 @@ Todo lo demás (vault, dual-pane, servidor local) son **tabla de la verdad** o *
 
 | Fase | Duración | Outcome | Estado |
 |---|---|---|---|
-| **Fase 0** | 1-2 semanas | Sin crashes, build limpio, deps mínimas | 🔴 Pendiente |
-| **Fase 1** | 4-6 semanas | Tabla de la verdad (trash, búsqueda, batch, dupes) | ⏸ Bloqueada |
-| **Fase 2** | 4-6 semanas | Diferenciador inicial (vault, server, editor) | ⏸ Bloqueada |
-| **Fase 3** | 8-12 semanas | IA real (search semántico, LLM agent lite) | ⏸ Bloqueada |
-| **Fase 4** | 12+ semanas | Moonshots (time-travel, cross-device, AR) | ⏸ Bloqueada |
-| **Fase 5** | Ongoing | Polish (theming, accesibilidad, companions) | ⏸ Bloqueada |
+| **Fase 0** | 1-2 semanas | Sin crashes, build limpio, deps mínimas | ✅ Completa |
+| **Fase 1** | 4-6 semanas | Tabla de la verdad (trash, búsqueda, batch, dupes) | ✅ Completa |
+| **Fase 2** | 4-6 semanas | Diferenciador inicial (vault, server, editor) | ✅ Completa |
+| **Fase 3** | 8-12 semanas | IA real (OCR, auto-tag → sem search, LLM agent lite) | 🟡 2/12 features |
+| **Fase 4** | 12+ semanas | Moonshots (time-travel, cross-device, AR) | ⏸ Pendiente |
+| **Fase 5** | Ongoing | Polish (theming, accesibilidad, companions) | ⏸ Pendiente |
 
 ---
 

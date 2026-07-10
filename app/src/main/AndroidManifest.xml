@@ -26,6 +26,12 @@
         </provider>
 
         <service android:name=".core.services.CompressionService" android:enabled="true" android:exported="false" android:foregroundServiceType="dataSync" />
+
+        <!-- PHASE 9.6.1 — Sovereign Linux Runtime. Foreground service
+             that owns long-lived child processes spawned by the in-app
+             terminal. Kept unexported; only Elysium's own Activities
+             can promote a terminal session to the foreground. -->
+        <service android:name=".core.runtime.terminal.service.TerminalService" android:enabled="true" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

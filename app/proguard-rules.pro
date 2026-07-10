@@ -69,6 +69,16 @@
 -keep class com.google.mediapipe.** { *; }
 -dontwarn com.google.mediapipe.**
 
+# ----- Tink (Phase 2.1: vault encryption) -----
+# Tink loads keyset classes reflectively; keep primitives + KeysetHandle + AndroidKeysetManager.
+-keep class com.google.crypto.tink.** { *; }
+-keepclassmembers class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+# AndroidKeysetManager / AndroidKeystoreAead use reflection on its own packages.
+-keep class com.google.crypto.tink.integration.android.** { *; }
+-keep class com.google.crypto.tink.shaded.protobuf.** { *; }
+-dontwarn com.google.errorprone.annotations.**
+
 # ----- Coil (image loading) -----
 -dontwarn coil.**
 
@@ -97,9 +107,43 @@
 -keep class com.elysium.vanguard.**.*Track { *; }
 -keep class com.elysium.vanguard.**.*Playlist { *; }
 
-# ----- Suppress noisy warnings from optional deps -----
--dontwarn java.lang.invoke.StringConcatFactory
--dontwarn javax.annotation.**
+# ----- Apache MINA SSHD (Phase 2.4: SFTP server) -----
+# SSH server classes are loaded reflectively by the protocol negotiation layer.
+-keep class org.apache.sshd.** { *; }
+-keepclassmembers class org.apache.sshd.** { *; }
+-dontwarn org.apache.sshd.**
+# JGit is a transitive dep of sshd-git (we don't use it but it's pulled in).
+# Silence its MBean references — the JMX MBean server isn't available on
+# Android, and the JGit code path that calls it is unreachable in our app.
+-dontwarn org.eclipse.jgit.**
+-dontwarn java.lang.management.**
+# MINA pulls in a few javax.* classes that don't exist on Android. They're
+# only referenced from optional code paths (PEM key parsing via JCA, JMX
+# error instrumentation). The SFTP server doesn't exercise those paths, so
+# we can safely tell R8 to ignore the unresolved references.
+-dontwarn javax.management.**
+-dontwarn javax.security.auth.login.**
+# Netty is the underlying transport for MINA; we don't need to keep its
+# internals but do need to silence the Log4J bindings that MINA references.
+-dontwarn org.apache.log4j.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn io.netty.**
+# BlockHound is a reactor-netty testing tool; it's pulled in transitively
+# by some MINA sub-modules but never used at runtime in our app.
+-dontwarn reactor.blockhound.**
+# BC / Conscrypt / OpenJSSE are optional JCA providers; SFTP works fine
+# without them on Android (the platform provider covers what we need).
 -dontwarn org.bouncycastle.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
+
+# ----- ML Kit (Phase 3.10/3.11: OCR + image labeling) -----
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.internal.mlkit_**
+
+# ----- ZXing (Phase 3.7: QR code generation) -----
+-dontwarn com.google.zxing.**
+
+# ----- Suppress noisy warnings from optional deps -----
+-dontwarn java.lang.invoke.StringConcatFactory
+-dontwarn javax.annotation.**

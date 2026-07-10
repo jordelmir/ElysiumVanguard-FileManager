@@ -1,4 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  PHASE 7.3 (Security Hardening) — Backup allow-list.
+
+  Auto Backup (Android ≤ 11) and Cloud Backup (Android ≥ 12) both upload
+  everything inside the app's internal storage to the user's Google Drive
+  (or the configured backup provider) by default. For a file manager that
+  holds private keys, encrypted vault metadata, and OCR output, this is
+  unacceptable: the SFTP host key and the vault database would silently
+  leave the device.
+
+  This allow-list excludes the sensitive paths while preserving Auto Backup
+  for user-visible data we DO want to keep across reinstalls (e.g. tags
+  applied to files, smart folders, user preferences). The vault's encrypted
+  payload lives under files/vault/ which is also excluded — without the
+  key, the file is opaque anyway, but excluding it keeps the wire payload
+  smaller and removes ambiguity.
+-->
 <full-backup-content>
+    <!-- Allow everything in sharedpref + database, then carve out
+         exclusions for file-domain sensitive paths. The file domain
+         must be `<include>`-ed before any `<exclude>` will apply. -->
+    <include domain="sharedpref" path="." />
+    <include domain="database" path="." />
     <include domain="file" path="." />
+
+    <!-- Excluded file-domain entries: -->
+    <exclude domain="file" path="sftp-hostkey/" />
+    <exclude domain="file" path="ocr/" />
+    <exclude domain="file" path="vault/" />
+    <exclude domain="file" path="ssh-hostkey.ser" />
+    <exclude domain="file" path="hostkey.ser" />
 </full-backup-content>

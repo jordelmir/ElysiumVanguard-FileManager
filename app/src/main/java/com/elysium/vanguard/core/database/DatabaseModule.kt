@@ -21,7 +21,12 @@ object DatabaseModule {
             TitanDatabase::class.java,
             "titan_sovereign.db"
         )
-            .addMigrations(TitanDatabase.MIGRATION_1_2)
+            .addMigrations(
+                TitanDatabase.MIGRATION_1_2,
+                TitanDatabase.MIGRATION_2_3,
+                TitanDatabase.MIGRATION_3_4,
+                TitanDatabase.MIGRATION_4_5
+            )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
     }
@@ -34,5 +39,20 @@ object DatabaseModule {
     @Provides
     fun provideTrashDao(database: TitanDatabase): TrashDao {
         return database.trashDao()
+    }
+
+    @Provides
+    fun provideVaultDao(database: TitanDatabase): VaultDao {
+        return database.vaultDao()
+    }
+
+    @Provides
+    fun provideFileMetadataDao(database: TitanDatabase): FileMetadataDao {
+        return database.fileMetadataDao()
+    }
+
+    @Provides
+    fun provideSmartFolderDao(database: TitanDatabase): SmartFolderDao {
+        return database.smartFolderDao()
     }
 }

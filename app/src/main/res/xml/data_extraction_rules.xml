@@ -1,9 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  PHASE 7.3 (Security Hardening) — Data extraction rules (Android 12+).
+
+  Cloud backup: user's Google Drive (auto-backup, opt-out at OS level).
+  Device transfer: D2D copy when migrating to a new device.
+
+  Both default to "include everything". We override to exclude the
+  same sensitive paths as backup_rules.xml, plus the room-master-key
+  SharedPreferences (which the vault could use to derive a key from
+  the user's lock-screen PIN/biometric — never sync that to the cloud).
+-->
 <data-extraction-rules>
     <cloud-backup>
+        <include domain="sharedpref" path="." />
+        <include domain="database" path="." />
         <include domain="file" path="." />
+
+        <exclude domain="file" path="sftp-hostkey/" />
+        <exclude domain="file" path="ocr/" />
+        <exclude domain="file" path="vault/" />
+        <exclude domain="file" path="ssh-hostkey.ser" />
+        <exclude domain="file" path="hostkey.ser" />
     </cloud-backup>
     <device-transfer>
+        <include domain="sharedpref" path="." />
+        <include domain="database" path="." />
         <include domain="file" path="." />
+
+        <exclude domain="file" path="sftp-hostkey/" />
+        <exclude domain="file" path="ocr/" />
+        <exclude domain="file" path="vault/" />
+        <exclude domain="file" path="ssh-hostkey.ser" />
+        <exclude domain="file" path="hostkey.ser" />
     </device-transfer>
 </data-extraction-rules>

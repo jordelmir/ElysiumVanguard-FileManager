@@ -29,6 +29,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import kotlinx.coroutines.launch
 import com.elysium.vanguard.core.util.FileOpenerUtil
+import com.elysium.vanguard.core.saf.SafTreeManager
+import javax.inject.Inject
 
 /**
  * PROJECT TITAN: ELYSIUM VANGUARD
@@ -36,6 +38,15 @@ import com.elysium.vanguard.core.util.FileOpenerUtil
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    /**
+     * PHASE 8.3 — Hilt-injected SAF tree manager. We hold it at the
+     * Activity level so the picker callback (registered in onCreate via
+     * [registerForActivityResult]) can call [SafTreeManager.onTreePicked]
+     * before any screen reads the granted URI.
+     */
+    @Inject lateinit var safTreeManager: SafTreeManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -65,13 +76,210 @@ class MainActivity : ComponentActivity() {
                         com.elysium.vanguard.features.dashboard.DashboardScreen(
                             onNavigateToStorage = { navController.navigate("file_manager") },
                             onNavigateToGallery = { navController.navigate("gallery") },
-                            onNavigateToMusic = { navController.navigate("music_hub") }
+                            onNavigateToMusic = { navController.navigate("music_hub") },
+                            onNavigateToRuntime = { navController.navigate("runtime") },
+                            onNavigateToTerminal = { navController.navigate("terminal") }
                         )
                     }
                     composable("file_manager") {
                         com.elysium.vanguard.features.filemanager.FileManagerScreen(
                             viewModel = fileManagerViewModel,
+                            onBack = { navController.popBackStack() },
+                            onNavigateToVault = { navController.navigate("vault") },
+                            onNavigateToTrash = { navController.navigate("trash") },
+                            onNavigateToSearch = { navController.navigate("search") },
+                            onNavigateToDuplicates = { navController.navigate("duplicates") },
+                            onNavigateToAnalyzer = { navController.navigate("analyzer") },
+                            onNavigateToServer = { navController.navigate("local_server") },
+                            onNavigateToSftp = { navController.navigate("sftp_server") },
+                            onNavigateToDualPane = { navController.navigate("dual_pane") },
+                            onNavigateToOcr = { navController.navigate("ocr") },
+                            onNavigateToAutoTag = { navController.navigate("auto_tag") }
+                        )
+                    }
+                    composable("local_server") {
+                        com.elysium.vanguard.features.server.LocalServerScreen(
                             onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("sftp_server") {
+                        com.elysium.vanguard.features.sftp.SftpScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("dual_pane") {
+                        com.elysium.vanguard.features.dualpane.DualPaneScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("ocr") {
+                        com.elysium.vanguard.features.ocr.OcrScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("auto_tag") {
+                        com.elysium.vanguard.features.tagging.AutoTagScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 9.6.1 — Sovereign Linux runtime entry point.
+                    // First working delivery of an in-app terminal backed
+                    // by a child /system/bin/sh process.
+                    composable("terminal") {
+                        com.elysium.vanguard.features.runtime.terminal.TerminalScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 9.6.3 — Distro-rooted terminal. Same screen,
+                    // but the VM resolves a launcher against the named
+                    // distro and builds the shell command line through
+                    // it. The plain `terminal` route stays for the
+                    // 9.6.1 local-shell fallback.
+                    composable(
+                        route = "terminal_distro/{distroId}",
+                        arguments = listOf(
+                            navArgument("distroId") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments
+                        com.elysium.vanguard.features.runtime.terminal.TerminalScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 9.6.2 — Sovereign runtime catalog (install
+                    // distros, manage installed rootfs).
+                    composable("runtime") {
+                        com.elysium.vanguard.features.runtime.RuntimeScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenTerminal = { navController.navigate("terminal") },
+                            onOpenDistro = { distroId ->
+                                val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
+                                navController.navigate("terminal_distro/$encoded")
+                            },
+                            onInspectDistro = { distroId ->
+                                val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
+                                navController.navigate("runtime_inspect/$encoded")
+                            },
+                            onOpenDesktop = { distroId ->
+                                val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
+                                navController.navigate("runtime_desktop/$encoded")
+                            },
+                            onCustomRootfs = { navController.navigate("runtime_custom") }
+                        )
+                    }
+                    // PHASE 9.6.3.2 — Inspect a single installed distro
+                    // (Files / OS / Packages / Snapshots tabs).
+                    composable(
+                        route = "runtime_inspect/{distroId}",
+                        arguments = listOf(
+                            navArgument("distroId") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments
+                        com.elysium.vanguard.features.runtime.inspect.RuntimeInspectScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 9.6.3.2 — Custom rootfs URL install.
+                    composable("runtime_custom") {
+                        com.elysium.vanguard.features.runtime.custom.RuntimeCustomScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 9.6.5 — Linux desktop (VNC stub + app launcher catalog).
+                    composable(
+                        route = "runtime_desktop/{distroId}",
+                        arguments = listOf(
+                            navArgument("distroId") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments
+                        com.elysium.vanguard.features.runtime.desktop.LinuxDesktopScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "metadata/{key}/{name}",
+                        arguments = listOf(
+                            navArgument("key") { type = NavType.StringType },
+                            navArgument("name") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        // The FileMetadataViewModel reads "key" and "name" from SavedStateHandle,
+                        // which Compose Navigation populates from these nav arguments.
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments  // documented; Hilt reads from SavedStateHandle
+                        com.elysium.vanguard.features.metadata.FileMetadataScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("vault") {
+                        com.elysium.vanguard.features.vault.VaultScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenFile = { _, tmp -> handleOpenFile(navController, tmp.absolutePath, "*/*") },
+                            onNavigateToMetadata = { key: String, name: String ->
+                                val encodedKey = URLEncoder.encode(key, StandardCharsets.UTF_8.toString())
+                                val encodedName = URLEncoder.encode(name, StandardCharsets.UTF_8.toString())
+                                navController.navigate("metadata/$encodedKey/$encodedName")
+                            }
+                        )
+                    }
+                    composable("trash") {
+                        com.elysium.vanguard.features.trash.TrashScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("search") {
+                        com.elysium.vanguard.features.search.SearchScreen(
+                            onBack = { navController.popBackStack() },
+                            onResultClick = { path -> handleOpenFile(navController, path, "*/*") }
+                        )
+                    }
+                    composable("duplicates") {
+                        com.elysium.vanguard.features.duplicates.DuplicatesScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("analyzer") {
+                        com.elysium.vanguard.features.analyzer.StorageAnalyzerScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "conflicts/{sources}/{dest}",
+                        arguments = listOf(
+                            navArgument("sources") { type = NavType.StringType },
+                            navArgument("dest") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments
+                        com.elysium.vanguard.features.conflict.ConflictResolutionScreen(
+                            onBack = { navController.popBackStack() },
+                            onApplied = { _ -> navController.popBackStack() }
+                        )
+                    }
+                    composable("smart_folders") {
+                        com.elysium.vanguard.features.smartfolders.SmartFoldersScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenFolder = { folder ->
+                                navController.navigate("smart_folder/${folder.id}")
+                            }
+                        )
+                    }
+                    composable(
+                        route = "smart_folder/{id}",
+                        arguments = listOf(navArgument("id") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        // id arrives in the SavedStateHandle via Hilt; the VM reads it directly.
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments
+                        com.elysium.vanguard.features.smartfolders.SmartFolderResultsScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenFile = { path -> handleOpenFile(navController, path, "*/*") }
                         )
                     }
                     composable("gallery") {
@@ -176,6 +384,42 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable(
+                        route = "viewer_elysium/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val path = URLDecoder.decode(backStackEntry.arguments?.getString("path") ?: "", StandardCharsets.UTF_8.toString())
+                        com.elysium.vanguard.features.viewer.ElysiumDocumentViewer(
+                            file = java.io.File(path),
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "editor_text/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val path = URLDecoder.decode(backStackEntry.arguments?.getString("path") ?: "", StandardCharsets.UTF_8.toString())
+                        com.elysium.vanguard.features.editor.TextEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "editor_md/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val path = URLDecoder.decode(backStackEntry.arguments?.getString("path") ?: "", StandardCharsets.UTF_8.toString())
+                        com.elysium.vanguard.features.editor.MarkdownEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
+                        route = "editor_crdt/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        com.elysium.vanguard.features.crdteditor.CrdtDocumentEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(
                         route = "album_detail/{albumName}",
                         arguments = listOf(navArgument("albumName") { type = NavType.StringType })
                     ) { backStackEntry ->
@@ -201,6 +445,13 @@ class MainActivity : ComponentActivity() {
                                 }
                                 is FileManagerEvent.ShareFile -> {
                                     FileOpenerUtil.shareFile(this@MainActivity, File(event.file.path))
+                                }
+                                is FileManagerEvent.Snackbar -> {
+                                    android.widget.Toast.makeText(
+                                        this@MainActivity,
+                                        event.message,
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         }
@@ -309,34 +560,77 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * PHASE 8.3 — SAF picker.
+     *
+     * Replaces the deprecated `MANAGE_EXTERNAL_STORAGE` flow (which Play
+     * Store blocks and which only works with the permission declared in
+     * the manifest, which we don't). We ask the user to grant us a folder
+     * via the system SAF picker. The granted URI is persistable (survives
+     * reboots) and scopes all file operations to that tree.
+     *
+     * Pre-Android 11: standard READ/WRITE_EXTERNAL_STORAGE permissions are
+     * still the only option, so we keep that flow for those devices.
+     */
+    private val safPickerLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            // SafTreeManager.onTreePicked updates its StateFlow. The
+            // FileManagerViewModel observes that flow (see init {}) and
+            // automatically reloads the root — no direct call needed here.
+            safTreeManager.onTreePicked(uri)
+        }
+    }
+
     private fun checkAndRequestStorageRoot() {
+        // Check if a SAF tree is already granted. If so, the file manager
+        // is ready to use. This works on every API level we support.
+        if (safTreeManager.hasUsableTree) return
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            // Android 11+
-            if (!android.os.Environment.isExternalStorageManager()) {
-                try {
-                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    val uri = Uri.fromParts("package", packageName, null)
-                    intent.data = uri
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                    startActivity(intent)
-                }
-            }
+            // Android 11+: prompt the user to grant a folder via SAF. We
+            // do NOT request MANAGE_EXTERNAL_STORAGE; the SAF tree is the
+            // modern, Play-Store-friendly way to access user files.
+            showSafPickerPrompt()
         } else {
-            // Android 10 and below: Request standard permissions
+            // Android 10 and below: legacy permissions.
             val permissions = mutableListOf(
                 android.Manifest.permission.READ_EXTERNAL_STORAGE,
                 android.Manifest.permission.WRITE_EXTERNAL_STORAGE
             )
-            
             val toRequest = permissions.filter {
                 androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
             }
-            
             if (toRequest.isNotEmpty()) {
                 androidx.core.app.ActivityCompat.requestPermissions(this, toRequest.toTypedArray(), 1001)
             }
         }
+    }
+
+    private fun showSafPickerPrompt() {
+        // Use the platform AlertDialog — `MainActivity` is a
+        // `ComponentActivity` themed as `Theme.Material.NoActionBar`
+        // (AOSP Material, not AppCompat / MaterialComponents), so
+        // `androidx.appcompat.app.AlertDialog.Builder` throws at
+        // `.show()` with "You need to use a Theme.AppCompat theme".
+        // The platform dialog has no theme requirements and works
+        // against the activity's existing window decor.
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Connect a folder")
+            .setMessage(
+                "Elysium Vanguard needs access to your files. " +
+                    "Pick a folder (e.g. Documents, Downloads) and the app will " +
+                    "work only inside that folder. You can disconnect any time " +
+                    "from Settings."
+            )
+            .setPositiveButton("Pick folder") { _, _ ->
+                safPickerLauncher.launch(null)
+            }
+            .setNegativeButton("Use app folder only") { _, _ ->
+                // User declined. App still works with its own external files dir.
+            }
+            .setCancelable(false)
+            .show()
     }
 }

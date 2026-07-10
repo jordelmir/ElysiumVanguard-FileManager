@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.core.ai.DownloadState
 import com.elysium.vanguard.core.ai.MediaPipeManager
 import com.elysium.vanguard.core.ai.ModelDownloadManager
+import com.elysium.vanguard.core.trash.TrashRepository
+import com.elysium.vanguard.core.trash.TrashSource
+import com.elysium.vanguard.core.saf.SafTreeManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -24,11 +27,16 @@ class FileManagerViewModel @Inject constructor(
     private val repository: FileManagerRepository,
     private val modelManager: ModelDownloadManager,
     private val mediaPipeManager: MediaPipeManager,
+    private val trashRepository: TrashRepository,
+    private val safTreeManager: SafTreeManager,
     private val app: Application
 ) : ViewModel() {
     private val context get() = app.applicationContext
 
-    private val _currentPath = MutableStateFlow<String>(android.os.Environment.getExternalStorageDirectory().absolutePath)
+    // PHASE 8.5: start with the app's external files dir (always accessible
+    // without permissions). Once the user grants a SAF tree, the SAF flow
+    // takes over. We no longer default to /sdcard which is blocked on API 30+.
+    private val _currentPath = MutableStateFlow<String>(app.getExternalFilesDir(null)?.absolutePath ?: app.filesDir.absolutePath)
     val currentPath: StateFlow<String> = _currentPath.asStateFlow()
 
     private val _uiState = MutableStateFlow<FileManagerUiState>(FileManagerUiState.Loading)
@@ -109,6 +117,18 @@ class FileManagerViewModel @Inject constructor(
             IntentFilter("com.elysium.vanguard.COMPRESSION_PROGRESS"),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
+
+        // PHASE 8.3: react to SAF tree URI changes. When the user grants a
+        // folder via the system picker, SafTreeManager publishes the new
+        // URI; we reload the file list to show its contents.
+        viewModelScope.launch {
+            safTreeManager.currentTreeUri.collect { uri ->
+                if (uri != null) {
+                    _currentPath.value = "saf:"
+                    loadDirectory("saf:")
+                }
+            }
+        }
     }
 
     override fun onCleared() {
@@ -128,9 +148,13 @@ class FileManagerViewModel @Inject constructor(
 
     fun checkPermissionsAndLoad() {
         val hasPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            // PHASE 8.3: we accept either MANAGE_EXTERNAL_STORAGE (legacy
+            // granted by power users via Settings) OR a SAF tree picked via
+            // the system folder picker. The latter is the recommended path.
+            @Suppress("DEPRECATION")
             android.os.Environment.isExternalStorageManager()
         } else {
-            true // Legacy handling usually done at Activity level
+            true
         }
 
         if (hasPermission) {
@@ -138,6 +162,19 @@ class FileManagerViewModel @Inject constructor(
         } else {
             _uiState.value = FileManagerUiState.PermissionRequired
         }
+    }
+
+    /**
+     * PHASE 8.3 — entry point for the SAF flow. The Activity invokes this
+     * once the user grants a folder; we set the current path to the SAF
+     * root and trigger a reload.
+     */
+    fun loadDirectorySafRoot() {
+        // The actual SAF root path encoding is "saf:" (empty relative
+        // path), which the dual repository recognizes as the root of the
+        // granted tree.
+        _currentPath.value = "saf:"
+        loadDirectory("saf:")
     }
 
     fun loadDirectory(path: String) {
@@ -201,12 +238,45 @@ class FileManagerViewModel @Inject constructor(
     fun deleteSelected() {
         viewModelScope.launch {
             val toDelete = _selectedFiles.value.toList()
-            toDelete.forEach { path ->
-                repository.deleteFile(path)
+            // PHASE 8.5: route all deletes through the trash so the user
+            // can recover. Hard-delete is now an explicit action in the
+            // overflow menu (see [deleteSelectedPermanently]).
+            var trashedCount = 0
+            for (path in toDelete) {
+                val file = File(path)
+                if (!file.exists()) continue
+                val source = TrashSource.FromFile(
+                    file = file,
+                    parentIdentifier = file.parent ?: "",
+                    mimeType = null
+                )
+                val id = trashRepository.moveToTrash(source)
+                if (id > 0) trashedCount++
             }
             clearSelection()
             loadDirectory(_currentPath.value)
             updateStorageStats()
+            _events.emit(FileManagerEvent.Snackbar("$trashedCount item(s) moved to trash"))
+        }
+    }
+
+    /**
+     * PHASE 8.5: hard-delete without going through trash. Used by the
+     * "Delete permanently" overflow action which already confirms in the UI.
+     * Kept separate from [deleteSelected] so the default tap cannot lose
+     * data.
+     */
+    fun deleteSelectedPermanently() {
+        viewModelScope.launch {
+            val toDelete = _selectedFiles.value.toList()
+            var deleted = 0
+            for (path in toDelete) {
+                if (repository.deleteFile(path)) deleted++
+            }
+            clearSelection()
+            loadDirectory(_currentPath.value)
+            updateStorageStats()
+            _events.emit(FileManagerEvent.Snackbar("$deleted item(s) deleted permanently"))
         }
     }
 
@@ -382,6 +452,8 @@ enum class CompressionStatus {
 sealed class FileManagerEvent {
     data class OpenFile(val file: TitanFile) : FileManagerEvent()
     data class ShareFile(val file: TitanFile) : FileManagerEvent()
+    /** PHASE 8.5: transient status message for the snackbar host. */
+    data class Snackbar(val message: String) : FileManagerEvent()
 }
 
 data class PendingFileOperation(
