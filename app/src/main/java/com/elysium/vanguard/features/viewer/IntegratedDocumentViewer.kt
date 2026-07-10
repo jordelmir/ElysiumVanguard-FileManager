@@ -147,13 +147,21 @@ fun IntegratedDocumentViewer(
                     AndroidView(
                         factory = { ctx ->
                             android.webkit.WebView(ctx).apply {
-                                settings.allowFileAccess = true
+                                // PHASE 7.2 (Security Hardening): Never set
+                                // `allowFileAccess = true`. With allowFileAccess
+                                // + loadDataWithBaseURL(null, ...), a malicious
+                                // CSV cell like `</td><script>fetch('file:///data/...')</script>`
+                                // could exfiltrate internal app data. We serve
+                                // content via loadData (no base URL → no file
+                                // access needed) and disable file access entirely.
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
                                 settings.builtInZoomControls = true
                                 settings.displayZoomControls = false
                                 settings.useWideViewPort = true
                                 settings.loadWithOverviewMode = true
                                 setBackgroundColor(0xFF111111.toInt())
-                                
+
                                 val csvText = try { file.readText() } catch (e: Exception) { "Error: ${e.message}" }
                                 val htmlContent = buildCsvHtml(csvText)
                                 loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
@@ -166,13 +174,25 @@ fun IntegratedDocumentViewer(
                     AndroidView(
                         factory = { ctx ->
                             android.webkit.WebView(ctx).apply {
-                                settings.allowFileAccess = true
+                                // PHASE 7.2 (Security Hardening): loadUrl("file://...")
+                                // is a silent privilege escalation — any HTML file
+                                // the user opens can read any file the app process
+                                // can read. Route through FileProvider instead, so
+                                // the WebView receives a `content://` URI scoped
+                                // to this specific file only.
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = true
                                 settings.builtInZoomControls = true
                                 settings.displayZoomControls = false
                                 settings.useWideViewPort = true
                                 settings.loadWithOverviewMode = true
                                 setBackgroundColor(0xFF111111.toInt())
-                                loadUrl("file://${file.absolutePath}")
+                                val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                                    ctx,
+                                    "${ctx.packageName}.fileprovider",
+                                    file
+                                )
+                                loadUrl(contentUri.toString())
                             }
                         },
                         modifier = Modifier.fillMaxSize()
