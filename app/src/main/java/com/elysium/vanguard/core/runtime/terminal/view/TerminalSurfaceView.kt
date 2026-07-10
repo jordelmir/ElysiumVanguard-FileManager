@@ -1,0 +1,233 @@
+package com.elysium.vanguard.core.runtime.terminal.view
+
+import android.content.Context
+import android.graphics.Canvas
+import android.util.AttributeSet
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
+import com.elysium.vanguard.core.runtime.terminal.render.TerminalRenderer
+import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
+
+/**
+ * PHASE 9.6.1 — Hardware-rendered terminal grid as a [SurfaceView].
+ *
+ * Why SurfaceView rather than a regular [android.view.View]: terminal
+ * text repaints a lot (every CRLF, every keystroke, every
+ * completion-result), and we want those paints to take the GPU path
+ * rather than going through the UI thread's RenderNode pipeline. We
+ * surface exactly one canvas per frame, controlled by [drawOnce], and
+ * the Compose host uses [invalidate] to schedule the next one.
+ *
+ * Phase 9.6.1 hard rules:
+ *
+ *  - One session per view. Tap-to-focus is provided by the host.
+ *  - We don't steal focus on attach. Compose decides when to focus us
+ *    by exposing a `Modifier.focusRequester`.
+ *  - Modifier keys (Shift, Ctrl, Alt) come from key events; we
+ *    synthesize the conventional escape sequences (CSI + letter) so
+ *    readline / vim / etc. Just Work.
+ *
+ * Phase 9.6.1 — first build; intentionally minimal.
+ */
+internal class TerminalSurfaceView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : SurfaceView(context, attrs, defStyleAttr), SurfaceHolder.Callback {
+
+    /** Logical grid dimensions. Used by the host to compute cell metrics. */
+    var cols: Int = 80
+        set(value) { field = value.coerceAtLeast(2) }
+
+    var rows: Int = 24
+        set(value) { field = value.coerceAtLeast(2) }
+
+    /** Session this view is bound to. May be set after attach; null before. */
+    var session: TerminalSession? = null
+        set(value) {
+            field = value
+            drawOnce()
+        }
+
+    private var cellWidthPx: Float = 0f
+    private var cellHeightPx: Float = 0f
+    private var renderer: TerminalRenderer? = null
+
+    init {
+        holder.addCallback(this)
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+
+    /** Implemented by host to forward typed bytes to the session. */
+    var onInput: ((ByteArray) -> Unit)? = null
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        drawOnce()
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {
+        recomputeMetrics(w, h)
+        drawOnce()
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        renderer = null
+    }
+
+    private fun recomputeMetrics(width: Int, height: Int) {
+        // Pick a monospace cell size that fills the surface without
+        // slicing the last column. We prefer 7×14 px as a sane default
+        // (matches the typical font preview in Material 3) and let the
+        // actual character advance fill the column.
+        cellHeightPx = 14f * resources.displayMetrics.scaledDensity
+        cellWidthPx = cellHeightPx * 0.6f  // monospace aspect ≈ 0.6
+        renderer = TerminalRenderer(cellWidthPx, cellHeightPx)
+    }
+
+    /**
+     * Single-frame paint. The session pipes output through the
+     * [TerminalBuffer]; the renderer reads at draw time. We don't
+     * accumulate dirty regions in 9.6.1 — `invalidate()` here means
+     * "schedule a paint on the next VSYNC", which Compose already
+     * manages for us via `AndroidView { invalidate() }`.
+     */
+    fun drawOnce() {
+        val activeSession = session
+        if (activeSession == null || renderer == null) return
+        val buffer: TerminalBuffer = activeSession.buffer
+        val surfaceHolder = holder
+        val canvas: Canvas? = surfaceHolder.lockCanvas()
+        if (canvas == null) return
+        try {
+            // Center the grid inside the surface if there's spare room.
+            val gridW = buffer.primaryCols() * cellWidthPx
+            val gridH = buffer.primaryRows() * cellHeightPx
+            val offsetX = (canvas.width - gridW) / 2f
+            val offsetY = (canvas.height - gridH) / 2f
+            renderer!!.draw(canvas, buffer, offsetX, offsetY)
+        } finally {
+            surfaceHolder.unlockCanvasAndPost(canvas)
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_DOWN) requestFocus()
+        return super.onTouchEvent(event)
+    }
+
+    override fun onKeyDown(eventCode: Int, event: KeyEvent): Boolean {
+        // Translate keys to bytes the shell understands. We prioritize
+        // correctness over completeness: Ctrl-A..Z, Enter, Backspace,
+        // Tab, Esc, arrows.
+        val bytes: ByteArray? = when (val key = mapKeyEvent(event, eventCode)) {
+            KeyStroke.Enter -> "\r".toByteArray()
+            KeyStroke.Backspace -> byteArrayOf(0x08)
+            KeyStroke.Tab -> byteArrayOf(0x09)
+            KeyStroke.Esc -> byteArrayOf(0x1B)
+            KeyStroke.Up -> "\u001b[A".toByteArray()
+            KeyStroke.Down -> "\u001b[B".toByteArray()
+            KeyStroke.Right -> "\u001b[C".toByteArray()
+            KeyStroke.Left -> "\u001b[D".toByteArray()
+            is KeyStroke.Char -> byteArrayOf(key.code.toByte())
+            is KeyStroke.CtrlChar -> byteArrayOf(key.controlByte)
+            null -> null
+        }
+        if (bytes != null && bytes.isNotEmpty()) {
+            onInput?.invoke(bytes)
+            return true
+        }
+        return super.onKeyDown(eventCode, event)
+    }
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
+        outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        return TerminalInputConnection(this)
+    }
+
+    /** Public bridge for [TerminalInputConnection] to forward chars. */
+    fun deliverInput(bytes: ByteArray) {
+        onInput?.invoke(bytes)
+    }
+
+    /**
+     * Translate a key event into something the shell parser can react
+     * to. Returns null when no translation applies (the framework should
+     * keep trying other handlers).
+     */
+    private fun mapKeyEvent(event: KeyEvent, code: Int): KeyStroke? {
+        return when {
+            event.action != KeyEvent.ACTION_DOWN -> null
+            code == KeyEvent.KEYCODE_ENTER -> KeyStroke.Enter
+            code == KeyEvent.KEYCODE_DEL -> KeyStroke.Backspace
+            code == KeyEvent.KEYCODE_TAB -> KeyStroke.Tab
+            code == KeyEvent.KEYCODE_ESCAPE -> KeyStroke.Esc
+            code == KeyEvent.KEYCODE_DPAD_UP -> KeyStroke.Up
+            code == KeyEvent.KEYCODE_DPAD_DOWN -> KeyStroke.Down
+            code == KeyEvent.KEYCODE_DPAD_LEFT -> KeyStroke.Left
+            code == KeyEvent.KEYCODE_DPAD_RIGHT -> KeyStroke.Right
+            event.isCtrlPressed && code in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
+                val charIdx = code - KeyEvent.KEYCODE_A
+                // Ctrl+A..Z maps to control bytes 1..26. The lower 5 bits
+                // of the ASCII letter are the control byte.
+                KeyStroke.CtrlChar((charIdx + 1).toByte())
+            }
+            // KeyEvent.getUnicodeChar() returns Int. We compare with
+            // the literal 0 (Int) so the comparison is well-typed.
+            event.unicodeChar != 0 && !event.isCtrlPressed ->
+                KeyStroke.Char(event.unicodeChar)
+            else -> null
+        }
+    }
+
+    private sealed class KeyStroke {
+        data object Enter : KeyStroke()
+        data object Backspace : KeyStroke()
+        data object Tab : KeyStroke()
+        data object Esc : KeyStroke()
+        data object Up : KeyStroke()
+        data object Down : KeyStroke()
+        data object Left : KeyStroke()
+        data object Right : KeyStroke()
+        /** Unicode codepoint produced by the key event; rendered to UTF-8 in the host. */
+        data class Char(val code: Int) : KeyStroke()
+        /** Control-byte for a Ctrl+letter combo; the byte value itself, ready to write. */
+        data class CtrlChar(val controlByte: Byte) : KeyStroke()
+    }
+}
+
+/**
+ * PHASE 9.6.1 — Input connection that delegates to the host view.
+ *
+ * The Compose TextField ecosystem calls commitText / deleteSurroundingText
+ * on this object when the soft keyboard produces input. We translate
+ * commits to UTF-8 bytes and forward them to [TerminalSurfaceView.deliverInput].
+ */
+private class TerminalInputConnection(
+    private val view: TerminalSurfaceView
+) : BaseInputConnection(view, false) {
+    override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+        if (text == null || text.isEmpty()) return false
+        view.deliverInput(text.toString().toByteArray(Charsets.UTF_8))
+        return true
+    }
+
+    override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+        if (beforeLength > 0) {
+            // Convert "backspace" into the standard DEL control byte the
+            // shell expects. Some apps prefer DEL = 0x7F; both work for
+            // most shells.
+            repeat(beforeLength) { view.deliverInput(byteArrayOf(0x08)) }
+        }
+        if (afterLength > 0) {
+            repeat(afterLength) { view.deliverInput(byteArrayOf(0x7F)) }
+        }
+        return true
+    }
+}
