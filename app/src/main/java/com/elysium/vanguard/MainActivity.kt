@@ -82,7 +82,9 @@ class MainActivity : ComponentActivity() {
                             onNavigateToGallery = { navController.navigate("gallery") },
                             onNavigateToMusic = { navController.navigate("music_hub") },
                             onNavigateToRuntime = { navController.navigate("runtime") },
-                            onNavigateToTerminal = { navController.navigate("terminal") }
+                            onNavigateToTerminal = { navController.navigate("terminal") },
+                            onNavigateToWord = { navController.navigate("editor_word_new") },
+                            onNavigateToSheet = { navController.navigate("editor_sheet_new") }
                         )
                     }
                     composable("file_manager") {
@@ -420,6 +422,41 @@ class MainActivity : ComponentActivity() {
                         arguments = listOf(navArgument("path") { type = NavType.StringType })
                     ) { backStackEntry ->
                         com.elysium.vanguard.features.crdteditor.CrdtDocumentEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 10.5 — Elysium Word editor. The full Word
+                    // clone: font, typography, spacing, alignment,
+                    // lists, headings, block quotes, code blocks,
+                    // tables, .docx import/export.
+                    composable(
+                        route = "editor_word/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        com.elysium.vanguard.features.word.WordEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 10.5 — Elysium Word editor for a fresh
+                    // document (no path).
+                    composable("editor_word_new") {
+                        com.elysium.vanguard.features.word.WordEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 10.6 — Elysium Sheet editor. The full
+                    // Excel clone: cells, formulas, formatting, charts,
+                    // multiple sheets, .xlsx import/export.
+                    composable(
+                        route = "editor_sheet/{path}",
+                        arguments = listOf(navArgument("path") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        com.elysium.vanguard.features.sheet.SheetEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("editor_sheet_new") {
+                        com.elysium.vanguard.features.sheet.SheetEditorScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }

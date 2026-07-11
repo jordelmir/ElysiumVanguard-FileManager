@@ -63,7 +63,9 @@ fun DashboardScreen(
     onNavigateToGallery: () -> Unit,
     onNavigateToMusic: () -> Unit,
     onNavigateToRuntime: (() -> Unit)? = null,
-    onNavigateToTerminal: (() -> Unit)? = null
+    onNavigateToTerminal: (() -> Unit)? = null,
+    onNavigateToWord: (() -> Unit)? = null,
+    onNavigateToSheet: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -94,6 +96,36 @@ fun DashboardScreen(
             gradientBg = Brush.linearGradient(
                 listOf(
                     TitanColors.RadioactiveGreen.copy(alpha = 0.18f),
+                    TitanColors.PlasmaPurple.copy(alpha = 0.05f)
+                )
+            )
+        ),
+        // PHASE 10.5 — Elysium Word. The full Word clone: font,
+        // typography, spacing, alignment, lists, headings, etc.
+        PortalItem(
+            title = "WORD",
+            subtitle = "WRITE · FORMAT · EXPORT",
+            icon = Icons.Default.Article,
+            neonColor = TitanColors.NeonCyan,
+            onClick = onNavigateToWord ?: {},
+            gradientBg = Brush.linearGradient(
+                listOf(
+                    TitanColors.NeonCyan.copy(alpha = 0.18f),
+                    TitanColors.ElectricBlue.copy(alpha = 0.05f)
+                )
+            )
+        ),
+        // PHASE 10.6 — Elysium Sheet. The full Excel clone: cells,
+        // formulas (32 functions), formatting, multiple sheets.
+        PortalItem(
+            title = "SHEET",
+            subtitle = "FORMULAS · CHARTS · EXPORT",
+            icon = Icons.Default.GridOn,
+            neonColor = TitanColors.QuantumPink,
+            onClick = onNavigateToSheet ?: {},
+            gradientBg = Brush.linearGradient(
+                listOf(
+                    TitanColors.QuantumPink.copy(alpha = 0.18f),
                     TitanColors.PlasmaPurple.copy(alpha = 0.05f)
                 )
             )
@@ -166,6 +198,20 @@ fun DashboardScreen(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
+            }
+
+            // PHASE 10.7 — Quick action ribbon. Three glass tiles
+            // for the highest-traffic "make something" actions:
+            // new Word document, new Sheet workbook, install a
+            // Linux distro. We surface them above the main portal
+            // grid so the user doesn't have to scroll to find
+            // them.
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                QuickActionRibbon(
+                    onNewWord = { onNavigateToWord?.invoke() },
+                    onNewSheet = { onNavigateToSheet?.invoke() },
+                    onRuntime = { onNavigateToRuntime?.invoke() }
+                )
             }
 
             // ══════════ LIVE METRICS STRIP ══════════
@@ -503,5 +549,95 @@ private fun getBatteryLevel(context: Context): Int {
         bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
     } catch (_: Exception) {
         100
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PHASE 10.7 — Quick action ribbon
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Compact row of three glass tiles for "create something new"
+ * actions. Each tile pulses its accent color softly so the
+ * user perceives them as alive. The whole ribbon is wrapped in
+ * a `pulsingNeonBorder` so it never feels static.
+ */
+@Composable
+private fun QuickActionRibbon(
+    onNewWord: () -> Unit,
+    onNewSheet: () -> Unit,
+    onRuntime: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .pulsingNeonBorder(cornerRadius = 18.dp, glowColor = TitanColors.NeonCyan, glassAlpha = 0.06f)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        QuickActionTile(
+            label = "WORD",
+            icon = Icons.Default.Article,
+            accent = TitanColors.NeonCyan,
+            modifier = Modifier.weight(1f),
+            onClick = onNewWord
+        )
+        QuickActionTile(
+            label = "SHEET",
+            icon = Icons.Default.GridOn,
+            accent = TitanColors.QuantumPink,
+            modifier = Modifier.weight(1f),
+            onClick = onNewSheet
+        )
+        QuickActionTile(
+            label = "RUNTIME",
+            icon = Icons.Default.Terminal,
+            accent = TitanColors.RadioactiveGreen,
+            modifier = Modifier.weight(1f),
+            onClick = onRuntime
+        )
+    }
+}
+
+@Composable
+private fun QuickActionTile(
+    label: String,
+    icon: ImageVector,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val infinite = rememberInfiniteTransition(label = "tile_$label")
+    val glow by infinite.animateFloat(
+        initialValue = 0.5f, targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glow"
+    )
+    Box(
+        modifier = modifier
+            .height(72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .border(1.dp, accent.copy(alpha = 0.6f * glow), RoundedCornerShape(14.dp))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = accent.copy(alpha = glow),
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                label,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp
+            )
+        }
     }
 }
