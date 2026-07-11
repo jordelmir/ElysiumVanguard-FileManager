@@ -19,7 +19,9 @@ import com.elysium.vanguard.features.filemanager.FileManagerEvent
 import com.elysium.vanguard.features.player.NativeMediaPlayer
 import com.elysium.vanguard.features.viewer.HighFidelityImageViewer
 import com.elysium.vanguard.features.viewer.IntegratedDocumentViewer
-import com.elysium.vanguard.ui.theme.TitanTheme
+import com.elysium.vanguard.ui.theme.ElysiumTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import java.net.URLEncoder
@@ -45,6 +47,7 @@ class MainActivity : ComponentActivity() {
      * but no longer gates the app at first launch.
      */
     @Inject lateinit var safTreeManager: SafTreeManager
+    @Inject lateinit var paletteManager: com.elysium.vanguard.core.palette.PaletteManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,8 +64,15 @@ class MainActivity : ComponentActivity() {
             val galleryViewModel: com.elysium.vanguard.features.gallery.GalleryViewModel = hiltViewModel()
             val musicHubViewModel: com.elysium.vanguard.features.player.MusicHubViewModel = hiltViewModel()
             val navController = rememberNavController()
+            // PHASE 10.8 — the live palette from PaletteManager
+            // (a Hilt singleton). The M3 colorScheme inside
+            // ElysiumTheme is rebuilt whenever the user picks
+            // a new color in the customization screen, so every
+            // M3 widget (Button, TextField, etc.) reacts
+            // immediately.
+            val palette by paletteManager.current.collectAsState()
 
-            TitanTheme {
+            ElysiumTheme(palette = palette) {
                 NavHost(
                     navController = navController,
                     startDestination = "splash"
@@ -84,7 +94,8 @@ class MainActivity : ComponentActivity() {
                             onNavigateToRuntime = { navController.navigate("runtime") },
                             onNavigateToTerminal = { navController.navigate("terminal") },
                             onNavigateToWord = { navController.navigate("editor_word_new") },
-                            onNavigateToSheet = { navController.navigate("editor_sheet_new") }
+                            onNavigateToSheet = { navController.navigate("editor_sheet_new") },
+                            onNavigateToColors = { navController.navigate("color_customization") }
                         )
                     }
                     composable("file_manager") {
@@ -457,6 +468,16 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("editor_sheet_new") {
                         com.elysium.vanguard.features.sheet.SheetEditorScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 10.8 — Color customization. Lets the user
+                    // change primary/secondary/tertiary/quaternary
+                    // colors live, pick from 5 visual styles (NEON,
+                    // PHOSPHORESCENT, METALLIC, COMBINED, DIFFUSED),
+                    // and save the result as a named palette.
+                    composable("color_customization") {
+                        com.elysium.vanguard.features.customization.ColorCustomizationScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }

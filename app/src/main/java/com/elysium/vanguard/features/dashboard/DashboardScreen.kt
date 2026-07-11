@@ -65,7 +65,8 @@ fun DashboardScreen(
     onNavigateToRuntime: (() -> Unit)? = null,
     onNavigateToTerminal: (() -> Unit)? = null,
     onNavigateToWord: (() -> Unit)? = null,
-    onNavigateToSheet: (() -> Unit)? = null
+    onNavigateToSheet: (() -> Unit)? = null,
+    onNavigateToColors: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -127,6 +128,24 @@ fun DashboardScreen(
                 listOf(
                     TitanColors.QuantumPink.copy(alpha = 0.18f),
                     TitanColors.PlasmaPurple.copy(alpha = 0.05f)
+                )
+            )
+        ),
+        // PHASE 10.8 — Color customization. Live palette editor:
+        // primary/secondary/tertiary/quaternary + accent, with
+        // NEON / PHOSPHORESCENT / METALLIC / COMBINED / DIFFUSED
+        // styles, 8 built-in presets (TITAN / OLED BLACK / etc.),
+        // and persistence.
+        PortalItem(
+            title = "COLORS",
+            subtitle = "PRIMARY · ACCENT · PRESETS",
+            icon = Icons.Default.Palette,
+            neonColor = TitanColors.NeonYellow,
+            onClick = onNavigateToColors ?: {},
+            gradientBg = Brush.linearGradient(
+                listOf(
+                    TitanColors.NeonYellow.copy(alpha = 0.18f),
+                    TitanColors.NeonOrange.copy(alpha = 0.05f)
                 )
             )
         )
