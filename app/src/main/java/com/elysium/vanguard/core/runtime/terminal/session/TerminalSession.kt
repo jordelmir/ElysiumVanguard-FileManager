@@ -245,13 +245,17 @@ class TerminalSession(
         private const val PUMP_CHUNK = 4096
 
         /**
-         * PHASE 9.6.3 — Build a [TerminalSession] configured to run the
-         * given [DistroLauncher] against the supplied rootfs. The launcher's
-         * [DistroLauncher.buildShellCommand] decides whether we end up in
-         * a real proot (Phase 9.6.3.1) or in the jailed shell (9.6.3).
+         * PHASE 9.6.3 / 10.4 — Build a [TerminalSession] configured to
+         * run the given [DistroLauncher] against the supplied rootfs.
          *
-         * The default probe script lists the rootfs top-level so the user
-         * sees immediate evidence the launcher chose correctly.
+         * Phase 10.4 changed this from "always run a one-shot probe" to
+         * "open a real interactive shell". The old probe
+         * (`pwd; ls -al /; exit`) made sense when every launcher was a
+         * one-shot script; now Direct-Exec delivers an actual shell
+         * with stdin, and we want the user to land in it. The probe
+         * string is still passed in as a pre-script so the user
+         * immediately sees the launcher chose the right flavor; once
+         * the probe finishes, the shell takes over stdin.
          */
         fun forDistro(
             rootfsDir: File,
@@ -262,20 +266,41 @@ class TerminalSession(
         ): TerminalSession {
             require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
             val launcher = pick.launcher
-            // `JailedDistroLauncher` accepts a script string only; the
-            // probe format here doubles as the user's first impression
-            // of the distro.
-            val script = "pwd; echo; echo '--- /etc/os-release (if any) ---'; " +
-                "cat /etc/os-release 2>/dev/null || echo '(no os-release)'; " +
-                "echo; echo '--- / top dir ---'; ls -la / | head -n 40"
-            val command = launcher.buildShellCommand(rootfsDir, script)
+            val isDirectExec = launcher.kind ==
+                com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind.DIRECT_EXEC
+            // Build the command first so the launcher's `buildShellCommand`
+            // gets a chance to validate the rootfs. We then attach a
+            // diagnostic pre-script only for non-interactive cases
+            // (probes); for Direct-Exec we want a real interactive
+            // shell, so we leave the command untouched.
+            val baseCommand = if (isDirectExec) {
+                launcher.buildShellCommand(rootfsDir, script = "")
+            } else {
+                val probe =
+                    "echo '=== ${launcher.kind} ready ==='; pwd; " +
+                        "echo '--- /etc/os-release (if any) ---'; " +
+                        "cat /etc/os-release 2>/dev/null || echo '(no os-release)'; " +
+                        "echo '--- / top 40 ---'; ls -la / 2>/dev/null | head -n 40"
+                launcher.buildShellCommand(rootfsDir, probe)
+            }
+            // PHASE 10.4 — For Direct-Exec we want the rootfs' own
+            // environment (PATH, LD_LIBRARY_PATH, HOME, TMPDIR) to
+            // reach the child process. We thread it through the
+            // Config's environmentVariables so the Android `Process`
+            // exposes the same env the launcher's design assumes.
+            val env = if (isDirectExec &&
+                launcher is com.elysium.vanguard.core.runtime.distros.launcher.DirectExecDistroLauncher
+            ) {
+                launcher.defaultEnvironment(rootfsDir)
+            } else emptyList()
             return TerminalSession(
                 Config(
-                    command = command,
+                    command = baseCommand,
                     workingDirectory = rootfsDir,
                     cols = cols,
                     rows = rows,
-                    termName = termName
+                    termName = termName,
+                    environmentVariables = env
                 )
             )
         }

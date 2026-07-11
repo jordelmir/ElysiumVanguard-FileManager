@@ -221,14 +221,37 @@ class LauncherResolutionTest {
     }
 
     @Test
-    fun `production registry also resolves to jailed shell in 9_6_3`() {
+    fun `production registry resolves to Direct-Exec when rootfs has a shell (10_4)`() {
+        // Phase 10.4: production registry now contains Direct-Exec.
+        // A rootfs that ships /bin/bash is answered with Direct-Exec.
+        val rootfs = Files.createTempDirectory("elysium-res-test").toFile()
+        try {
+            // Write a fake `/bin/bash` into the temp rootfs. We must
+            // strip the leading `/` because `java.io.File(parent,
+            // "/abs")` resolves the child to the host's `/abs`, not
+            // the parent's root.
+            val bash = File(rootfs, "bin/bash")
+            bash.parentFile?.mkdirs()
+            bash.writeText("#!/bin/sh\n")
+            bash.setExecutable(true)
+            val reg = DistroLauncherRegistry.production(supportedAbis = setOf("arm64-v8a"))
+            val res = LauncherResolution.resolve(rootfs, reg)
+            assertEquals(LauncherKind.DIRECT_EXEC, res.launcher.kind)
+            assertNotNull(res.reason)
+        } finally {
+            rootfs.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `production registry falls back to jailed when rootfs has no shell (10_4)`() {
+        // Phase 10.4: a rootfs without a runnable shell bypasses
+        // Direct-Exec and lands on Jailed. Native-Proot is still inert.
         val rootfs = Files.createTempDirectory("elysium-res-test").toFile()
         try {
             val reg = DistroLauncherRegistry.production(supportedAbis = setOf("arm64-v8a"))
             val res = LauncherResolution.resolve(rootfs, reg)
             assertEquals(LauncherKind.JAILED_SHELL, res.launcher.kind)
-            // The reason still mentions fallback because proot is not yet
-            // actually wiring the binary.
             assertNotNull(res.reason)
         } finally {
             rootfs.deleteRecursively()

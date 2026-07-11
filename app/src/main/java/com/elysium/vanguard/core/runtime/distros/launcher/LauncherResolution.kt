@@ -79,13 +79,15 @@ class DistroLauncherRegistry(
         fun empty(): DistroLauncherRegistry = DistroLauncherRegistry(emptyList())
 
         /**
-         * Production registry. Inert for 9.6.3 because the proot
-         * launcher reports `isAvailable == false` until the JNI lands.
+         * Production registry. Phase 10.4 — now prefers Direct-Exec
+         * over Jailed when the rootfs contains a runnable shell.
+         * Direct-Exec is the workhorse until `libproot.so` lands.
          */
         fun production(supportedAbis: Set<String>): DistroLauncherRegistry =
             DistroLauncherRegistry(
                 listOf(
                     NativeProotLauncher(bundledAbis = supportedAbis),
+                    DirectExecDistroLauncher(),
                     JailedDistroLauncher()
                 )
             )

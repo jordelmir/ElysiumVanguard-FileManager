@@ -140,6 +140,7 @@ private fun headerTitle(kind: LauncherKind?): String = when (kind) {
     LauncherKind.JAILED_SHELL -> "Elysium Terminal · jailed"
     LauncherKind.NATIVE_PROOT -> "Elysium Terminal · proot"
     LauncherKind.NAMESPACE_UNSHARE -> "Elysium Terminal · unshare"
+    LauncherKind.DIRECT_EXEC -> "Elysium Terminal · direct-exec"
     null -> "Elysium Terminal"
 }
 

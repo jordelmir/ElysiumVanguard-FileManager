@@ -27,5 +27,15 @@ enum class LauncherKind {
      * Future: a `prctl(PR_SET_NO_NEW_PRIVS, 1, …)` based launcher that
      * goes through `unshare` for namespace isolation.
      */
-    NAMESPACE_UNSHARE
+    NAMESPACE_UNSHARE,
+
+    /**
+     * PHASE 10.4 — Direct-Exec: runs the rootfs' own shell binary with
+     * `PATH` and `LD_LIBRARY_PATH` pointed at the rootfs, and the
+     * process `cwd` set to the rootfs. No chroot, no proot — the
+     * device's loader runs the rootfs' ELFs directly. This is the
+     * workhorse launcher for "I just want a real shell inside the
+     * distro" while proot is still pending.
+     */
+    DIRECT_EXEC
 }

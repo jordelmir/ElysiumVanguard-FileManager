@@ -10,7 +10,9 @@ import java.io.File
  * implementations. Tests can inject a deterministic [staticResolver]
  * for repeatable behavior.
  *
- * Phase 9.6.3 — first build; intentionally minimal.
+ * Phase 10.4 — the default resolver now uses the production registry
+ * (Native-Proot → Direct-Exec → Jailed). A rootfs containing a
+ * runnable shell lands on Direct-Exec instead of the Jailed shell.
  */
 fun interface LauncherResolver {
     fun resolve(rootfs: File): LauncherPick
@@ -28,33 +30,33 @@ fun interface LauncherResolver {
 }
 
 /**
- * PHASE 9.6.3 — Default resolver; does the actual device probing.
+ * PHASE 9.6.3 / 10.4 — Default resolver; does the actual device probing.
  *
  * Two flavors are exposed:
- *   - [DEFAULT] always falls back to the jailed shell (Phase 9.6.3 ships
- *     this; Phase 9.6.3.1 will probe for libproot.so and use that when
- *     present).
+ *   - [DEFAULT] now goes through the production registry, which prefers
+ *     Direct-Exec (Phase 10.4) over the Jailed shell whenever the
+ *     rootfs has a runnable shell binary. Until proot lands,
+ *     Native-Proot is still inert.
  *   - [JAILED] always returns the jailed shell (tests).
- *
- * Phase 9.6.3 — first build; intentionally minimal.
  */
 object LauncherResolutionResolver {
 
     /**
-     * Production resolver; for 9.6.3 it is identical to [JAILED].
-     * 9.6.3.1 swaps this for an ABI-aware probe.
+     * Production resolver. Phase 10.4: uses the production registry
+     * (Native-Proot, Direct-Exec, Jailed) so a real shell inside the
+     * rootfs actually runs. The registry walks candidates in order and
+     * returns the first one whose `isAvailable` is true.
      */
     val DEFAULT: LauncherResolver = LauncherResolver { rootfs ->
-        JAILED.resolve(rootfs)
+        LauncherResolution.resolve(rootfs, DistroLauncherRegistry.production(emptySet()))
     }
 
     /**
-     * Returns the jailed shell regardless of device state. 9.6.3's
-     * `isAvailable()` always reports `false` for the proot launcher
-     * (binary not vendored yet) so this collapses to the same path
-     * anyway, but exposing it as a constant keeps the code honest.
+     * Returns the jailed shell regardless of device state. Tests use
+     * this to pin down the Jailed code path; production never picks it
+     * unless both Direct-Exec and Native-Proot are unavailable.
      */
-    val JAILED: LauncherResolver = LauncherResolver { rootfs ->
+    val JAILED: LauncherResolver = LauncherResolver { _ ->
         LauncherPick(
             launcher = JailedDistroLauncher(),
             reason = "jailed shell (no native proot in 9.6.3)"
