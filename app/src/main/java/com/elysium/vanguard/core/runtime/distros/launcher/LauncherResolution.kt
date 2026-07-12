@@ -80,9 +80,9 @@ class DistroLauncherRegistry(
         fun empty(): DistroLauncherRegistry = DistroLauncherRegistry(emptyList())
 
         /**
-         * Production registry. Phase 10.4 — now prefers Direct-Exec
-         * over Jailed when the rootfs contains a runnable shell.
-         * Direct-Exec is the workhorse until `libproot.so` lands.
+         * Production registry. Native PRoot wins whenever the payload is
+         * present; Direct-Exec remains the compatible fallback for a rootfs
+         * whose shell can run without PRoot.
          */
         fun production(
             supportedAbis: Set<String>,

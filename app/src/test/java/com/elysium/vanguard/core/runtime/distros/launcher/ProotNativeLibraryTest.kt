@@ -104,7 +104,7 @@ class ProotNativeLibraryTest {
         val termux = Files.createTempDirectory("elysium-proot-termux").toFile()
         try {
             user.mkdirs()
-            val userLib = File(user, "libproot.so").apply { createNewFile() }
+            File(user, "libproot.so").createNewFile()
             val termuxLib = File(termux, "libproot.so").apply { createNewFile() }
             val probe = ProotNativeLibrary.default(
                 abis = setOf("arm64-v8a"),
@@ -155,25 +155,5 @@ class ProotNativeLibraryTest {
         } finally {
             base.deleteRecursively()
         }
-    }
-}
-
-/**
- * PHASE 9.6.4 — Tests for the JNI bridge stub.
- *
- * We do NOT actually invoke the JNI bridge in JVM tests — there is no
- * Android `System.loadLibrary` and no proot_main symbol here. We
- * verify only the symbolic shape: the bridge exposes the right
- * methods, accepts the right argument shape, and returns null when
- * not loaded.
- */
-class ProotNativeBridgeTest {
-
-    @Test
-    fun `bridge reports unloaded when proot_jni is not on the classpath`() {
-        val bridge = ProotNativeBridgeStub()
-        assertEquals(ProotNativeBridgeStub.LoadingState.UNLOADED, bridge.loadingState)
-        // Running a probe should NOT throw — it just returns false.
-        assertEquals(false, bridge.isLoaded())
     }
 }

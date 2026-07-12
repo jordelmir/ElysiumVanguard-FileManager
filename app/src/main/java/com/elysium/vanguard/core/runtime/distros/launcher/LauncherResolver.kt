@@ -35,8 +35,8 @@ fun interface LauncherResolver {
  * Two flavors are exposed:
  *   - [DEFAULT] now goes through the production registry, which prefers
  *     Direct-Exec (Phase 10.4) over the Jailed shell whenever the
- *     rootfs has a runnable shell binary. Until proot lands,
- *     Native-Proot is still inert.
+ *     rootfs has a runnable shell binary. Native-Proot is selected whenever
+ *     the bundled payload and rootfs pass their availability checks.
  *   - [JAILED] always returns the jailed shell (tests).
  */
 object LauncherResolutionResolver {

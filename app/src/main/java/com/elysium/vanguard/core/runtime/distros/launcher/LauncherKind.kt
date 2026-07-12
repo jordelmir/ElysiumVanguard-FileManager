@@ -35,7 +35,7 @@ enum class LauncherKind {
      * process `cwd` set to the rootfs. No chroot, no proot — the
      * device's loader runs the rootfs' ELFs directly. This is the
      * workhorse launcher for "I just want a real shell inside the
-     * distro" while proot is still pending.
+     * distro" when the native PRoot payload is unavailable on the device.
      */
     DIRECT_EXEC
 }

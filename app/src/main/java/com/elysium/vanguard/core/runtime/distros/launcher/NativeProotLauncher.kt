@@ -6,7 +6,7 @@ import com.elysium.vanguard.core.runtime.network.GuestDnsConfig
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
 
 /**
- * PHASE 9.6.4 — Native-proot launcher (wired but binary-pending).
+ * Native PRoot launcher.
  *
  * Two pieces matter:
  *
@@ -27,23 +27,19 @@ import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
  * for the jailed shell — proot's binary then takes over and
  * translates syscalls.
  *
- * Phase 9.6.4 — wired but inert until libproot.so ships (see
- * `proot/INSTALL.md`).
+ * The APK bundles the executable PRoot payload for arm64; resolution still
+ * performs a real on-device file check before selecting it.
  */
 open class NativeProotLauncher(
     /**
-     * Set of ABIs this binary was bundled for. Empty means "no binary,
-     * inert" — the resolution code will skip us entirely.
+     * Set of ABIs this binary was bundled for. Empty means no native payload,
+     * so resolution skips this launcher.
      */
     private val bundledAbis: Set<String> = emptySet(),
 
     /**
-     * Where to look for a binary outside the APK. Phase 9.6.3 leaves
-     * this empty; the resolver also looks in Termux's well-known paths.
-     */
-    /**
-     * PHASE 9.6.4 — Optional native library detector. Production code
-     * wires a real one; tests can supply a fake.
+     * Optional native library detector. Production code supplies the APK's
+     * extracted native directory; tests can supply an isolated fixture.
      */
     private val nativeLibrary: ProotNativeLibrary? = null,
 
@@ -70,9 +66,8 @@ open class NativeProotLauncher(
     override fun buildShellCommand(rootfsDir: File, script: String): List<String> {
         require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
         if (!isAvailable(rootfsDir)) {
-            // Honest: build the same string shape we *would* have built,
-            // but the UI / callers are expected to detect via
-            // [isAvailable] and use [JailedDistroLauncher] instead.
+            // Callers must resolve availability before launch; this sentinel
+            // is retained only as a defensive non-executable result.
             return listOf("proot-missing")
         }
         val location = nativeLibrary?.location ?: return listOf("proot-missing")
