@@ -17,17 +17,12 @@
   smaller and removes ambiguity.
 -->
 <full-backup-content>
-    <!-- Allow everything in sharedpref + database, then carve out
-         exclusions for file-domain sensitive paths. The file domain
-         must be `<include>`-ed before any `<exclude>` will apply. -->
-    <include domain="sharedpref" path="." />
-    <include domain="database" path="." />
-    <include domain="file" path="." />
-
-    <!-- Excluded file-domain entries: -->
-    <exclude domain="file" path="sftp-hostkey/" />
-    <exclude domain="file" path="ocr/" />
-    <exclude domain="file" path="vault/" />
-    <exclude domain="file" path="ssh-hostkey.ser" />
-    <exclude domain="file" path="hostkey.ser" />
+    <!-- Strict allow-list. No file-domain content is backed up: rootfs,
+         terminal state, keys, vault payloads, OCR and temporary downloads
+         therefore fail closed when new paths are added. -->
+    <include domain="database" path="titan_sovereign.db" />
+    <include domain="sharedpref" path="elysium_palette_prefs.xml" />
+    <include domain="sharedpref" path="elysium_music_prefs.xml" />
+    <include domain="sharedpref" path="elysium_gallery_prefs.xml" />
+    <include domain="sharedpref" path="elysium_trash_config.xml" />
 </full-backup-content>
