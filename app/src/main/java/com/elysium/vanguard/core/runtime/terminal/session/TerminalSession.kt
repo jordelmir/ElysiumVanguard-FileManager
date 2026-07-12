@@ -4,13 +4,13 @@ import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncher
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherPick
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalParser
+import com.elysium.vanguard.core.runtime.terminal.pty.NativePty
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -22,15 +22,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import java.util.UUID
 
 /**
- * PHASE 9.6.1 — Process-backed terminal session.
+ * Native-PTY-backed terminal session.
  *
- * This is the OS bridge: it owns a [Process] running the user's shell,
- * brokers bytes between the process and the [TerminalParser], and
+ * This is the OS bridge: it owns a native PTY process group running the user's
+ * shell, brokers bytes between the PTY and the [TerminalParser], and
  * exposes the lifecycle events the UI needs (started, exited, errored,
  * user input).
  *
@@ -81,9 +79,8 @@ class TerminalSession(
 
     /** Internal coroutine scope tied to the process lifecycle. */
     private val sessionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var process: Process? = null
+    private var pty: NativePty? = null
     private var pumpOut: Job? = null
-    private var pumpErr: Job? = null
     private var waitJob: Job? = null
 
     private val parser = TerminalParser(buffer)
@@ -98,41 +95,42 @@ class TerminalSession(
         if (_state.value != State.NotStarted) return
         _state.value = State.Starting
         try {
-            val pb = ProcessBuilder(config.command).apply {
-                directory(config.workingDirectory)
-                redirectErrorStream(false)
-                environment().apply {
-                    put("TERM", config.termName)
-                    put("COLORTERM", if (config.colorTermSupport) "truecolor" else "")
-                    put("LINES", config.rows.toString())
-                    put("COLUMNS", config.cols.toString())
-                    if (!config.environmentVariables.any { it.first == "LANG" }) {
-                        put("LANG", "en_US.UTF-8")
-                    }
-                    config.environmentVariables.forEach { (k, v) -> put(k, v) }
-                }
-            }
-            val p = pb.start()
-            process = p
+            val nativePty = NativePty.spawn(
+                command = config.command,
+                environment = resolvedEnvironment(),
+                workingDirectory = config.workingDirectory,
+                columns = config.cols,
+                rows = config.rows
+            )
+            pty = nativePty
             _state.value = State.Running(
                 sinceMs = System.currentTimeMillis(),
-                pid = processId(p)
+                pid = nativePty.pid
             )
-            pumpOut = pump(p.inputStream)
-            pumpErr = pump(p.errorStream)
+            pumpOut = pump(nativePty)
             waitJob = sessionScope.launch {
-                val rc = try {
-                    p.waitFor()
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    -1
+                while (isActive) {
+                    val rc = try {
+                        nativePty.waitForExit(WAIT_POLL_MS)
+                    } catch (io: IOException) {
+                        if (_state.value !is State.Stopped) {
+                            _state.value = State.Error(io.message ?: "native wait failed")
+                            _events.trySend(Event.Failed(io.message ?: "native wait failed"))
+                        }
+                        return@launch
+                    }
+                    if (rc == null) continue
+                    if (_state.value !is State.Stopped) {
+                        _state.value = State.Exited(rc)
+                        _events.trySend(Event.Exited(rc))
+                    }
+                    return@launch
                 }
-                _state.value = State.Exited(rc)
-                _events.trySend(Event.Exited(rc))
             }
         } catch (io: IOException) {
-            _state.value = State.Error(io.message ?: "start failed")
-            _events.trySend(Event.Failed(io.message ?: "start failed"))
+            val message = io.message ?: "native PTY start failed"
+            _state.value = State.Error(message)
+            _events.trySend(Event.Failed(message))
         }
     }
 
@@ -143,16 +141,20 @@ class TerminalSession(
      * coroutines also complete naturally; we only cancel them on
      * explicit [stop].
      */
-    private fun pump(stream: InputStream): Job = sessionScope.launch {
+    private fun pump(nativePty: NativePty): Job = sessionScope.launch {
         val buf = ByteArray(PUMP_CHUNK)
         val decoder = Utf8LineDecoder()
         while (isActive) {
             val n = try {
-                stream.read(buf)
+                nativePty.read(buf)
             } catch (io: IOException) {
+                if (_state.value !is State.Stopped && _state.value !is State.Exited) {
+                    _events.trySend(Event.Failed("read failed: ${io.message}"))
+                }
                 break
             }
             if (n < 0) break
+            if (n == 0) continue
             val chunk = decoder.append(buf, n)
             if (chunk.isNotEmpty()) {
                 parser.feed(chunk)
@@ -169,12 +171,10 @@ class TerminalSession(
      * launches on the session scope.
      */
     fun write(bytes: ByteArray) {
-        val out: OutputStream? = process?.outputStream
-        if (out == null) return
+        val nativePty = pty ?: return
         sessionScope.launch(Dispatchers.IO) {
             try {
-                out.write(bytes)
-                out.flush()
+                nativePty.write(bytes)
             } catch (io: IOException) {
                 _events.trySend(Event.Failed("write failed: ${io.message}"))
             }
@@ -187,24 +187,24 @@ class TerminalSession(
     /** Send Ctrl+C (ASCII 0x03) without flushing — same as a real ctrl-c. */
     fun sendInterrupt() = write(byteArrayOf(0x03))
 
-    /** Resize request from the OS / window. Phase 9.6.1 no-op stub. */
+    /** Resize both the kernel PTY and the terminal model. */
     fun resize(cols: Int, rows: Int) {
-        // Phase 9.6.2: implement TIOCSWINSZ via TIOC ioctl through
-        // reflection; out of scope here.
-        buffer.resize(cols, rows)
+        val nativePty = pty ?: return
+        sessionScope.launch(Dispatchers.IO) {
+            try {
+                nativePty.resize(columns = cols, rows = rows)
+                buffer.resize(cols, rows)
+            } catch (io: IOException) {
+                _events.trySend(Event.Failed("resize failed: ${io.message}"))
+            }
+        }
     }
 
     /** Stop the session. Idempotent; safe to call from any thread. */
     fun stop() {
         if (_state.value == State.NotStarted) return
         try {
-            process?.let { p ->
-                p.destroy()
-                // Give the process 100ms to honor SIGTERM, otherwise
-                // we escalate. Phased 9.6.1 doesn't actually need
-                // gentle kill because we only spawn sh, but this is
-                // the right shape for future bash-over-proot sessions.
-            }
+            pty?.close()
         } catch (_: Exception) { /* ignore */ }
         sessionScope.cancel()
         _state.value = State.Stopped
@@ -242,18 +242,9 @@ class TerminalSession(
         data object TitleChanged : Event()
     }
 
-    private fun awaitCloseSafely() = Unit // placeholder for future flow conversion
-
     companion object {
         private const val PUMP_CHUNK = 4096
-
-        private fun processId(process: Process): Long? {
-            return runCatching {
-                val field = process.javaClass.getDeclaredField("pid")
-                field.isAccessible = true
-                (field.get(process) as? Number)?.toLong()
-            }.getOrNull()
-        }
+        private const val WAIT_POLL_MS = 250
 
         /**
          * PHASE 9.6.3 / 10.4 — Build a [TerminalSession] configured to
@@ -313,6 +304,31 @@ class TerminalSession(
                 )
             )
         }
+    }
+
+    private fun resolvedEnvironment(): Map<String, String> {
+        val environment = LinkedHashMap<String, String>()
+        System.getenv().forEach { (key, value) ->
+            if (key.isNotEmpty() && '=' !in key && '\u0000' !in key && '\u0000' !in value) {
+                environment[key] = value
+            }
+        }
+        environment["TERM"] = config.termName
+        if (config.colorTermSupport) environment["COLORTERM"] = "truecolor"
+        else environment.remove("COLORTERM")
+        environment["LINES"] = config.rows.toString()
+        environment["COLUMNS"] = config.cols.toString()
+        if ("LANG" !in environment && "LC_ALL" !in environment) {
+            environment["LANG"] = "en_US.UTF-8"
+        }
+        config.environmentVariables.forEach { (key, value) ->
+            require(key.isNotEmpty() && '=' !in key && '\u0000' !in key) {
+                "invalid environment key"
+            }
+            require('\u0000' !in value) { "environment value cannot contain NUL" }
+            environment[key] = value
+        }
+        return environment
     }
 }
 

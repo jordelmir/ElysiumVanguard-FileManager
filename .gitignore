@@ -31,6 +31,7 @@ jdk17.tar.gz
 *.txt
 build/
 app/build/
+/native/runtime/target/
 .gradle/
 captures/
 .externalNativeBuild/

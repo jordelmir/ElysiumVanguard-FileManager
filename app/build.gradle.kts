@@ -134,6 +134,29 @@ android {
     }
 }
 
+val buildRustRuntime by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the ARM64 Rust PTY runtime with the pinned Android NDK."
+    val runtimeDir = rootProject.layout.projectDirectory.dir("native/runtime")
+    inputs.file(runtimeDir.file("Cargo.toml"))
+    inputs.file(runtimeDir.file("Cargo.lock"))
+    inputs.file(runtimeDir.file("build.rs"))
+    inputs.dir(runtimeDir.dir("src"))
+    inputs.file(runtimeDir.file("build-android.sh"))
+    outputs.file(layout.buildDirectory.file("generated/rustJniLibs/arm64-v8a/libelysium_runtime.so"))
+    commandLine("bash", runtimeDir.file("build-android.sh").asFile.absolutePath)
+}
+
+android.sourceSets.getByName("main").jniLibs.srcDir(
+    layout.buildDirectory.dir("generated/rustJniLibs")
+)
+
+tasks.configureEach {
+    if (name == "mergeDebugJniLibFolders" || name == "mergeReleaseJniLibFolders") {
+        dependsOn(buildRustRuntime)
+    }
+}
+
 dependencies {
     // Core Android
     implementation("androidx.core:core-ktx:1.12.0")
