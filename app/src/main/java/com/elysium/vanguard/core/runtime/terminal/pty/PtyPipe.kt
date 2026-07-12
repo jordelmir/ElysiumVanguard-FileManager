@@ -4,21 +4,11 @@ import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * PHASE 9.6.10 — PTY passthrough abstraction.
+ * Legacy pipe harness retained for JVM tests.
  *
- * A real PTY (pseudo-terminal) on Android requires Termux's `termux-pty`
- * JNI library. Until that ships we keep two paths:
- *
- *   - [PipePty]: standard Android pipes. Doesn't support raw terminal
- *     modes (line editing), but the OS doesn't enforce them anyway,
- *     so most shells work.
- *   - [NativePty]: future wiring for termux-pty; today it's the same
- *     as [PipePty] with the slot ready for an actual native binding.
- *
- * The interface lets [TerminalSession] swap implementations without
- * changing the pumping logic.
- *
- * Phase 9.6.10 — first build; intentionally minimal.
+ * Production terminal sessions use [NativePty], backed by Elysium's Rust
+ * runtime. This file models ordinary Java pipes only for deterministic tests;
+ * it must not be selected by a production terminal session.
  */
 interface PtyPipe {
     /**
@@ -42,7 +32,7 @@ interface PtyPipe {
 
     /**
      * Set the window size (rows × cols). No-op for pipes; meaningful for
-     * the future native PTY that talks to termux-pty's TIOCSWINSZ path.
+     * a real native PTY's TIOCSWINSZ path.
      */
     fun setWindowSize(rows: Int, cols: Int)
 
@@ -51,7 +41,7 @@ interface PtyPipe {
 }
 
 /**
- * PHASE 9.6.10 — Pipe-backed PTY placeholder.
+ * Pipe-backed test fixture.
  *
  * Builds two [java.io.PipedInputStream] / [PipedOutputStream] pairs and
  * exposes the right halves:
@@ -145,12 +135,10 @@ class PipePty private constructor(
 }
 
 /**
- * PHASE 9.6.10 — Stub for the future native-PTY implementation.
- *
- * Today it's identity-equal to [PipePty]; when termux-pty lands we'll
- * swap factory implementations and the rest of the app picks up the
- * real PTY without touching it.
+ * Deprecated test-only factory. Production code must not route a terminal
+ * through pipes and claim interactive TUI support.
  */
+@Deprecated("Use NativePty for production terminal sessions")
 object PtyFactory {
     fun create(): PtyPipe = PipePty.create()
 }

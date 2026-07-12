@@ -80,7 +80,7 @@ internal fun TerminalHost(
 
     AndroidView(
         modifier = modifier
-            .background(Color(0xFF0F1115))
+            .background(Color.Black)
             .focusRequester(focusRequester),
         factory = { surface },
         update = {

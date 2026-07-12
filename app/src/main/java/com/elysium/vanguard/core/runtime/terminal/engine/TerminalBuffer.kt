@@ -1,252 +1,308 @@
 package com.elysium.vanguard.core.runtime.terminal.engine
 
+import java.util.ArrayDeque
+
 /**
- * PHASE 9.6.1 — The terminal screen model.
+ * Mutable terminal screen model with bounded scrollback and frame snapshots.
  *
- * A grid of `rows × cols` cells. Each cell carries the printable char
- * plus the [TerminalAttributes] in force when it was written. The parser
- * updates the cursor and the attributes; the renderer reads everything
- * exactly as it appears.
- *
- * Why a separate "attributes" object rather than a packed int? Two
- * reasons: (a) `withForeground` / `withBackground` returns an
- * immutable copy so attribute changes don't accidentally mutate other
- * cells; (b) reading colored cells in the renderer doesn't require
- * bit-twiddling. Memory-wise we pay ~24 bytes per cell: 80×24×24 ≈
- * 46 KB primary, 80×1000×24 ≈ 1.92 MB scrollback. Well under the
- * heap budget on stock devices.
- *
- * Why only a primary grid + a scrollback ring and not a "real" alt
- * buffer? `vim` and `less` do benefit, but they emit clear sequences
- * that fall back to the primary buffer cleanly. Alt buffer would let
- * us preserve scrollback on vim exit; deferred to 9.6.2.
- *
- * Phase 9.6.1 — first build; intentionally minimal.
+ * Parser mutations happen on a PTY I/O coroutine while Canvas rendering runs
+ * elsewhere. A renderer therefore consumes one immutable [TerminalSnapshot]
+ * rather than observing a grid while it is being resized or scrolled.
  */
 internal class TerminalBuffer(
-    val cols: Int,
-    val rows: Int,
+    cols: Int,
+    rows: Int,
     private val scrollbackLines: Int = DEFAULT_SCROLLBACK
 ) {
-    /** The primary grid. Each entry is a (char, attributes) cell. */
-    private val primary: Array<TerminalCell> = Array(rows * cols) {
-        TerminalCell(' ', TerminalAttributes.DEFAULT)
-    }
+    var cols: Int = cols
+        private set
+    var rows: Int = rows
+        private set
 
-    /**
-     * Pre-allocated scrollback ring of full rows. `head` points at the
-     * next slot to write (oldest line lives at `(head - size) mod cap`).
-     * Empty entries (null) represent virtual pre-history the user never
-     * saw.
-     */
-    private val scrollback: Array<TerminalCellArray?>
-    private val scrollbackCapacity: Int = scrollbackLines
-    private var scrollbackHead = 0
-    private var scrollbackSize = 0
+    private var primary: Array<TerminalCell> = blankGrid(cols, rows)
+    private val scrollback = ArrayDeque<TerminalCellArray>(scrollbackLines)
+    private var dirtyRows: BooleanArray = BooleanArray(rows) { true }
+    private var fullRedraw = true
 
     var cursorRow: Int = 0
         private set
     var cursorCol: Int = 0
         private set
-
     var currentAttributes: TerminalAttributes = TerminalAttributes.DEFAULT
 
     init {
         require(cols > 0 && rows > 0) { "grid must be non-empty" }
         require(scrollbackLines >= 0) { "scrollback must be non-negative" }
-        scrollback = arrayOfNulls(scrollbackCapacity)
     }
 
-    /** Write a printable character at the cursor and advance. */
+    @Synchronized
     fun putChar(c: Char) {
         setCellRaw(cursorRow, cursorCol, TerminalCell(c, currentAttributes))
         advanceCursorAfterChar()
     }
 
-    private fun advanceCursorAfterChar() {
-        if (cursorCol + 1 < cols) {
-            cursorCol += 1
-            return
-        }
-        cursorCol = 0
-        cursorDownOne()
-    }
-
+    @Synchronized
     fun lineFeed() = cursorDownOne()
 
-    fun carriageReturn() {
-        cursorCol = 0
-    }
+    @Synchronized
+    fun carriageReturn() = setCursor(cursorRow, 0)
 
-    fun backspace() {
-        if (cursorCol > 0) cursorCol -= 1
-    }
+    @Synchronized
+    fun backspace() = setCursor(cursorRow, (cursorCol - 1).coerceAtLeast(0))
 
-    fun horizontalTab() {
-        cursorCol = ((cursorCol / TAB_WIDTH) + 1) * TAB_WIDTH
-        if (cursorCol >= cols) cursorCol = cols - 1
-    }
+    @Synchronized
+    fun horizontalTab() = setCursor(cursorRow, (((cursorCol / TAB_WIDTH) + 1) * TAB_WIDTH).coerceAtMost(cols - 1))
 
-    /** Sets cursor to (1-based row, 1-based col); clipped to screen. */
+    /** Sets cursor to a one-based VT coordinate and clips it to the grid. */
+    @Synchronized
     fun setCursorPosition(row: Int, col: Int) {
-        cursorRow = (row - 1).coerceIn(0, rows - 1)
-        cursorCol = (col - 1).coerceIn(0, cols - 1)
+        setCursor((row - 1).coerceIn(0, rows - 1), (col - 1).coerceIn(0, cols - 1))
     }
 
-    fun cursorUp(n: Int) {
-        cursorRow = (cursorRow - n).coerceAtLeast(0)
-    }
+    @Synchronized
+    fun cursorUp(n: Int) = setCursor((cursorRow - n.coerceAtLeast(1)).coerceAtLeast(0), cursorCol)
 
-    fun cursorDown(n: Int) {
-        cursorRow = (cursorRow + n).coerceAtMost(rows - 1)
-    }
+    @Synchronized
+    fun cursorDown(n: Int) = setCursor((cursorRow + n.coerceAtLeast(1)).coerceAtMost(rows - 1), cursorCol)
 
-    fun cursorRight(n: Int) {
-        cursorCol = (cursorCol + n).coerceAtMost(cols - 1)
-    }
+    @Synchronized
+    fun cursorRight(n: Int) = setCursor(cursorRow, (cursorCol + n.coerceAtLeast(1)).coerceAtMost(cols - 1))
 
-    fun cursorLeft(n: Int) {
-        cursorCol = (cursorCol - n).coerceAtLeast(0)
-    }
+    @Synchronized
+    fun cursorLeft(n: Int) = setCursor(cursorRow, (cursorCol - n.coerceAtLeast(1)).coerceAtLeast(0))
 
+    @Synchronized
     fun eraseFromCursorToEndOfScreen() {
         eraseFromCursorToEndOfLine()
-        for (r in (cursorRow + 1) until rows) {
-            clearRow(r)
+        for (row in (cursorRow + 1) until rows) clearRow(row)
+    }
+
+    @Synchronized
+    fun eraseFromStartOfScreenToCursor() {
+        for (row in 0 until cursorRow) clearRow(row)
+        clearRowUpToInclusive(cursorRow, cursorCol)
+    }
+
+    @Synchronized
+    fun eraseEntireScreen() {
+        for (row in 0 until rows) clearRow(row)
+    }
+
+    @Synchronized
+    fun eraseFromCursorToEndOfLine() = clearRowFrom(cursorRow, cursorCol)
+
+    @Synchronized
+    fun eraseFromStartOfLineToCursor() = clearRowUpToInclusive(cursorRow, cursorCol)
+
+    @Synchronized
+    fun eraseEntireLine() = clearRow(cursorRow)
+
+    /**
+     * Reflows visible rows into a new mutable grid without clearing terminal
+     * history. Rows are conservative hard boundaries because this model does
+     * not yet retain DEC wrap flags; content is never silently discarded except
+     * the oldest visible rows when shrinking height.
+     */
+    @Synchronized
+    fun resize(newCols: Int, newRows: Int) {
+        require(newCols > 0 && newRows > 0) { "grid must be non-empty" }
+        if (newCols == cols && newRows == rows) return
+
+        val oldCursorRow = cursorRow
+        val oldCursorCol = cursorCol
+        val visibleRows = ArrayList<TerminalCellArray>(rows)
+        for (row in 0 until rows) visibleRows += rowCopy(row)
+        val reflowed = reflowRows(visibleRows, newCols)
+        val retained = reflowed.takeLast(newRows)
+        val skipped = reflowed.size - retained.size
+
+        cols = newCols
+        rows = newRows
+        primary = blankGrid(newCols, newRows)
+        // Keep the existing top-left viewport stable while a larger display
+        // becomes available. When shrinking, `takeLast` has already removed
+        // the oldest rows and the retained viewport still starts at row zero.
+        val firstTargetRow = 0
+        retained.forEachIndexed { index, row ->
+            System.arraycopy(row.cells, 0, primary, (firstTargetRow + index) * newCols, newCols)
+        }
+
+        val rowsBeforeCursor = reflowRows(visibleRows.take(oldCursorRow), newCols).size
+        val cursorChunk = oldCursorCol / newCols
+        val mappedRow = rowsBeforeCursor + cursorChunk - skipped + firstTargetRow
+        val mappedCol = oldCursorCol % newCols
+        cursorRow = mappedRow.coerceIn(0, newRows - 1)
+        cursorCol = mappedCol.coerceIn(0, newCols - 1)
+
+        // Preserve history but normalize row width for consumers that inspect
+        // scrollback after a fold/unfold resize.
+        val reflowedHistory = reflowRows(scrollback.toList(), newCols)
+        scrollback.clear()
+        reflowedHistory.takeLast(scrollbackLines).forEach(scrollback::addLast)
+        dirtyRows = BooleanArray(newRows) { true }
+        fullRedraw = true
+    }
+
+    @Synchronized
+    fun cellAt(row: Int, col: Int): TerminalCell {
+        require(row in 0 until rows && col in 0 until cols) { "cell outside terminal grid" }
+        return primary[row * cols + col]
+    }
+
+    @Synchronized
+    fun primaryRows(): Int = rows
+
+    @Synchronized
+    fun primaryCols(): Int = cols
+
+    /** Immutable frame state. Calling this consumes accumulated dirty rows. */
+    @Synchronized
+    fun snapshot(): TerminalSnapshot {
+        val dirty = if (fullRedraw) IntArray(rows) { it } else {
+            dirtyRows.indices.filter { dirtyRows[it] }.toIntArray()
+        }
+        val snapshot = TerminalSnapshot(
+            cols = cols,
+            rows = rows,
+            cursorRow = cursorRow,
+            cursorCol = cursorCol,
+            cells = primary.copyOf(),
+            dirtyRows = dirty,
+            fullRedraw = fullRedraw
+        )
+        dirtyRows.fill(false)
+        fullRedraw = false
+        return snapshot
+    }
+
+    @Synchronized
+    fun requestFullRedraw() {
+        fullRedraw = true
+        dirtyRows.fill(true)
+    }
+
+    @Synchronized
+    fun scrollbackSnapshot(): Array<TerminalCellArray> = scrollback.toTypedArray()
+
+    private fun advanceCursorAfterChar() {
+        if (cursorCol + 1 < cols) {
+            setCursor(cursorRow, cursorCol + 1)
+        } else {
+            setCursor(cursorRow, 0)
+            cursorDownOne()
         }
     }
 
-    fun eraseFromStartOfScreenToCursor() {
-        for (r in 0 until cursorRow) clearRow(r)
-        clearRowUpToInclusive(cursorRow, cursorCol)
+    private fun cursorDownOne() {
+        if (cursorRow + 1 < rows) setCursor(cursorRow + 1, cursorCol)
+        else scrollUpOne()
     }
 
-    fun eraseEntireScreen() {
-        for (r in 0 until rows) clearRow(r)
+    private fun scrollUpOne() {
+        // A one-row terminal cannot shift content upward. Keeping the row is
+        // the least surprising VT behavior and avoids erasing the last glyph
+        // every time output wraps at the right edge.
+        if (rows <= 1) {
+            dirtyRows[0] = true
+            return
+        }
+        if (scrollbackLines > 0) {
+            if (scrollback.size == scrollbackLines) scrollback.removeFirst()
+            scrollback.addLast(rowCopy(0))
+        }
+        System.arraycopy(primary, cols, primary, 0, (rows - 1) * cols)
+        val blank = TerminalCell(' ', currentAttributes)
+        val bottom = (rows - 1) * cols
+        for (column in 0 until cols) primary[bottom + column] = blank
+        dirtyRows.fill(true)
+        // Cursor stays on the bottom row, retaining its column.
+        cursorRow = rows - 1
+        dirtyRows[cursorRow] = true
     }
 
-    fun eraseFromCursorToEndOfLine() {
-        clearRowFrom(cursorRow, cursorCol)
+    private fun setCursor(row: Int, column: Int) {
+        val previousRow = cursorRow
+        cursorRow = row
+        cursorCol = column
+        dirtyRows[previousRow] = true
+        dirtyRows[row] = true
     }
 
-    fun eraseFromStartOfLineToCursor() {
-        clearRowUpToInclusive(cursorRow, cursorCol)
-    }
-
-    fun eraseEntireLine() {
-        clearRow(cursorRow)
+    private fun setCellRaw(row: Int, col: Int, cell: TerminalCell) {
+        primary[row * cols + col] = cell
+        dirtyRows[row] = true
     }
 
     private fun clearRow(row: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
-        for (c in 0 until cols) primary[start + c] = blank
+        for (column in 0 until cols) primary[start + column] = blank
+        dirtyRows[row] = true
     }
 
     private fun clearRowFrom(row: Int, fromCol: Int) {
         val blank = TerminalCell(' ', currentAttributes)
-        val start = row * cols + fromCol
-        for (c in fromCol until cols) primary[start + c - fromCol] = blank
-        // Note: the inner expression above is intentionally verbose
-        // for clarity; the JIT will collapse it.
+        val start = row * cols
+        for (column in fromCol until cols) primary[start + column] = blank
+        dirtyRows[row] = true
     }
 
-    private fun clearRowUpToInclusive(row: Int, col: Int) {
+    private fun clearRowUpToInclusive(row: Int, column: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
-        val end = col.coerceAtMost(cols - 1)
-        for (c in 0..end) primary[start + c] = blank
+        for (col in 0..column.coerceAtMost(cols - 1)) primary[start + col] = blank
+        dirtyRows[row] = true
     }
 
-    /** Wrap the top row into scrollback, shift everything up. */
-    private fun scrollUpOne() {
-        // A single-row display has nothing to scroll into. Without this
-        // guard we used to silently blank the entire row when a wrap
-        // reached the end (a real bug, see PHASE 9.6.1 unit tests).
-        if (rows <= 1) return
-        if (scrollbackCapacity > 0) {
-            val top = topRow()
-            scrollback[scrollbackHead] = top
-            scrollbackHead = (scrollbackHead + 1) % scrollbackCapacity
-            if (scrollbackSize < scrollbackCapacity) scrollbackSize += 1
+    private fun rowCopy(row: Int): TerminalCellArray {
+        val cells = Array(cols) { index -> primary[row * cols + index] }
+        return TerminalCellArray(cells)
+    }
+
+    private fun reflowRows(source: List<TerminalCellArray>, targetCols: Int): List<TerminalCellArray> {
+        val result = ArrayList<TerminalCellArray>()
+        source.forEach { row ->
+            val lastMeaningful = row.cells.indexOfLast {
+                it.char != ' ' || it.attributes.backgroundColor != TerminalAttributes.Color.BackgroundDefault
+            }
+            if (lastMeaningful < 0) {
+                result += TerminalCellArray(targetCols)
+                return@forEach
+            }
+            var offset = 0
+            while (offset <= lastMeaningful) {
+                val cells = Array(targetCols) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
+                val count = minOf(targetCols, lastMeaningful - offset + 1)
+                for (index in 0 until count) cells[index] = row.cells[offset + index]
+                result += TerminalCellArray(cells)
+                offset += count
+            }
         }
-        // Shift primary up by one. arraycopy is hands-down faster than
-        // touching every cell with a loop.
-        System.arraycopy(primary, cols, primary, 0, (rows - 1) * cols)
-        val bottom = (rows - 1) * cols
-        val blank = TerminalCell(' ', currentAttributes)
-        for (c in 0 until cols) primary[bottom + c] = blank
+        return result
     }
 
-    private fun cursorDownOne() {
-        if (cursorRow + 1 < rows) {
-            cursorRow += 1
-            return
-        }
-        scrollUpOne()
-    }
-
-    private fun setCellRaw(row: Int, col: Int, cell: TerminalCell) {
-        if (row in 0 until rows && col in 0 until cols) {
-            primary[row * cols + col] = cell
-        }
-    }
-
-    /**
-     * Read-only cell access for the renderer. Cheap: just an
-     * array-element read. Cells are immutable so no synchronization is
-     * needed if the parser mutates the buffer; the only constraint is
-     * that the renderer and parser run on different threads without
-     * interleaving within a single frame, which Compose interleaves
-     * for us.
-     */
-    fun cellAt(row: Int, col: Int): TerminalCell {
-        return primary[row * cols + col]
-    }
-
-    fun primaryRows(): Int = rows
-    fun primaryCols(): Int = cols
-
-    private fun topRow(): TerminalCellArray {
-        val r = TerminalCellArray(cols)
-        System.arraycopy(primary, 0, r.cells, 0, cols)
-        return r
-    }
-
-    /**
-     * Returns the scrollback in newest-at-bottom order. Empty when
-     * nothing has scrolled off yet.
-     */
-    fun scrollbackSnapshot(): Array<TerminalCellArray> {
-        if (scrollbackSize == 0) return emptyArray()
-        val out = ArrayList<TerminalCellArray>(scrollbackSize)
-        val start = (scrollbackHead - scrollbackSize + scrollbackCapacity) % scrollbackCapacity
-        for (i in 0 until scrollbackSize) {
-            val idx = (start + i) % scrollbackCapacity
-            val row = scrollback[idx] ?: continue
-            out += row
-        }
-        return out.toTypedArray()
-    }
-
-    fun resize(newCols: Int, newRows: Int) {
-        // 9.6.1: refuse silently if size unchanged; otherwise clear
-        // primary. Proper reflow is 9.6.2 work.
-        if (newCols == cols && newRows == rows) return
-        for (i in primary.indices) primary[i] = TerminalCell(' ', currentAttributes)
-    }
+    private fun blankGrid(columns: Int, rowCount: Int): Array<TerminalCell> =
+        Array(columns * rowCount) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
 
     companion object {
-        const val DEFAULT_SCROLLBACK = 1000
+        const val DEFAULT_SCROLLBACK = 1_000
         const val TAB_WIDTH = 8
     }
 }
 
-/**
- * One row of the terminal. Wraps a fixed-length [TerminalCell] array.
- * Renderer reads it cell-by-cell; scrollback stores one of these per
- * detached row.
- */
+internal data class TerminalSnapshot(
+    val cols: Int,
+    val rows: Int,
+    val cursorRow: Int,
+    val cursorCol: Int,
+    val cells: Array<TerminalCell>,
+    val dirtyRows: IntArray,
+    val fullRedraw: Boolean
+) {
+    fun cellAt(row: Int, col: Int): TerminalCell = cells[row * cols + col]
+}
+
+/** One immutable row used by scrollback and resize reflow. */
 internal class TerminalCellArray(val cells: Array<TerminalCell>) {
     constructor(cols: Int) : this(Array(cols) { TerminalCell(' ', TerminalAttributes.DEFAULT) })
 
@@ -254,5 +310,5 @@ internal class TerminalCellArray(val cells: Array<TerminalCell>) {
     val size: Int get() = cells.size
 }
 
-/** A single char + its current attributes. Used both in grid and scrollback. */
+/** A single glyph cell plus its immutable rendition attributes. */
 internal data class TerminalCell(val char: Char, val attributes: TerminalAttributes)

@@ -3,10 +3,10 @@ package com.elysium.vanguard.core.runtime.terminal.render
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalAttributes
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalCell
+import com.elysium.vanguard.core.runtime.terminal.engine.TerminalSnapshot
 
 /**
  * PHASE 9.6.1 — Canvas-backed grid renderer.
@@ -36,7 +36,7 @@ internal class TerminalRenderer(
     private val cellWidthPx: Float,
     private val cellHeightPx: Float,
     /** Background of the grid; cells with "default" bg use this. */
-    private val themeBackground: Int = Color.parseColor("#0F1115"),
+    private val themeBackground: Int = Color.BLACK,
     /** Foreground of cells with default fg. */
     private val themeForeground: Int = Color.parseColor("#E4E7EB")
 ) {
@@ -62,48 +62,60 @@ internal class TerminalRenderer(
         offsetX: Float = 0f,
         offsetY: Float = 0f
     ) {
-        bgPaint.color = themeBackground
-        val gridWidth = cellWidthPx * buffer.primaryCols()
-        val gridHeight = cellHeightPx * buffer.primaryRows()
-        canvas.drawRect(offsetX, offsetY, offsetX + gridWidth, offsetY + gridHeight, bgPaint)
+        val snapshot = buffer.snapshot()
+        draw(canvas, snapshot, offsetX, offsetY)
+    }
 
-        for (r in 0 until buffer.primaryRows()) {
-            drawRow(canvas, buffer, r, offsetX, offsetY + r * cellHeightPx)
+    private fun draw(
+        canvas: Canvas,
+        snapshot: TerminalSnapshot,
+        offsetX: Float,
+        offsetY: Float
+    ) {
+        val rowsToDraw = if (snapshot.fullRedraw) IntArray(snapshot.rows) { it } else snapshot.dirtyRows
+        if (snapshot.fullRedraw) canvas.drawColor(themeBackground)
+        if (rowsToDraw.isEmpty()) return
+
+        for (row in rowsToDraw) {
+            drawRow(canvas, snapshot, row, offsetX, offsetY + row * cellHeightPx)
         }
 
+        if (!snapshot.fullRedraw && snapshot.cursorRow !in rowsToDraw) return
         // Cursor block: convention taken from xterm defaults. We
         // invert by drawing a foreground-tinted rect and then re-drawing
         // the character under it in background color — visually correct
         // even with empty cells.
-        val attributes = buffer.currentAttributes
+        val cell = snapshot.cellAt(snapshot.cursorRow, snapshot.cursorCol)
+        val attributes = cell.attributes
         cursorPaint.color = resolveFgColor(attributes)
-        val cx = offsetX + buffer.cursorCol * cellWidthPx
-        val cy = offsetY + buffer.cursorRow * cellHeightPx
+        val cx = offsetX + snapshot.cursorCol * cellWidthPx
+        val cy = offsetY + snapshot.cursorRow * cellHeightPx
         canvas.drawRect(cx, cy, cx + cellWidthPx, cy + cellHeightPx, cursorPaint)
         // Re-paint the (sometimes hidden) glyph in background color so
         // it stays readable when sitting on a same-color cell.
         glyphPaint.color = themeBackground
         val baseline = cy + cellHeightPx * 0.78f
-        val cell = buffer.cellAt(buffer.cursorRow, buffer.cursorCol)
         canvas.drawText(cell.char.toString(), cx, baseline, glyphPaint)
     }
 
     private fun drawRow(
         canvas: Canvas,
-        buffer: TerminalBuffer,
+        snapshot: TerminalSnapshot,
         rowIndex: Int,
         offsetX: Float,
         rowY: Float
     ) {
-        val cols = buffer.primaryCols()
+        val cols = snapshot.cols
+        bgPaint.color = themeBackground
+        canvas.drawRect(offsetX, rowY, offsetX + cols * cellWidthPx, rowY + cellHeightPx, bgPaint)
         var c = 0
         while (c < cols) {
-            val cell = buffer.cellAt(rowIndex, c)
+            val cell = snapshot.cellAt(rowIndex, c)
             val attributes = cell.attributes
             val start = c
             // Find the longest run of cells that shares the same
             // attributes — we batch the drawText call across the run.
-            while (c < cols && sameAttributes(buffer.cellAt(rowIndex, c), attributes)) {
+            while (c < cols && sameAttributes(snapshot.cellAt(rowIndex, c), attributes)) {
                 c += 1
             }
             // Background of the whole run if it asks for a non-default bg.
@@ -133,7 +145,7 @@ internal class TerminalRenderer(
                 // grid this allocates <2 KB per repaint and is dominated
                 // by the actual drawText cost.
                 val sb = StringBuilder(c - start)
-                for (k in start until c) sb.append(buffer.cellAt(rowIndex, k).char)
+                for (k in start until c) sb.append(snapshot.cellAt(rowIndex, k).char)
                 canvas.drawText(sb.toString(), offsetX + start * cellWidthPx, baseline, glyphPaint)
             }
         }
@@ -154,16 +166,12 @@ internal class TerminalRenderer(
         return a.attributes === b
     }
 
-    private fun resolveFgColor(a: TerminalAttributes): Int = resolveColor(
-        a.foregroundColor,
-        defaultColor = themeForeground,
-        isBold = a.isBold
+    private fun resolveFgColor(a: TerminalAttributes): Int = a.foregroundRgb?.orOpaque() ?: resolveColor(
+        a.foregroundColor, defaultColor = themeForeground, isBold = a.isBold
     )
 
-    private fun resolveBgColor(a: TerminalAttributes): Int = resolveColor(
-        a.backgroundColor,
-        defaultColor = themeBackground,
-        isBold = false
+    private fun resolveBgColor(a: TerminalAttributes): Int = a.backgroundRgb?.orOpaque() ?: resolveColor(
+        a.backgroundColor, defaultColor = themeBackground, isBold = false
     )
 
     /**
@@ -209,5 +217,4 @@ internal class TerminalRenderer(
     }
 }
 
-@Suppress("unused")
-private fun emptyRect(): Rect = Rect(0, 0, 0, 0)
+private fun Int.orOpaque(): Int = 0xFF000000.toInt() or this

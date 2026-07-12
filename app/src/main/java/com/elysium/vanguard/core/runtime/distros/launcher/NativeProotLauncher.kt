@@ -55,7 +55,7 @@ open class NativeProotLauncher(
 
     override val capabilities: LauncherCapabilities = LauncherCapabilities(
         canRunElfBinaries = bundledAbis.isNotEmpty(),
-        exposesPty = false,
+        exposesPty = true,
         supportsBindMounts = bundledAbis.isNotEmpty(),
         requiresRoot = false,
         abiSupport = bundledAbis

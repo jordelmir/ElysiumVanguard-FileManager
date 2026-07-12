@@ -19,14 +19,12 @@ import java.nio.file.Files
 class JailedDistroLauncherTest {
 
     @Test
-    fun `buildShellCommand injects a probe when script is empty`() {
+    fun `buildShellCommand opens an interactive shell when script is empty`() {
         val launcher = JailedDistroLauncher()
         val rootfs = Files.createTempDirectory("elysium-jailed-test").toFile()
         try {
             val cmd = launcher.buildShellCommand(rootfs, "")
-            assertEquals(listOf("/system/bin/sh", "-c"), cmd.take(2))
-            assertTrue(cmd[2].contains("echo"))
-            assertTrue(cmd[2].contains("pwd"))
+            assertEquals(listOf("/system/bin/sh", "-i"), cmd)
         } finally {
             rootfs.deleteRecursively()
         }
@@ -101,7 +99,7 @@ class JailedDistroLauncherTest {
         val launcher = JailedDistroLauncher()
         val caps = launcher.capabilities
         assertFalse(caps.canRunElfBinaries)
-        assertFalse(caps.exposesPty)
+        assertTrue(caps.exposesPty)
         assertFalse(caps.supportsBindMounts)
         assertFalse(caps.requiresRoot)
     }

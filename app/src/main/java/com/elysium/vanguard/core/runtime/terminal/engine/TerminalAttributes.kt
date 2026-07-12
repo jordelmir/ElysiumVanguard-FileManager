@@ -20,13 +20,24 @@ package com.elysium.vanguard.core.runtime.terminal.engine
 internal data class TerminalAttributes(
     val foregroundColor: Color,
     val backgroundColor: Color,
-    val flags: Int
+    val flags: Int,
+    /** Packed opaque RGB override from SGR 38/48; null means ANSI/default. */
+    val foregroundRgb: Int? = null,
+    val backgroundRgb: Int? = null
 ) {
     fun withForeground(color: Color): TerminalAttributes =
-        if (color === foregroundColor) this else copy(foregroundColor = color)
+        if (color === foregroundColor && foregroundRgb == null) this
+        else copy(foregroundColor = color, foregroundRgb = null)
 
     fun withBackground(color: Color): TerminalAttributes =
-        if (color === backgroundColor) this else copy(backgroundColor = color)
+        if (color === backgroundColor && backgroundRgb == null) this
+        else copy(backgroundColor = color, backgroundRgb = null)
+
+    fun withForegroundRgb(rgb: Int): TerminalAttributes =
+        copy(foregroundColor = Color.ForegroundDefault, foregroundRgb = rgb and 0x00FFFFFF)
+
+    fun withBackgroundRgb(rgb: Int): TerminalAttributes =
+        copy(backgroundColor = Color.BackgroundDefault, backgroundRgb = rgb and 0x00FFFFFF)
 
     fun withFlag(flag: Flag, on: Boolean): TerminalAttributes {
         val newFlags = if (on) flags or flag.mask else flags and flag.mask.inv()
@@ -40,7 +51,12 @@ internal data class TerminalAttributes(
      * colors in hand.
      */
     fun inverted(): TerminalAttributes =
-        copy(foregroundColor = backgroundColor, backgroundColor = foregroundColor)
+        copy(
+            foregroundColor = backgroundColor,
+            backgroundColor = foregroundColor,
+            foregroundRgb = backgroundRgb,
+            backgroundRgb = foregroundRgb
+        )
 
     val isBold: Boolean get() = flags and Flag.BOLD.mask != 0
     val isUnderline: Boolean get() = flags and Flag.UNDERLINE.mask != 0
@@ -51,7 +67,9 @@ internal data class TerminalAttributes(
         val DEFAULT = TerminalAttributes(
             foregroundColor = Color.ForegroundDefault,
             backgroundColor = Color.BackgroundDefault,
-            flags = 0
+            flags = 0,
+            foregroundRgb = null,
+            backgroundRgb = null
         )
     }
 

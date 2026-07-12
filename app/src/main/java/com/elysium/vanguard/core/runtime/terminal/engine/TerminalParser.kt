@@ -1,5 +1,10 @@
 package com.elysium.vanguard.core.runtime.terminal.engine
 
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+
 /**
  * PHASE 9.6.1 — VT100 / ECMA-48 escape-sequence parser.
  *
@@ -34,11 +39,37 @@ internal class TerminalParser(
     private val buffer: TerminalBuffer
 ) {
     /** Per VT100 §5.4: ground, escape, csi-entry, osc-string, etc. */
-    private enum class State { GROUND, ESCAPE, CSI_ENTRY, OSC_STRING }
+    private enum class State { GROUND, ESCAPE, CSI_ENTRY, OSC_STRING, OSC_ESCAPE }
     private var state: State = State.GROUND
     private val params: ArrayList<Int> = ArrayList(8)
     private var intermediate: Char = ' '
     private var oscBuffer: StringBuilder = StringBuilder(64)
+    private val utf8Decoder = StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    private var incompleteUtf8: ByteArray = ByteArray(0)
+
+    /**
+     * Consume raw PTY bytes. UTF-8 and escape state are both retained across
+     * arbitrary read boundaries, so a split emoji, CJK character or CSI prefix
+     * produces the same model as one contiguous read.
+     */
+    fun feed(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset) {
+        require(offset >= 0 && length >= 0 && offset + length <= bytes.size) {
+            "byte range is outside source array"
+        }
+        if (length == 0) return
+        val combined = ByteArray(incompleteUtf8.size + length)
+        incompleteUtf8.copyInto(combined)
+        bytes.copyInto(combined, incompleteUtf8.size, offset, offset + length)
+        val input = ByteBuffer.wrap(combined)
+        val output = CharBuffer.allocate(combined.size)
+        utf8Decoder.decode(input, output, false)
+        incompleteUtf8 = ByteArray(input.remaining())
+        input.get(incompleteUtf8)
+        output.flip()
+        if (output.hasRemaining()) feed(output)
+    }
 
     /**
      * Feed a chunk of text. Caller is responsible for UTF-8 decoding;
@@ -56,8 +87,22 @@ internal class TerminalParser(
                 State.ESCAPE -> handleEscape(c)
                 State.CSI_ENTRY -> handleCsiEntry(c)
                 State.OSC_STRING -> handleOscString(c)
+                State.OSC_ESCAPE -> handleOscEscape(c)
             }
         }
+    }
+
+    /** Flushes a final incomplete UTF-8 sequence as replacement text. */
+    fun finishInput() {
+        if (incompleteUtf8.isEmpty()) return
+        val input = ByteBuffer.wrap(incompleteUtf8)
+        val output = CharBuffer.allocate(incompleteUtf8.size)
+        utf8Decoder.decode(input, output, true)
+        utf8Decoder.flush(output)
+        utf8Decoder.reset()
+        incompleteUtf8 = ByteArray(0)
+        output.flip()
+        if (output.hasRemaining()) feed(output)
     }
 
     private fun handleGround(c: Char) {
@@ -226,12 +271,70 @@ internal class TerminalParser(
                     val c = TerminalAttributes.Color.fromAnsiIndex(op - 100)
                     if (c != null) attr = attr.withBackground(c)
                 }
-                // 38;5;n and 38;2;r;g;b are truecolor — not 9.6.1 scope.
+                38, 48 -> {
+                    val foreground = op == 38
+                    when (p.getOrNull(i + 1)) {
+                        5 -> {
+                            val rgb = p.getOrNull(i + 2)?.let(::ansi256ToRgb)
+                            if (rgb != null) {
+                                attr = if (foreground) attr.withForegroundRgb(rgb) else attr.withBackgroundRgb(rgb)
+                                i += 2
+                            }
+                        }
+                        2 -> {
+                            val red = p.getOrNull(i + 2)
+                            val green = p.getOrNull(i + 3)
+                            val blue = p.getOrNull(i + 4)
+                            if (red != null && green != null && blue != null) {
+                                val rgb = (red.coerceIn(0, 255) shl 16) or
+                                    (green.coerceIn(0, 255) shl 8) or blue.coerceIn(0, 255)
+                                attr = if (foreground) attr.withForegroundRgb(rgb) else attr.withBackgroundRgb(rgb)
+                                i += 4
+                            }
+                        }
+                    }
+                }
                 else -> { /* ignore unsupported SGR */ }
             }
             i += 1
         }
         buffer.currentAttributes = attr
+    }
+
+    private fun ansi256ToRgb(index: Int): Int? {
+        if (index !in 0..255) return null
+        if (index < 16) {
+            val color = TerminalAttributes.Color.fromAnsiIndex(index) ?: return null
+            return ansiColorRgb(color)
+        }
+        if (index in 16..231) {
+            val steps = intArrayOf(0, 95, 135, 175, 215, 255)
+            val cube = index - 16
+            return (steps[cube / 36] shl 16) or (steps[(cube / 6) % 6] shl 8) or steps[cube % 6]
+        }
+        val gray = 8 + (index - 232) * 10
+        return (gray shl 16) or (gray shl 8) or gray
+    }
+
+    private fun ansiColorRgb(color: TerminalAttributes.Color): Int = when (color) {
+        TerminalAttributes.Color.Black -> 0x000000
+        TerminalAttributes.Color.Red -> 0xCD3131
+        TerminalAttributes.Color.Green -> 0x0DBC79
+        TerminalAttributes.Color.Yellow -> 0xE5E510
+        TerminalAttributes.Color.Blue -> 0x2472C8
+        TerminalAttributes.Color.Magenta -> 0xBC3FBC
+        TerminalAttributes.Color.Cyan -> 0x11A8CD
+        TerminalAttributes.Color.White -> 0xE5E5E5
+        TerminalAttributes.Color.BrightBlack -> 0x666666
+        TerminalAttributes.Color.BrightRed -> 0xF14C4C
+        TerminalAttributes.Color.BrightGreen -> 0x23D18B
+        TerminalAttributes.Color.BrightYellow -> 0xF5F543
+        TerminalAttributes.Color.BrightBlue -> 0x3B8EEA
+        TerminalAttributes.Color.BrightMagenta -> 0xD670D6
+        TerminalAttributes.Color.BrightCyan -> 0x29B8DB
+        TerminalAttributes.Color.BrightWhite -> 0xFFFFFF
+        TerminalAttributes.Color.ForegroundDefault,
+        TerminalAttributes.Color.BackgroundDefault -> 0xFFFFFF
     }
 
     private fun handleOscString(c: Char) {
@@ -240,16 +343,30 @@ internal class TerminalParser(
         // state machine.
         when (c) {
             '\u0007' -> state = State.GROUND
-            '\u001b' -> {
-                // Expecting '\' next for ST; we drop straight to ground.
-                state = State.GROUND
+            '\u001b' -> state = State.OSC_ESCAPE
+            else -> if (oscBuffer.length < MAX_OSC_CHARS) oscBuffer.append(c)
+        }
+    }
+
+    private fun handleOscEscape(c: Char) {
+        when (c) {
+            '\\' -> state = State.GROUND // String Terminator: ESC \
+            '\u001b' -> Unit // retain OSC escape state for repeated ESC
+            else -> {
+                if (oscBuffer.length < MAX_OSC_CHARS - 1) {
+                    oscBuffer.append('\u001b').append(c)
+                }
+                state = State.OSC_STRING
             }
-            else -> oscBuffer.append(c)
         }
     }
 
     private fun resetParams() {
         params.clear()
         intermediate = ' '
+    }
+
+    companion object {
+        private const val MAX_OSC_CHARS = 8 * 1024
     }
 }

@@ -33,13 +33,10 @@ class JailedDistroLauncher(
 
     override fun buildShellCommand(rootfsDir: File, script: String): List<String> {
         require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
-        // We use `-c` only when the caller hands us a script; an empty
-        // script means "give me an interactive sh" — but interactive sh
-        // needs a tty, which Android's ProcessBuilder doesn't supply,
-        // so we degrade to a 1-shot `ls -al` probe instead. The UI
-        // shows a one-line caveat when this happens.
+        // The native terminal backend provides the controlling PTY, so an
+        // empty script opens a genuine interactive Android shell.
         return if (script.isBlank()) {
-            listOf(shellPath, "-c", "echo '[jailed] no PTY yet — phase 9.6.3.1'; pwd; ls -al /; exit")
+            listOf(shellPath, "-i")
         } else {
             listOf(shellPath, "-c", script)
         }

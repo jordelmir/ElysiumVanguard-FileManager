@@ -146,19 +146,77 @@ class TerminalBufferTest {
     }
 
     @Test
-    fun `resize refuses silently on same size and clears on different size`() {
+    fun `resize keeps same dimensions stable and reflows visible cells`() {
         val b = TerminalBuffer(cols = 4, rows = 2)
         b.putChar('a')
         // Same dims: nothing changes.
         b.resize(4, 2)
         assertEquals('a', b.cellAt(0, 0).char)
-        // Different dims: clears cells. We don't assert grid shape in
-        // 9.6.1 (resize doesn't reflow); we just verify nothing crashes.
+        // Different dimensions retain the visible terminal rather than
+        // blanking it, which is essential on rotation/fold changes.
         b.resize(8, 4)
+        assertEquals(8, b.primaryCols())
+        assertEquals(4, b.primaryRows())
+        assertEquals('a', b.cellAt(0, 0).char)
+    }
+
+    @Test
+    fun `snapshot consumes dirty rows without exposing partial grid mutations`() {
+        val b = TerminalBuffer(cols = 4, rows = 2)
+        val initial = b.snapshot()
+        assertEquals(2, initial.dirtyRows.size)
+        b.putChar('x')
+        val changed = b.snapshot()
+        assertEquals(intArrayOf(0).toList(), changed.dirtyRows.toList())
+        assertEquals('x', changed.cellAt(0, 0).char)
+        assertEquals(0, b.snapshot().dirtyRows.size)
     }
 }
 
 class TerminalParserTest {
+
+    @Test
+    fun `fragmented UTF-8 bytes produce the same cells as contiguous input`() {
+        val b = TerminalBuffer(cols = 8, rows = 1)
+        val parser = TerminalParser(b)
+        val bytes = "aéb".toByteArray(Charsets.UTF_8)
+        parser.feed(bytes, 0, 2) // a + first byte of é
+        parser.feed(bytes, 2, bytes.size - 2)
+
+        assertEquals('a', b.cellAt(0, 0).char)
+        assertEquals('é', b.cellAt(0, 1).char)
+        assertEquals('b', b.cellAt(0, 2).char)
+    }
+
+    @Test
+    fun `fragmented CSI bytes retain parser state`() {
+        val b = TerminalBuffer(cols = 8, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed(byteArrayOf(0x1B))
+        parser.feed("[31mR".toByteArray(Charsets.UTF_8))
+
+        assertEquals('R', b.cellAt(0, 0).char)
+        assertEquals(TerminalAttributes.Color.Red, b.cellAt(0, 0).attributes.foregroundColor)
+    }
+
+    @Test
+    fun `every byte fragmentation boundary matches contiguous terminal state`() {
+        val payload = "\u001b[31mR\u001b[0m é".toByteArray(Charsets.UTF_8)
+        val expected = TerminalBuffer(cols = 16, rows = 2).also { buffer ->
+            TerminalParser(buffer).feed(payload)
+        }.snapshot()
+
+        for (split in 0..payload.size) {
+            val actualBuffer = TerminalBuffer(cols = 16, rows = 2)
+            val parser = TerminalParser(actualBuffer)
+            parser.feed(payload, 0, split)
+            parser.feed(payload, split, payload.size - split)
+            val actual = actualBuffer.snapshot()
+            for (row in 0 until expected.rows) for (column in 0 until expected.cols) {
+                assertEquals("split=$split row=$row column=$column", expected.cellAt(row, column), actual.cellAt(row, column))
+            }
+        }
+    }
 
     @Test
     fun `plain ASCII writes go to the buffer`() {
@@ -244,6 +302,25 @@ class TerminalParserTest {
     }
 
     @Test
+    fun `SGR truecolor preserves exact uniform foreground and background`() {
+        val b = TerminalBuffer(cols = 4, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("\u001b[38;2;57;255;20;48;2;3;9;17mN")
+
+        assertEquals(0x39FF14, b.cellAt(0, 0).attributes.foregroundRgb)
+        assertEquals(0x030911, b.cellAt(0, 0).attributes.backgroundRgb)
+    }
+
+    @Test
+    fun `SGR 256 color resolves xterm cube values`() {
+        val b = TerminalBuffer(cols = 4, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("\u001b[38;5;196mR")
+
+        assertEquals(0xFF0000, b.cellAt(0, 0).attributes.foregroundRgb)
+    }
+
+    @Test
     fun `CUP moves cursor 1-based`() {
         val b = TerminalBuffer(cols = 10, rows = 5)
         val parser = TerminalParser(b)
@@ -286,5 +363,17 @@ class TerminalParserTest {
         assertEquals('o', b.cellAt(0, 4).char)
         assertEquals('w', b.cellAt(0, 5).char)
         assertEquals('d', b.cellAt(0, 9).char)
+    }
+
+    @Test
+    fun `OSC string terminator split across escape and slash does not print slash`() {
+        val b = TerminalBuffer(cols = 8, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("A\u001b]0;title\u001b")
+        parser.feed("\\B")
+
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals('B', b.cellAt(0, 1).char)
+        assertEquals(' ', b.cellAt(0, 2).char)
     }
 }

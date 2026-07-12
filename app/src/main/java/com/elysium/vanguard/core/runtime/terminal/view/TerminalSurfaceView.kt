@@ -71,6 +71,7 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     var onInput: ((ByteArray) -> Unit)? = null
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        session?.buffer?.requestFullRedraw()
         drawOnce()
     }
 
@@ -88,9 +89,10 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         // foldables and tablets use the available terminal canvas.
         cellHeightPx = 16f * resources.displayMetrics.density * resources.configuration.fontScale
         cellWidthPx = cellHeightPx * 0.6f  // monospace aspect ≈ 0.6
-        cols = (width / cellWidthPx).toInt().coerceIn(40, 220)
-        rows = (height / cellHeightPx).toInt().coerceIn(12, 120)
+        cols = (width / cellWidthPx).toInt().coerceIn(20, 220)
+        rows = (height / cellHeightPx).toInt().coerceIn(6, 120)
         session?.resize(cols, rows)
+        session?.buffer?.requestFullRedraw()
         renderer = TerminalRenderer(cellWidthPx, cellHeightPx)
     }
 
@@ -109,12 +111,7 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         val canvas: Canvas? = surfaceHolder.lockCanvas()
         if (canvas == null) return
         try {
-            // Center the grid inside the surface if there's spare room.
-            val gridW = buffer.primaryCols() * cellWidthPx
-            val gridH = buffer.primaryRows() * cellHeightPx
-            val offsetX = (canvas.width - gridW) / 2f
-            val offsetY = (canvas.height - gridH) / 2f
-            renderer!!.draw(canvas, buffer, offsetX, offsetY)
+            renderer!!.draw(canvas, buffer)
         } finally {
             surfaceHolder.unlockCanvasAndPost(canvas)
         }
@@ -136,11 +133,10 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         // correctness over completeness: Ctrl-A..Z, Enter, Backspace,
         // Tab, Esc, arrows.
         val bytes: ByteArray? = when (val key = mapKeyEvent(event, eventCode)) {
-            // ProcessBuilder gives us a pipe rather than a PTY. A pipe
-            // has no terminal line discipline to translate CR to LF,
-            // so Enter must send a real newline.
-            KeyStroke.Enter -> "\n".toByteArray()
-            KeyStroke.Backspace -> byteArrayOf(0x08)
+            // A real PTY preserves terminal line discipline: terminal Enter
+            // is carriage-return and backspace defaults to DEL in xterm.
+            KeyStroke.Enter -> byteArrayOf(0x0D)
+            KeyStroke.Backspace -> byteArrayOf(0x7F)
             KeyStroke.Tab -> byteArrayOf(0x09)
             KeyStroke.Esc -> byteArrayOf(0x1B)
             KeyStroke.Up -> "\u001b[A".toByteArray()

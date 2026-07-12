@@ -12,8 +12,9 @@ import java.io.File
  * with the rootfs as `cwd`. That gives the user an Android shell pointed
  * at the rootfs directory — useful for `ls`, `cat`, `find`, but it never
  * runs ANY of the binaries the distro actually ships. No `apt`, no `apk`,
- * no `bash`, no `busybox`. The user sees "no PTY yet" in the buffer and
- * the session exits.
+ * no `bash`, no `busybox`. The native terminal backend now supplies the PTY;
+ * this launcher remains limited by the lack of a rootfs namespace, not by
+ * terminal interaction.
  *
  * `NativeProotLauncher` (Phase 9.6.4) wants to wire `libproot.so` but the
  * binary is not vendored yet, so `isAvailable` always returns false.
@@ -71,10 +72,7 @@ class DirectExecDistroLauncher(
         // loader path is reachable via our LD_LIBRARY_PATH. Marking this
         // true makes the UI stop showing the "ELF unavailable" badge.
         canRunElfBinaries = true,
-        // Direct-Exec still doesn't expose a real PTY; the terminal
-        // screen drives the user's bytes through stdin. Same shape as
-        // JailedDistroLauncher — UI behaves identically.
-        exposesPty = false,
+        exposesPty = true,
         // No bind mounts. The rootfs is the world.
         supportsBindMounts = false,
         // No root, no proot, no tricks.

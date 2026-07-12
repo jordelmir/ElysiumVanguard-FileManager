@@ -232,7 +232,7 @@ class DirectExecDistroLauncherTest {
         val launcher = DirectExecDistroLauncher()
         assertEquals(LauncherKind.DIRECT_EXEC, launcher.kind)
         assertTrue(launcher.capabilities.canRunElfBinaries)
-        assertFalse(launcher.capabilities.exposesPty)
+        assertTrue(launcher.capabilities.exposesPty)
         assertFalse(launcher.capabilities.supportsBindMounts)
         assertFalse(launcher.capabilities.requiresRoot)
     }

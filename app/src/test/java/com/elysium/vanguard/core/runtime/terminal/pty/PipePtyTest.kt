@@ -65,6 +65,7 @@ class PipePtyTest {
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun `factory returns a pipe-backed PtyPipe`() {
         val pty = PtyFactory.create()
         assertTrue(pty is PipePty)

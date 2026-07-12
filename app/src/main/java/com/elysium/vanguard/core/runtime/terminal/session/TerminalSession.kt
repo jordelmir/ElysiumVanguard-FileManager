@@ -143,7 +143,6 @@ class TerminalSession(
      */
     private fun pump(nativePty: NativePty): Job = sessionScope.launch {
         val buf = ByteArray(PUMP_CHUNK)
-        val decoder = Utf8LineDecoder()
         while (isActive) {
             val n = try {
                 nativePty.read(buf)
@@ -155,12 +154,13 @@ class TerminalSession(
             }
             if (n < 0) break
             if (n == 0) continue
-            val chunk = decoder.append(buf, n)
-            if (chunk.isNotEmpty()) {
-                parser.feed(chunk)
-                _output.tryEmit(chunk)
-            }
+            parser.feed(buf, length = n)
+            // Output flow is a repaint signal. The terminal model itself is
+            // fed raw bytes above, so a split UTF-8 sequence cannot corrupt
+            // rendering merely because this debug-facing chunk is incomplete.
+            _output.tryEmit(String(buf, 0, n, Charsets.UTF_8))
         }
+        parser.finishInput()
     }
 
     /**
@@ -330,51 +330,4 @@ class TerminalSession(
         }
         return environment
     }
-}
-
-/**
- * UTF-8 line-aware decoder.
- *
- * Process.stdout delivers raw bytes; we want to surface text to the UI
- * in reasonably-sized chunks (not character-by-character, which would be
- * prohibitively slow through Flow). We decode per chunk in one shot,
- * but guard against split multi-byte sequences at chunk boundaries by
- * buffering the unfinished tail until the next chunk arrives.
- *
- * Not a full streaming UTF-8 decoder (those reserve ~3 bytes); the
- * chunk size is 4 KB so a 3-byte ledger per stream is negligible.
- */
-private class Utf8LineDecoder {
-    private val pending: ByteArrayOutputStream = ByteArrayOutputStream()
-
-    fun append(buf: ByteArray, len: Int): String {
-        pending.write(buf, 0, len)
-        // Try to decode everything pending. Malformed sequences at this
-        // point would only happen if the producer used invalid UTF-8;
-        // we fall back to lossy in that case (charset-with-replace is
-        // intentionally avoided to keep memory tight).
-        val combined = pending.toByteArray()
-        pending.reset()
-        return try {
-            String(combined, Charsets.UTF_8)
-        } catch (_: Exception) {
-            String(combined, Charsets.ISO_8859_1)
-        }
-    }
-}
-
-/** Tiny local BAOS to avoid pulling `java.io.BufferedOutputStream` here. */
-private class ByteArrayOutputStream {
-    private var buf: ByteArray = ByteArray(64)
-    private var size: Int = 0
-    fun write(b: ByteArray, off: Int, len: Int) {
-        if (size + len > buf.size) {
-            val newSize = (size + len).coerceAtLeast(buf.size * 2)
-            buf = buf.copyOf(newSize)
-        }
-        System.arraycopy(b, off, buf, size, len)
-        size += len
-    }
-    fun reset() { size = 0 }
-    fun toByteArray(): ByteArray = buf.copyOf(size)
 }

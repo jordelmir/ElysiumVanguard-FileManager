@@ -18,10 +18,7 @@ data class LauncherCapabilities(
     val canRunElfBinaries: Boolean,
 
     /**
-     * Whether the launched shell is interactive (PTY-friendly). Phase
-     * 9.6.3 ships `false` everywhere because Android's ProcessBuilder
-     * gives us a pipe, not a PTY; 9.6.3.1 adds PTY via Termux
-     * `termux-pty`.
+     * Whether the terminal backend gives this launcher a real interactive PTY.
      */
     val exposesPty: Boolean,
 
@@ -50,7 +47,7 @@ data class LauncherCapabilities(
          */
         val JAILED_BASELINE = LauncherCapabilities(
             canRunElfBinaries = false,
-            exposesPty = false,
+            exposesPty = true,
             supportsBindMounts = false,
             requiresRoot = false,
             abiSupport = emptySet()
@@ -61,7 +58,7 @@ data class LauncherCapabilities(
          */
         val PROOT_TARGET = LauncherCapabilities(
             canRunElfBinaries = true,
-            exposesPty = false,
+            exposesPty = true,
             supportsBindMounts = true,
             requiresRoot = false,
             abiSupport = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
