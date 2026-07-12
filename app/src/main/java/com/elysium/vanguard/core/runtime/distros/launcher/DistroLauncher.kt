@@ -54,6 +54,14 @@ interface DistroLauncher {
     fun buildProbeCommand(rootfsDir: java.io.File, args: List<String>): List<String>
 
     /**
+     * Environment required by the host-side launcher process. This is
+     * deliberately separate from variables passed inside the guest:
+     * PRoot needs its loader/library paths before the guest exists,
+     * while direct-exec needs rootfs paths for Android's linker.
+     */
+    fun environmentVariables(rootfsDir: java.io.File): List<Pair<String, String>> = emptyList()
+
+    /**
      * Cheap check whether this launcher can produce a working process for
      * the given rootfs (e.g. JailedDistroLauncher needs
      * `rootfsDir/etc/os-release`; proot needs a populated ELF tree).

@@ -100,6 +100,14 @@ android {
         kotlinCompilerExtensionVersion = "1.5.4"
     }
     packaging {
+        jniLibs {
+            // PRoot is shipped as a PIE executable under lib/<abi> so
+            // Android grants it executable permissions. It must be
+            // extracted to applicationInfo.nativeLibraryDir; a binary
+            // stored only inside the APK zip cannot be started by
+            // ProcessBuilder.
+            useLegacyPackaging = true
+        }
         resources {
             // META-INF conflicts come from multi-jar deps like Apache SSHD
             // (cli + contrib + sftp all publish overlapping META-INF entries).

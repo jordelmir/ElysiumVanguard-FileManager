@@ -83,10 +83,20 @@ class DistroLauncherRegistry(
          * over Jailed when the rootfs contains a runnable shell.
          * Direct-Exec is the workhorse until `libproot.so` lands.
          */
-        fun production(supportedAbis: Set<String>): DistroLauncherRegistry =
+        fun production(
+            supportedAbis: Set<String>,
+            nativeLibrary: ProotNativeLibrary? = null,
+            prootTmpDir: File? = null,
+            mounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList()
+        ): DistroLauncherRegistry =
             DistroLauncherRegistry(
                 listOf(
-                    NativeProotLauncher(bundledAbis = supportedAbis),
+                    NativeProotLauncher(
+                        bundledAbis = supportedAbis,
+                        nativeLibrary = nativeLibrary,
+                        runtimeTmpDir = prootTmpDir,
+                        additionalMounts = mounts
+                    ),
                     DirectExecDistroLauncher(),
                     JailedDistroLauncher()
                 )

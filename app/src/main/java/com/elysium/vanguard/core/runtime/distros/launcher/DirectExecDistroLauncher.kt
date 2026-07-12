@@ -140,6 +140,9 @@ class DirectExecDistroLauncher(
         )
     }
 
+    override fun environmentVariables(rootfsDir: File): List<Pair<String, String>> =
+        defaultEnvironment(rootfsDir)
+
     /**
      * PHASE 10.4 — Returns the absolute path of the shell this launcher
      * would invoke, or `null` when [rootfsDir] doesn't have a runnable

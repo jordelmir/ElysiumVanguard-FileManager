@@ -38,23 +38,16 @@ object DistroCatalog {
             id = "debian-stable",
             displayName = "Debian Stable",
             family = DistroFamily.DEBIAN,
-            version = "12 (Bookworm)",
+            version = "13 (Trixie)",
             approxSizeBytes = 380L * MB,
             minAndroidVersion = 26,
-            rootfsUrl = "https://deb.debian.org/debian/dists/bookworm/main/installer-arm64/current/images/netboot/mini.iso",
-            rootfsKind = RootfsKind.BootstrapTarball,
-            bootstrapCommand = listOf(
-                // Debian doesn't ship a single rootfs tarball the way
-                // Ubuntu does. 9.6.2: fetch the bootstrap tar via
-                // debootstrap-style chroot-equivalent when run inside an
-                // existing Linux. First-build shortcut: pull the Ubuntu
-                // base (same family, true tarball) until we have a real
-                // debootstrap path on Android.
-                "/debootstrap/debian", "stable",
-                "\$ELYSIUM_ROOTFS"
-            ),
+            rootfsUrl = "https://github.com/termux/proot-distro/releases/download/v4.29.0/debian-trixie-aarch64-pd-v4.29.0.tar.xz",
+            rootfsKind = RootfsKind.TarXz,
+            bootstrapCommand = null,
             packageManager = "apt",
-            homepage = "https://www.debian.org/"
+            homepage = "https://www.debian.org/",
+            sha256 = "3834a11cbc6496935760bdc20cca7e2c25724d0cd8f5e4926da8fd5ca1857918",
+            stripComponents = 1
         ),
         Distro(
             id = "ubuntu-noble",
@@ -63,24 +56,26 @@ object DistroCatalog {
             version = "24.04 (Noble)",
             approxSizeBytes = 420L * MB,
             minAndroidVersion = 26,
-            rootfsUrl = "https://cdimage.ubuntu.com/ubuntu-base/noble/daily/current/noble-base-arm64.tar.gz",
+            rootfsUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/noble/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
             rootfsKind = RootfsKind.TarGz,
             bootstrapCommand = null,
             packageManager = "apt",
-            homepage = "https://ubuntu.com/"
+            homepage = "https://ubuntu.com/",
+            sha256 = "04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2"
         ),
         Distro(
             id = "alpine-latest",
             displayName = "Alpine Linux",
             family = DistroFamily.MUSL,
-            version = "latest (3.21+)",
+            version = "3.24.0",
             approxSizeBytes = 60L * MB,
             minAndroidVersion = 26,
-            rootfsUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/arm64/alpine-minirootfs-3.21.2-arm64.tar.gz",
+            rootfsUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.0-aarch64.tar.gz",
             rootfsKind = RootfsKind.TarGz,
             bootstrapCommand = null,
             packageManager = "apk",
-            homepage = "https://alpinelinux.org/"
+            homepage = "https://alpinelinux.org/",
+            sha256 = "4b8cd66a6688b2a87276c39843ed89c3a06d9534fc6a5823c586aff2696c1f2a"
         ),
         Distro(
             id = "arch-arm",
@@ -89,11 +84,13 @@ object DistroCatalog {
             version = "rolling",
             approxSizeBytes = 350L * MB,
             minAndroidVersion = 26,
-            rootfsUrl = "https://archlinuxarm.org/os/ArchLinuxARM-aarch64.tar.gz",
-            rootfsKind = RootfsKind.TarGz,
+            rootfsUrl = "https://github.com/termux/proot-distro/releases/download/v4.34.2/archlinux-aarch64-pd-v4.34.2.tar.xz",
+            rootfsKind = RootfsKind.TarXz,
             bootstrapCommand = null,
             packageManager = "pacman",
-            homepage = "https://archlinuxarm.org/"
+            homepage = "https://archlinuxarm.org/",
+            sha256 = "dabc2382ddcb725969cf7b9e2f3b102ec862ea6e0294198a30c71e9a4b837f81",
+            stripComponents = 1
         )
     )
 
@@ -144,7 +141,11 @@ data class Distro(
      */
     val bootstrapCommand: List<String>?,
     val packageManager: String,
-    val homepage: String
+    val homepage: String,
+    /** Optional lowercase SHA-256 of the downloaded archive. */
+    val sha256: String? = null,
+    /** Number of archive path segments removed before extraction. */
+    val stripComponents: Int = 0
 )
 
 /** Supported distro families. Each carries the install strategy. */

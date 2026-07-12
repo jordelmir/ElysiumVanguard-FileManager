@@ -38,22 +38,17 @@ open class NativeProotLauncher(
      * Where to look for a binary outside the APK. Phase 9.6.3 leaves
      * this empty; the resolver also looks in Termux's well-known paths.
      */
-    private val externalBinarySearchPaths: List<File> = emptyList(),
-
-    /**
-     * PHASE 9.6.4 — Optional filesystem bridge provider. When the
-     * launcher builds a command line it queries this for the bind
-     * mounts to encode as `-b` flags. The injected default pulls
-     * from the [com.elysium.vanguard.core.runtime.bridge.ElysiumNamespaces]
-     * source.
-     */
-    private val bridge: com.elysium.vanguard.core.runtime.bridge.FilesystemBridge = com.elysium.vanguard.core.runtime.bridge.FilesystemBridge,
-
     /**
      * PHASE 9.6.4 — Optional native library detector. Production code
      * wires a real one; tests can supply a fake.
      */
-    private val nativeLibrary: ProotNativeLibrary? = null
+    private val nativeLibrary: ProotNativeLibrary? = null,
+
+    /** Writable location for PRoot glue files and temporary state. */
+    private val runtimeTmpDir: File? = null,
+
+    /** Host paths explicitly exposed inside the guest namespace. */
+    private val additionalMounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList()
 ) : DistroLauncher {
 
     override val kind: LauncherKind = LauncherKind.NATIVE_PROOT
@@ -74,38 +69,76 @@ open class NativeProotLauncher(
             // [isAvailable] and use [JailedDistroLauncher] instead.
             return listOf("proot-missing")
         }
-        // PHASE 9.6.4 — Real proot command with bind mounts.
+        val location = nativeLibrary?.location ?: return listOf("proot-missing")
+        // Real PRoot command. The executable is a PIE shipped in
+        // nativeLibraryDir, not a symbolic command resolved through PATH.
         val args = ArrayList<String>()
-        args += "proot"
+        args += location.path.absolutePath
+        args += "--kill-on-exit"
+        args += "--link2symlink"
         args += "-0"
         args += "-r"
         args += rootfsDir.absolutePath
-        // Bind mounts: query the bridge for the active namespaces.
-        for (mount in bridge.standardMounts(sdcardPath = null, vaultPath = null)) {
+        listOf("/dev", "/proc", "/sys").forEach { hostPath ->
+            if (File(hostPath).exists()) {
+                args += "-b"
+                args += hostPath
+            }
+        }
+        for (mount in additionalMounts) {
+            if (!File(mount.hostPath).exists()) continue
+            // PRoot's basic bind option does not provide a trustworthy
+            // read-only guarantee. Fail closed until the filesystem broker
+            // can enforce that policy instead of silently widening access.
+            if (mount.readOnly) continue
             args += "-b"
             args += "${mount.hostPath}:${mount.guestPath}"
         }
+        args += "-w"
+        args += "/root"
+        args += "/usr/bin/env"
+        args += "-i"
+        args += "HOME=/root"
+        args += "USER=root"
+        args += "LOGNAME=root"
+        args += "SHELL=/bin/sh"
+        args += "TERM=xterm-256color"
+        args += "LANG=C.UTF-8"
+        args += "TMPDIR=/tmp"
+        args += "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         args += "/bin/sh"
-        args += "-c"
-        args += if (script.isBlank()) {
-            "echo '[proot] ready'; exec /bin/sh"
+        if (script.isBlank()) {
+            args += "-l"
         } else {
-            script
+            args += "-lc"
+            args += script
         }
         return args
     }
 
     override fun buildProbeCommand(rootfsDir: File, args: List<String>): List<String> {
         require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
-        val out = ArrayList<String>()
-        out += "proot"
-        out += "-0"
-        out += "-r"
-        out += rootfsDir.absolutePath
-        out += "/bin/sh"
-        out += "-c"
-        out += args.joinToString(" ")
-        return out
+        return buildShellCommand(
+            rootfsDir = rootfsDir,
+            script = args.joinToString(" ") { shellQuote(it) }
+        )
+    }
+
+    override fun environmentVariables(rootfsDir: File): List<Pair<String, String>> {
+        val location = nativeLibrary?.location ?: return emptyList()
+        val libraryDir = location.path.parentFile?.absolutePath ?: return emptyList()
+        val tmp = runtimeTmpDir ?: File(rootfsDir.parentFile, "proot-tmp")
+        if (!tmp.isDirectory && !tmp.mkdirs()) return emptyList()
+        return listOf(
+            "LD_LIBRARY_PATH" to libraryDir,
+            "PROOT_LOADER" to location.loaderPath.absolutePath,
+            "PROOT_TMP_DIR" to tmp.absolutePath,
+            // Android vendor kernels differ substantially. Disabling
+            // seccomp acceleration trades a little speed for predictable
+            // behavior across Android 8-16 and foldable OEM kernels.
+            "PROOT_NO_SECCOMP" to "1",
+            "PROOT_DONT_POLLUTE_ROOTFS" to "1"
+        )
     }
 
     /**
@@ -122,7 +155,13 @@ open class NativeProotLauncher(
      */
     override fun isAvailable(rootfsDir: File): Boolean {
         if (!rootfsDir.isDirectory) return false
-        if (nativeLibrary == null) return false
-        return nativeLibrary.location != null
+        val location = nativeLibrary?.location ?: return false
+        return location.path.isFile &&
+            location.path.length() > 0L &&
+            location.loaderPath.isFile &&
+            location.loaderPath.length() > 0L
     }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
 }

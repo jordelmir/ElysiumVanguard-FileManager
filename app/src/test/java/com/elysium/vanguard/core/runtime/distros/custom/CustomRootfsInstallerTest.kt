@@ -3,6 +3,8 @@ package com.elysium.vanguard.core.runtime.distros.custom
 import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroFamily
 import com.elysium.vanguard.core.runtime.distros.RootfsKind
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -51,43 +53,37 @@ class CustomRootfsInstallerTest {
         // The tar file we want:
         //   entry 1: directory "etc/"
         //   entry 2: regular file "etc/os-release" (content "NAME=elysium-test\n....\n")
-        // Two 512-byte headers + payload + two 512-byte end-of-archive
-        // blocks. We hand-roll because the existing extractor (9.6.2)
-        // already proved this code path works.
-        // Payload is exactly 22 bytes so the header size matches.
-        // "NAME=elysium-test\n1234" is 22 chars (17 + \n + 4 digits).
         val payload = "NAME=elysium-test\n1234".toByteArray(Charsets.UTF_8)
         check(payload.size == 22) { "payload size drifted (got ${payload.size}); update the assertion" }
-        val tarBytes = ByteArray(512 * 4)
-        writeTarHeader(
-            tarBytes, 0,
-            name = "etc",
-            size = 0L,
-            typeFlag = '5'
-        )
-        writeTarHeader(
-            tarBytes, 512,
-            name = "etc/os-release",
-            size = payload.size.toLong(),
-            typeFlag = '0'
-        )
-        System.arraycopy(payload, 0, tarBytes, 1024, payload.size)
+        val raw = java.io.ByteArrayOutputStream()
+        TarArchiveOutputStream(raw).use { tar ->
+            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+            addDirectory(tar, "etc/")
+            addFile(tar, "etc/os-release", payload, 0b110_100_100)
+            addDirectory(tar, "bin/")
+            addFile(tar, "bin/sh", "#!/bin/sh\n".toByteArray(), 0b111_101_101)
+        }
+        val tarBytes = raw.toByteArray()
         return if (gzip) gzipEncode(tarBytes) else tarBytes
     }
 
-    private fun writeTarHeader(buf: ByteArray, offset: Int, name: String, size: Long, typeFlag: Char) {
-        // name (offset 0, length 100)
-        val nameBytes = name.toByteArray(Charsets.UTF_8)
-        System.arraycopy(nameBytes, 0, buf, offset, nameBytes.size.coerceAtMost(100))
-        // size (offset 124, length 12) octal
-        val sizeStr = java.lang.Long.toOctalString(size)
-        val sizeField = ("%-11s ".format(sizeStr)).toByteArray(Charsets.US_ASCII)
-        System.arraycopy(sizeField, 0, buf, offset + 124, sizeField.size)
-        // typeflag at offset 156
-        buf[offset + 156] = typeFlag.code.toByte()
-        // version "ustar\0" at offset 257
-        val magic = "ustar".toByteArray(Charsets.US_ASCII)
-        System.arraycopy(magic, 0, buf, offset + 257, 5)
+    private fun addDirectory(tar: TarArchiveOutputStream, name: String) {
+        val entry = TarArchiveEntry(name).apply {
+            mode = 0b111_101_101
+            size = 0L
+        }
+        tar.putArchiveEntry(entry)
+        tar.closeArchiveEntry()
+    }
+
+    private fun addFile(tar: TarArchiveOutputStream, name: String, bytes: ByteArray, fileMode: Int) {
+        val entry = TarArchiveEntry(name).apply {
+            mode = fileMode
+            size = bytes.size.toLong()
+        }
+        tar.putArchiveEntry(entry)
+        tar.write(bytes)
+        tar.closeArchiveEntry()
     }
 
     private fun gzipEncode(raw: ByteArray): ByteArray {

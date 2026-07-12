@@ -27,6 +27,7 @@ import java.util.Locale
  */
 class ProotNativeLibrary(
     private val bundledAbis: Set<String>,
+    private val nativeLibraryDir: File?,
     private val userProotDir: File?,
     private val termuxProotCandidates: List<File>
 ) {
@@ -58,16 +59,16 @@ class ProotNativeLibrary(
     fun bundledAbis(): Set<String> = bundledAbis
 
     private fun detect(): ProotLocation? {
-        // First pass: bundled candidates inside the APK.
-        for (abi in bundledAbis) {
-            val candidate = File(bundledAbisDir(), "$abi/libproot.so")
-            if (candidate.isFile || looksLikeBundled(candidate)) {
-                return ProotLocation(
-                    source = ProotLocation.Source.BUNDLED,
-                    path = candidate,
-                    abi = abi
-                )
-            }
+        // Android extracts APK native libraries into one ABI-specific
+        // applicationInfo.nativeLibraryDir. Unlike the old placeholder,
+        // this is the real executable path ProcessBuilder can invoke.
+        val bundled = nativeLibraryDir?.let { File(it, "libproot.so") }
+        if (bundled?.isFile == true) {
+            return ProotLocation(
+                source = ProotLocation.Source.BUNDLED,
+                path = bundled,
+                abi = bundledAbis.firstOrNull() ?: "unknown"
+            )
         }
         // Second pass: user-installed under filesDir/proot/<abi>/.
         val userDir = userProotDir
@@ -104,22 +105,6 @@ class ProotNativeLibrary(
         return null
     }
 
-    /**
-     * APK-merged native libs extract to `<apkExtractDir>/lib/<abi>/...`
-     * at install; on a live device they're at `<dataDir>/lib/<abi>/...`.
-     * We can't actually see that filesystem location without
-     * `ApplicationInfo.nativeLibraryDir`, but Phase 9.6.4 only needs
-     * this for tests. The real detection path is in
-     * [com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher].
-     */
-    private fun bundledAbisDir(): File =
-        File("/data/app/~~enoYnooWNOPQvY6LmvD3w==/lib") // placeholder; resolved via context in prod
-
-    private fun looksLikeBundled(f: File): Boolean {
-        // Tests can opt into "bundled present" by writing a stub here.
-        return f.isFile
-    }
-
     companion object {
         /**
          * The default [ProotNativeLibrary] wired against a typical
@@ -129,9 +114,11 @@ class ProotNativeLibrary(
         fun default(
             abis: Set<String>,
             userProotDir: File?,
+            nativeLibraryDir: File? = null,
             termuxProotCandidates: List<File> = DEFAULT_TERMUX_PROBES
         ): ProotNativeLibrary = ProotNativeLibrary(
             bundledAbis = abis,
+            nativeLibraryDir = nativeLibraryDir,
             userProotDir = userProotDir,
             termuxProotCandidates = termuxProotCandidates
         )
@@ -141,8 +128,8 @@ class ProotNativeLibrary(
          * order; the first that exists wins.
          */
         val DEFAULT_TERMUX_PROBES: List<File> = listOf(
-            File("/data/data/com.termux/files/usr/libexec/proot"),
-            File("/data/user/0/com.termux/files/usr/libexec/proot"),
+            File("/data/data/com.termux/files/usr/bin/proot"),
+            File("/data/user/0/com.termux/files/usr/bin/proot"),
             File("/system/bin/proot")
         )
     }
@@ -163,4 +150,14 @@ data class ProotLocation(
 
     val displayPath: String
         get() = "${source.name.lowercase(Locale.US)} → ${path.absolutePath} (abi=$abi)"
+
+    val loaderPath: File
+        get() = when (source) {
+            Source.BUNDLED, Source.USER_INSTALLED -> File(path.parentFile, "libproot_loader.so")
+            Source.TERMUX -> {
+                val usrDir = path.parentFile?.parentFile
+                if (usrDir != null) File(usrDir, "libexec/proot/loader")
+                else File(path.parentFile, "loader")
+            }
+        }
 }

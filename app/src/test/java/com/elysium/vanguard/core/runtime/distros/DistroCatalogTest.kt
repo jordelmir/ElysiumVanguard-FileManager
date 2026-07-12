@@ -1,9 +1,16 @@
 package com.elysium.vanguard.core.runtime.distros
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
 
 class DistroCatalogTest {
 
@@ -40,6 +47,15 @@ class DistroCatalogTest {
                 "URL should be https for ${d.id}",
                 d.rootfsUrl.startsWith("https://")
             )
+            assertTrue(
+                "Catalog archive should have a pinned SHA-256 for ${d.id}",
+                d.sha256?.matches(Regex("[0-9a-f]{64}")) == true
+            )
+            assertTrue(
+                "Catalog kind must be directly extractable for ${d.id}",
+                d.rootfsKind == RootfsKind.TarGz || d.rootfsKind == RootfsKind.TarXz
+            )
+            assertTrue("stripComponents must be non-negative for ${d.id}", d.stripComponents >= 0)
         }
     }
 
@@ -74,6 +90,118 @@ class DistroRootfsExtractorTest {
     }
 
     @Test
+    fun `pax header keeps the next tar entry aligned and applies its path`() {
+        val paxRecord = "25 path=ignored-name.txt\n"
+        val archive = buildTinyTarEntry(
+            name = "PaxHeader",
+            content = paxRecord,
+            typeFlag = 'x'
+        ) + buildTinyTar("placeholder.txt", "survived\n")
+        val tmpDir = kotlin.io.path.createTempDirectory("distro-pax-test").toFile()
+
+        DistroRootfsExtractor().extract(
+            stream = archive.inputStream(),
+            destDir = tmpDir,
+            kind = RootfsKind.Custom
+        )
+
+        val extracted = File(tmpDir, "ignored-name.txt")
+        assertTrue("PAX path should be applied to the following entry", extracted.isFile)
+        assertEquals("survived\n", extracted.readText())
+    }
+
+    @Test
+    fun `strip components flattens a wrapped distro archive`() {
+        val archive = buildTinyTarEntry("wrapped/", "", '5') +
+            buildTinyTar(
+                "wrapped/etc/os-release", "NAME=Wrapped\n",
+                "wrapped/bin/sh", "#!/bin/sh\n"
+            )
+        val tmpDir = kotlin.io.path.createTempDirectory("distro-strip-test").toFile()
+
+        DistroRootfsExtractor().extract(
+            stream = archive.inputStream(),
+            destDir = tmpDir,
+            kind = RootfsKind.Custom,
+            stripComponents = 1
+        )
+
+        assertTrue(File(tmpDir, "etc/os-release").isFile)
+        assertTrue(File(tmpDir, "bin/sh").isFile)
+        assertFalse(File(tmpDir, "wrapped").exists())
+    }
+
+    @Test
+    fun `rejects parent traversal before writing outside rootfs`() {
+        val archive = buildTinyTar("../escape.txt", "blocked")
+        val parent = kotlin.io.path.createTempDirectory("distro-traversal-test").toFile()
+        val rootfs = File(parent, "rootfs")
+
+        expectExtractionFailure {
+            DistroRootfsExtractor().extract(
+                stream = archive.inputStream(),
+                destDir = rootfs,
+                kind = RootfsKind.Custom
+            )
+        }
+
+        assertFalse(File(parent, "escape.txt").exists())
+    }
+
+    @Test
+    fun `rejects symlink targets that escape rootfs`() {
+        val archive = ByteArrayOutputStream().use { bytes ->
+            TarArchiveOutputStream(bytes).use { tar ->
+                val symlink = TarArchiveEntry("usr/bin/escape", TarArchiveEntry.LF_SYMLINK).apply {
+                    linkName = "../../../outside"
+                    size = 0L
+                }
+                tar.putArchiveEntry(symlink)
+                tar.closeArchiveEntry()
+            }
+            bytes.toByteArray()
+        }
+
+        expectExtractionFailure {
+            DistroRootfsExtractor().extract(
+                stream = archive.inputStream(),
+                destDir = kotlin.io.path.createTempDirectory("distro-symlink-test").toFile(),
+                kind = RootfsKind.Custom
+            )
+        }
+    }
+
+    @Test
+    fun `enforces archive entry count limit`() {
+        val archive = buildTinyTar("one", "1", "two", "2")
+
+        expectExtractionFailure {
+            DistroRootfsExtractor(
+                ExtractionLimits(maxEntries = 1)
+            ).extract(
+                stream = archive.inputStream(),
+                destDir = kotlin.io.path.createTempDirectory("distro-count-test").toFile(),
+                kind = RootfsKind.Custom
+            )
+        }
+    }
+
+    @Test
+    fun `enforces extracted byte limit`() {
+        val archive = buildTinyTar("payload", "123456")
+
+        expectExtractionFailure {
+            DistroRootfsExtractor(
+                ExtractionLimits(maxTotalBytes = 5L, maxEntryBytes = 5L)
+            ).extract(
+                stream = archive.inputStream(),
+                destDir = kotlin.io.path.createTempDirectory("distro-size-test").toFile(),
+                kind = RootfsKind.Custom
+            )
+        }
+    }
+
+    @Test
     fun `display byte size has a unit suffix`() {
         // Explicit `L` suffixes + parens; otherwise Kotlin binds the
         // postfix method to the Int literal, which has no
@@ -100,6 +228,15 @@ class DistroRootfsExtractorTest {
             kind = if (useGzip) RootfsKind.TarGz else RootfsKind.Custom,
             progress = DistroRootfsExtractor.ProgressCallback.NONE
         )
+    }
+
+    private fun expectExtractionFailure(block: () -> Unit) {
+        try {
+            block()
+            fail("Expected extractor to reject the archive")
+        } catch (_: IOException) {
+            // Expected.
+        }
     }
 }
 
@@ -128,6 +265,48 @@ class DistroInstallerTest {
         val rootDir = java.io.File(baseDir, "alpine-latest")
         assertTrue("rootDir should exist after install attempt", rootDir.exists())
     }
+
+    @Test
+    fun `installer rejects a rootfs without a shell and os release`() {
+        val baseDir = kotlin.io.path.createTempDirectory("distro-invalid").toFile()
+        val downloader = DistroHttpDownloader {
+            buildTinyTar("placeholder.txt", "not a linux rootfs").inputStream()
+        }
+        val distro = DistroCatalog.find("alpine-latest")!!.copy(
+            rootfsKind = RootfsKind.Custom,
+            sha256 = null
+        )
+
+        try {
+            DistroInstaller(downloader = downloader).install(distro, baseDir)
+            fail("Invalid rootfs must not be accepted")
+        } catch (_: IOException) {
+            // Expected: validation must fail before activation.
+        }
+
+        val rootDir = File(baseDir, distro.id)
+        assertFalse("Invalid installs must not write a success manifest", File(rootDir, "manifest.json").exists())
+        assertTrue("Invalid installs must retain an actionable error", File(rootDir, "install.error").isFile)
+    }
+}
+
+class DistroInstallationHealthTest {
+
+    @Test
+    fun `empty rootfs is never healthy even without an error sentinel`() {
+        val rootDir = kotlin.io.path.createTempDirectory("empty-rootfs").toFile()
+        val rootfs = File(rootDir, "rootfs").apply { mkdirs() }
+        val installation = DistroInstallation(
+            distro = DistroCatalog.find("ubuntu-noble")!!,
+            rootDir = rootDir,
+            rootfsDir = rootfs,
+            installedAtEpochMs = System.currentTimeMillis(),
+            sizeOnDiskBytes = 0L,
+            lastError = null
+        )
+
+        assertFalse(installation.isHealthy)
+    }
 }
 
 // ─── tar building utilities (private to this file) ────────────────────────
@@ -137,7 +316,14 @@ class DistroInstallerTest {
  * given content. Used to exercise the extractor without needing a real
  * distro tarball in the test classpath.
  */
-internal fun buildTinyTar(name: String, content: String): ByteArray {
+internal fun buildTinyTar(name: String, content: String): ByteArray =
+    buildTinyTarEntry(name, content, '0')
+
+internal fun buildTinyTarEntry(
+    name: String,
+    content: String,
+    typeFlag: Char
+): ByteArray {
     val payload = content.toByteArray()
     val header = ByteArray(512)
     // Filename (offset 0, 100 bytes).
@@ -159,8 +345,8 @@ internal fun buildTinyTar(name: String, content: String): ByteArray {
     // Checksum (offset 148, 8 bytes) — fill with spaces initially; we
     // recompute below.
     for (i in 148..155) header[i] = ' '.code.toByte()
-    // typeflag (offset 156): '0' = regular file.
-    header[156] = '0'.code.toByte()
+    // typeflag (offset 156): regular file, PAX header, symlink, etc.
+    header[156] = typeFlag.code.toByte()
     // USTAR magic (offset 257).
     val magic = "ustar\u0000".toByteArray(Charsets.US_ASCII)
     System.arraycopy(magic, 0, header, 257, magic.size)

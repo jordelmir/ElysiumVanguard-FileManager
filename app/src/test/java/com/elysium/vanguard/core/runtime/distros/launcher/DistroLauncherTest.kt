@@ -170,24 +170,37 @@ class NativeProotLauncherTest {
 
     @Test
     fun `buildShellCommand produces a real proot flag shape when a fake launcher marks itself available`() {
-        // We exercise the wire through a small inline subclass that
-        // overrides isAvailable. This proves the launcher interface
-        // produces the expected proot command shape when the binary
-        // is real. The subclass is also useful as a reference for
-        // 9.6.3.1 when the JNI launches for real.
         val rootfs = Files.createTempDirectory("elysium-proot-test").toFile()
+        val runtimeDir = Files.createTempDirectory("elysium-proot-runtime").toFile()
         try {
-            val launcher = object : NativeProotLauncher(bundledAbis = setOf("arm64-v8a")) {
-                override fun isAvailable(r: java.io.File): Boolean = true
-            }
+            val executable = File(runtimeDir, "libproot.so").apply { writeText("proot") }
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp")
+            )
             val cmd = launcher.buildShellCommand(rootfs, "ls /")
-            assertEquals("proot", cmd[0])
-            assertEquals("-0", cmd[1])
+            assertEquals(executable.absolutePath, cmd[0])
+            assertTrue(cmd.contains("--kill-on-exit"))
+            assertTrue(cmd.contains("--link2symlink"))
+            assertTrue(cmd.contains("-0"))
             assertTrue(cmd.contains("-r"))
             assertTrue(cmd.contains(rootfs.absolutePath))
             assertTrue(cmd.contains("/bin/sh"))
+            assertTrue(launcher.isAvailable(rootfs))
+            val env = launcher.environmentVariables(rootfs).toMap()
+            assertEquals(File(runtimeDir, "libproot_loader.so").absolutePath, env["PROOT_LOADER"])
+            assertEquals(runtimeDir.absolutePath, env["LD_LIBRARY_PATH"])
         } finally {
             rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
         }
     }
 }

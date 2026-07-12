@@ -6,7 +6,8 @@ import com.elysium.vanguard.core.runtime.distros.custom.CustomRootfsPipeline
 import com.elysium.vanguard.core.runtime.distros.custom.CustomRootfsValidator
 import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncherRegistry
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolver
-import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolutionResolver
+import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolution
+import com.elysium.vanguard.core.runtime.distros.launcher.ProotNativeLibrary
 import com.elysium.vanguard.core.runtime.distros.snapshot.RootfsSnapshot
 import dagger.Module
 import dagger.Provides
@@ -34,12 +35,16 @@ object DistroModule {
      */
     @Provides
     @Singleton
-    fun provideDistroManager(@ApplicationContext context: Context): DistroManager {
+    fun provideDistroManager(
+        @ApplicationContext context: Context,
+        downloader: DistroHttpDownloader,
+        launcherResolver: LauncherResolver
+    ): DistroManager {
         val baseDir = java.io.File(context.filesDir, "distros").apply { if (!exists()) mkdirs() }
         return DistroManager(
             baseDir = baseDir,
-            downloader = RealDistroHttpDownloader(),
-            launcherResolver = LauncherResolutionResolver.DEFAULT
+            downloader = downloader,
+            launcherResolver = launcherResolver
         )
     }
 
@@ -59,7 +64,17 @@ object DistroModule {
      */
     @Provides
     @Singleton
-    fun provideLauncherResolver(): LauncherResolver = LauncherResolutionResolver.DEFAULT
+    fun provideLauncherResolver(registry: DistroLauncherRegistry): LauncherResolver =
+        LauncherResolver { rootfs -> LauncherResolution.resolve(rootfs, registry) }
+
+    @Provides
+    @Singleton
+    fun provideProotNativeLibrary(@ApplicationContext context: Context): ProotNativeLibrary =
+        ProotNativeLibrary.default(
+            abis = currentSupportedAbis(),
+            nativeLibraryDir = context.applicationInfo.nativeLibraryDir?.let { java.io.File(it) },
+            userProotDir = java.io.File(context.filesDir, "proot")
+        )
 
     /**
      * The launcher registry used by the resolution path; exposed so
@@ -68,8 +83,16 @@ object DistroModule {
      */
     @Provides
     @Singleton
-    fun provideLauncherRegistry(): DistroLauncherRegistry =
-        DistroLauncherRegistry.production(supportedAbis = currentSupportedAbis())
+    fun provideLauncherRegistry(
+        @ApplicationContext context: Context,
+        nativeLibrary: ProotNativeLibrary
+    ): DistroLauncherRegistry {
+        return DistroLauncherRegistry.production(
+            supportedAbis = currentSupportedAbis(),
+            nativeLibrary = nativeLibrary,
+            prootTmpDir = java.io.File(context.cacheDir, "proot")
+        )
+    }
 
     /**
      * PHASE 9.6.3.2 — The custom rootfs installer. Uses the

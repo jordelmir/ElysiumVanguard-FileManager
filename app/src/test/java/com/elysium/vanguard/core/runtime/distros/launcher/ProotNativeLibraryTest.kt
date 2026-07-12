@@ -20,6 +20,28 @@ import java.nio.file.Files
 class ProotNativeLibraryTest {
 
     @Test
+    fun `find bundled proot in Android native library directory`() {
+        val nativeDir = Files.createTempDirectory("elysium-native-libs").toFile()
+        try {
+            File(nativeDir, "libproot.so").writeText("proot")
+            val loader = File(nativeDir, "libproot_loader.so").apply { writeText("loader") }
+            val probe = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = nativeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+
+            val location = probe.location
+            assertNotNull(location)
+            assertEquals(ProotLocation.Source.BUNDLED, location!!.source)
+            assertEquals(loader, location.loaderPath)
+        } finally {
+            nativeDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `null when nothing is available`() {
         val lib = ProotNativeLibrary.default(
             abis = setOf("arm64-v8a"),

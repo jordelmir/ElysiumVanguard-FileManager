@@ -114,7 +114,10 @@ class TerminalSession(
             }
             val p = pb.start()
             process = p
-            _state.value = State.Running(System.currentTimeMillis())
+            _state.value = State.Running(
+                sinceMs = System.currentTimeMillis(),
+                pid = processId(p)
+            )
             pumpOut = pump(p.inputStream)
             pumpErr = pump(p.errorStream)
             waitJob = sessionScope.launch {
@@ -226,7 +229,7 @@ class TerminalSession(
     sealed class State {
         data object NotStarted : State()
         data object Starting : State()
-        data class Running(val sinceMs: Long) : State()
+        data class Running(val sinceMs: Long, val pid: Long?) : State()
         data class Exited(val exitCode: Int) : State()
         data class Error(val message: String) : State()
         data object Stopped : State()
@@ -243,6 +246,14 @@ class TerminalSession(
 
     companion object {
         private const val PUMP_CHUNK = 4096
+
+        private fun processId(process: Process): Long? {
+            return runCatching {
+                val field = process.javaClass.getDeclaredField("pid")
+                field.isAccessible = true
+                (field.get(process) as? Number)?.toLong()
+            }.getOrNull()
+        }
 
         /**
          * PHASE 9.6.3 / 10.4 — Build a [TerminalSession] configured to
@@ -266,14 +277,16 @@ class TerminalSession(
         ): TerminalSession {
             require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
             val launcher = pick.launcher
-            val isDirectExec = launcher.kind ==
-                com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind.DIRECT_EXEC
+            val isInteractiveGuest = launcher.kind ==
+                com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind.DIRECT_EXEC ||
+                launcher.kind ==
+                com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind.NATIVE_PROOT
             // Build the command first so the launcher's `buildShellCommand`
             // gets a chance to validate the rootfs. We then attach a
             // diagnostic pre-script only for non-interactive cases
             // (probes); for Direct-Exec we want a real interactive
             // shell, so we leave the command untouched.
-            val baseCommand = if (isDirectExec) {
+            val baseCommand = if (isInteractiveGuest) {
                 launcher.buildShellCommand(rootfsDir, script = "")
             } else {
                 val probe =
@@ -288,11 +301,7 @@ class TerminalSession(
             // reach the child process. We thread it through the
             // Config's environmentVariables so the Android `Process`
             // exposes the same env the launcher's design assumes.
-            val env = if (isDirectExec &&
-                launcher is com.elysium.vanguard.core.runtime.distros.launcher.DirectExecDistroLauncher
-            ) {
-                launcher.defaultEnvironment(rootfsDir)
-            } else emptyList()
+            val env = launcher.environmentVariables(rootfsDir)
             return TerminalSession(
                 Config(
                     command = baseCommand,

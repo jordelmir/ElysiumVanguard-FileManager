@@ -4,13 +4,12 @@ import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroHttpDownloader
 import com.elysium.vanguard.core.runtime.distros.DistroRootfsExtractor
 import com.elysium.vanguard.core.runtime.distros.DistroStorage
-import com.elysium.vanguard.core.runtime.distros.ProgressInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import com.elysium.vanguard.core.runtime.distros.RootfsHealth
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
 
 /**
@@ -59,44 +58,46 @@ class CustomRootfsInstaller(
         onProgress: (entriesExtracted: Int, lastEntryName: String) -> Unit = { _, _ -> },
         onByteProgress: (bytesRead: Long) -> Unit = {}
     ): Result<File> {
+        if (!baseDir.isDirectory && !baseDir.mkdirs()) {
+            return Result.failure(IOException("Could not create $baseDir"))
+        }
         val targetDir = File(baseDir, distro.id)
         if (targetDir.exists()) {
             return Result.failure(IOException("Distro already installed: ${distro.id}"))
         }
-        if (!targetDir.mkdirs()) {
-            return Result.failure(IOException("Could not create $targetDir"))
+        val stagingDir = File(baseDir, ".${distro.id}.installing")
+        stagingDir.deleteRecursively()
+        if (!stagingDir.mkdirs()) {
+            return Result.failure(IOException("Could not create $stagingDir"))
         }
-        val rootfsDir = File(targetDir, "rootfs")
+        val archive = File(stagingDir, "download.part")
+        val rootfsDir = File(stagingDir, "rootfs")
         if (!rootfsDir.mkdirs()) {
-            targetDir.deleteRecursively()
+            stagingDir.deleteRecursively()
             return Result.failure(IOException("Could not create $rootfsDir"))
         }
-        val manifest = File(targetDir, "manifest.json")
-        val installedVia = File(targetDir, "installed-via=custom")
+        val manifest = File(stagingDir, "manifest.json")
+        val installedVia = File(stagingDir, "installed-via=custom")
         return try {
-            val stream = downloader.open(url)
-            // Phase 9.6.3.3 — wrap with ProgressInputStream first so bytes
-            // are counted regardless of the compression wrapper that comes
-            // next. The counting stream wraps the entire download.
-            val counting = ProgressInputStream(stream, onByteProgress)
-            val decompressed = decompressingStream(counting, kind)
-            // We intentionally do not use use{} here because the
-            // decompression streams wrap the underlying connection and
-            // we want the order: close decompressor first (drains
-            // trailing tar data), then close the outer HTTPS stream.
-            val result = try {
-                extractor.extractRawTar(
-                    stream = decompressed,
-                    destDir = rootfsDir,
-                    progress = object : DistroRootfsExtractor.ProgressCallback {
-                        override fun onEntry(name: String, bytes: Long) {
-                            onProgress(1, name)
+            val receipt = downloadArchive(url, archive, onByteProgress)
+            var entriesSeen = 0
+            val result = archive.inputStream().buffered().use { compressed ->
+                decompressingStream(compressed, kind).use { tar ->
+                    extractor.extractRawTar(
+                        stream = tar,
+                        destDir = rootfsDir,
+                        progress = DistroRootfsExtractor.ProgressCallback { name, _ ->
+                            entriesSeen += 1
+                            onProgress(entriesSeen, name.removeSuffix("/"))
                         }
-                    }
-                )
-            } finally {
-                runCatching { decompressed.close() }
+                    )
+                }
             }
+            val health = RootfsHealth.inspect(rootfsDir, result.bytesWritten)
+            if (!health.isHealthy) {
+                throw IOException(health.reason ?: "custom rootfs validation failed")
+            }
+            if (!archive.delete()) throw IOException("Could not remove temporary archive")
             writeManifest(
                 manifest = manifest,
                 distro = distro,
@@ -104,14 +105,46 @@ class CustomRootfsInstaller(
                 kind = kind,
                 bytesWritten = result.bytesWritten,
                 entries = result.entriesExtracted,
-                bytesDownloaded = counting.progressBytes
+                bytesDownloaded = receipt.bytesDownloaded,
+                sha256 = receipt.sha256
             )
-            installedVia.createNewFile()
-            Result.success(rootfsDir)
-        } catch (io: IOException) {
-            targetDir.deleteRecursively()
-            Result.failure(io)
+            if (!installedVia.createNewFile()) throw IOException("Could not write custom install sentinel")
+            if (!stagingDir.renameTo(targetDir)) throw IOException("Could not activate custom rootfs")
+            Result.success(File(targetDir, "rootfs"))
+        } catch (failure: Exception) {
+            stagingDir.deleteRecursively()
+            Result.failure(failure as? IOException ?: IOException(failure.message ?: "custom install failed", failure))
         }
+    }
+
+    private fun downloadArchive(
+        url: String,
+        archive: File,
+        onByteProgress: (bytesRead: Long) -> Unit
+    ): DownloadReceipt {
+        val digest = MessageDigest.getInstance("SHA-256")
+        var total = 0L
+        downloader.open(url).use { input ->
+            archive.outputStream().buffered().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    total += read
+                    if (total > MAX_ARCHIVE_BYTES) {
+                        throw IOException("Custom rootfs archive exceeds 2 GB safety limit")
+                    }
+                    output.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    onByteProgress(read.toLong())
+                }
+            }
+        }
+        val sha256 = digest.digest().joinToString("") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+        return DownloadReceipt(total, sha256)
     }
 
     private fun decompressingStream(input: InputStream, kind: CustomRootfsKind): InputStream {
@@ -132,7 +165,8 @@ class CustomRootfsInstaller(
         kind: CustomRootfsKind,
         bytesWritten: Long,
         entries: Int,
-        bytesDownloaded: Long
+        bytesDownloaded: Long,
+        sha256: String
     ) {
         // Hand-rolled JSON keeps the file foot-gun-free and doesn't
         // require pulling in a second JSON library; the existing
@@ -149,6 +183,7 @@ class CustomRootfsInstaller(
             append("\"installVia\":\"custom\",")
             append("\"bytesWritten\":").append(bytesWritten).append(',')
             append("\"bytesDownloaded\":").append(bytesDownloaded).append(',')
+            append("\"sha256\":\"").append(sha256).append("\",")
             append("\"entriesExtracted\":").append(entries)
             append('}')
         }
@@ -157,6 +192,15 @@ class CustomRootfsInstaller(
 
     private fun jsonEscape(s: String): String =
         s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+
+    private data class DownloadReceipt(
+        val bytesDownloaded: Long,
+        val sha256: String
+    )
+
+    private companion object {
+        const val MAX_ARCHIVE_BYTES = 2L * 1024L * 1024L * 1024L
+    }
 }
 
 /**

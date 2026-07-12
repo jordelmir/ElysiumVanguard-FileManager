@@ -27,7 +27,14 @@ data class DistroInstallation(
     val sizeOnDiskBytes: Long,
     val lastError: String?
 ) {
-    val isHealthy: Boolean get() = lastError == null && rootfsDir.isDirectory
+    val health: RootfsHealthReport
+        get() = RootfsHealth.inspect(rootfsDir, sizeOnDiskBytes)
+
+    val isHealthy: Boolean
+        get() = lastError == null && health.isHealthy
+
+    val failureReason: String?
+        get() = lastError ?: health.reason
 }
 
 /**

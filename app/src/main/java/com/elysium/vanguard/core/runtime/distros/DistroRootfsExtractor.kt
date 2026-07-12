@@ -3,7 +3,12 @@ package com.elysium.vanguard.core.runtime.distros
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.zip.GZIPInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 
 /**
  * PHASE 9.6.2 — Pure-Kotlin tar / tar.gz extractor for distro rootfs.
@@ -26,7 +31,9 @@ import java.util.zip.GZIPInputStream
  *
  * Phase 9.6.2 — first build; intentionally minimal.
  */
-class DistroRootfsExtractor {
+class DistroRootfsExtractor(
+    private val limits: ExtractionLimits = ExtractionLimits()
+) {
 
     /**
      * Extract [stream] (gzip-wrapped per [kind]) into [destDir], invoking
@@ -44,21 +51,21 @@ class DistroRootfsExtractor {
         stream: InputStream,
         destDir: File,
         kind: RootfsKind,
-        progress: ProgressCallback = ProgressCallback.NONE
+        progress: ProgressCallback = ProgressCallback.NONE,
+        stripComponents: Int = 0
     ): ExtractResult {
-        destDir.mkdirs()
+        require(stripComponents >= 0) { "stripComponents must be non-negative" }
+        ensureDestination(destDir)
         val source = when (kind) {
             RootfsKind.TarGz -> GZIPInputStream(stream)
-            RootfsKind.TarXz -> throw IOException(
-                "xz extraction: pre-decompress then call extractRawTar"
-            )
+            RootfsKind.TarXz -> XZCompressorInputStream(stream)
             RootfsKind.BootstrapTarball,
             RootfsKind.DockerLayer -> throw IOException(
                 "$kind extraction not supported in 9.6.3.2"
             )
             RootfsKind.Custom -> stream // raw tar
         }
-        return readTar(source, destDir, progress)
+        return readTar(source, destDir, progress, stripComponents)
     }
 
     /**
@@ -71,173 +78,214 @@ class DistroRootfsExtractor {
     fun extractRawTar(
         stream: InputStream,
         destDir: File,
-        progress: ProgressCallback = ProgressCallback.NONE
+        progress: ProgressCallback = ProgressCallback.NONE,
+        stripComponents: Int = 0
     ): ExtractResult {
-        destDir.mkdirs()
-        return readTar(stream, destDir, progress)
+        require(stripComponents >= 0) { "stripComponents must be non-negative" }
+        ensureDestination(destDir)
+        return readTar(stream, destDir, progress, stripComponents)
     }
 
     private fun readTar(
         stream: InputStream,
         destDir: File,
-        progress: ProgressCallback
+        progress: ProgressCallback,
+        stripComponents: Int
     ): ExtractResult {
+        val base = destDir.canonicalFile
+        val pendingHardLinks = ArrayList<Pair<File, String>>()
+        val pendingSymbolicLinks = ArrayList<Pair<File, String>>()
         var entryCount = 0
+        var seenEntries = 0
         var totalBytes = 0L
-        while (true) {
-            val header = readHeader(stream) ?: break
-            val name = header.name
-            if (name.isEmpty()) break
-            val target = File(destDir, name)
-            when (header.typeFlag) {
-                TYPE_REGULAR -> {
-                    target.parentFile?.mkdirs()
-                    val written = copyData(stream, target, header.size)
-                    entryCount += 1
-                    totalBytes += written
-                    progress.onEntry(name, written)
+
+        TarArchiveInputStream(stream).use { tar ->
+            while (true) {
+                val entry = tar.nextEntry ?: break
+                seenEntries += 1
+                if (seenEntries > limits.maxEntries) {
+                    throw IOException("Archive exceeds ${limits.maxEntries} entry limit")
                 }
-                TYPE_DIRECTORY -> {
-                    target.mkdirs()
-                    entryCount += 1
-                    progress.onEntry(name, 0L)
+                if (entry.name.length > limits.maxPathLength) {
+                    throw IOException("Archive path exceeds ${limits.maxPathLength} characters")
                 }
-                TYPE_SYMLINK -> {
-                    target.parentFile?.mkdirs()
-                    target.delete()
-                    val linkTarget = header.linkName.ifEmpty { "/" }
-                    // Runtime.getRuntime available in JVM unit tests; we
-                    // use Files.createSymbolicLink when possible and
-                    // fall back to a sentinel text file with the target
-                    // when symlinks are unsupported (some Android FS).
-                    try {
-                        if (android.os.Build.VERSION.SDK_INT >= 0) {
-                            java.nio.file.Files.createSymbolicLink(
-                                target.toPath(),
-                                java.nio.file.Paths.get(linkTarget)
-                            )
+                if (!tar.canReadEntryData(entry)) {
+                    throw IOException("Unsupported tar entry: ${entry.name}")
+                }
+                val entryName = stripArchivePath(entry.name, stripComponents) ?: continue
+                val target = safeTarget(base, entryName)
+                when {
+                    entry.isDirectory -> {
+                        if (!target.isDirectory && !target.mkdirs()) {
+                            throw IOException("Could not create directory: $entryName")
                         }
-                    } catch (_: UnsupportedOperationException) {
-                        target.writeText("symlink -> $linkTarget\n")
+                        applyMode(target, entry.mode)
+                        entryCount += 1
+                        progress.onEntry(entryName, 0L)
                     }
-                    entryCount += 1
-                    progress.onEntry(name, 0L)
-                }
-                TYPE_PAX, TYPE_GNU_LONG_NAME -> {
-                    // Phase 9.6.3 will interpret pax extended headers. For
-                    // now we skip past the data block when present.
-                    skipData(stream, header.size)
-                }
-                else -> {
-                    // Unknown type: skip the data block and continue.
-                    skipData(stream, header.size)
+                    entry.isSymbolicLink -> {
+                        validateSymlinkTarget(base, target, entry.linkName)
+                        // Materialize after regular files. Besides preventing
+                        // links from redirecting later archive writes, this
+                        // lets case-insensitive JVM test hosts preserve the
+                        // real target when an archive contains aliases that
+                        // differ only by case (Android's ext4 is case-sensitive).
+                        pendingSymbolicLinks += target to entry.linkName
+                        entryCount += 1
+                        progress.onEntry(entryName, 0L)
+                    }
+                    entry.isLink -> {
+                        target.parentFile?.mkdirs()
+                        val linkName = stripArchivePath(entry.linkName, stripComponents)
+                            ?: throw IOException("Hard-link target removed by strip: ${entry.linkName}")
+                        pendingHardLinks += target to linkName
+                        entryCount += 1
+                        progress.onEntry(entryName, 0L)
+                    }
+                    entry.isFile -> {
+                        validateEntrySize(entry, totalBytes)
+                        target.parentFile?.mkdirs()
+                        val written = copyEntry(tar, target, entry)
+                        applyMode(target, entry.mode)
+                        entryCount += 1
+                        totalBytes += written
+                        progress.onEntry(entryName, written)
+                    }
+                    else -> {
+                        // Device nodes, FIFOs and sockets are supplied by
+                        // proot bind mounts and must not be materialized.
+                    }
                 }
             }
-            // tar entries are 512-byte aligned. We've read header.size
-            // bytes of payload; if it isn't a multiple of 512, pad.
-            padTo512(stream, header.size)
         }
+
+        pendingHardLinks.forEach { (target, linkName) ->
+            val source = safeTarget(base, linkName)
+            if (!source.isFile) {
+                throw IOException("Hard-link source is missing: $linkName")
+            }
+            target.delete()
+            try {
+                Files.createLink(target.toPath(), source.toPath())
+            } catch (_: Exception) {
+                source.copyTo(target, overwrite = true)
+            }
+        }
+
+        pendingSymbolicLinks.forEach { (target, linkName) ->
+            target.parentFile?.mkdirs()
+            if (isCaseInsensitiveSelfAlias(base, target, linkName)) {
+                return@forEach
+            }
+            if (target.exists() && !target.delete()) {
+                throw IOException("Could not replace symlink target: ${target.absolutePath}")
+            }
+            try {
+                Files.createSymbolicLink(target.toPath(), Paths.get(linkName))
+            } catch (e: Exception) {
+                throw IOException("Could not create symlink ${target.name} -> $linkName", e)
+            }
+        }
+
         return ExtractResult(entriesExtracted = entryCount, bytesWritten = totalBytes)
     }
 
-    private fun copyData(
-        stream: InputStream,
+    private fun ensureDestination(destDir: File) {
+        if (!destDir.isDirectory && !destDir.mkdirs()) {
+            throw IOException("Could not create extraction directory: ${destDir.absolutePath}")
+        }
+    }
+
+    private fun validateEntrySize(entry: TarArchiveEntry, bytesWritten: Long) {
+        if (entry.size < 0L) {
+            throw IOException("Negative tar entry size: ${entry.name}")
+        }
+        if (entry.size > limits.maxEntryBytes) {
+            throw IOException("Tar entry exceeds ${limits.maxEntryBytes} bytes: ${entry.name}")
+        }
+        if (entry.size > limits.maxTotalBytes - bytesWritten) {
+            throw IOException("Archive exceeds ${limits.maxTotalBytes} extracted-byte limit")
+        }
+    }
+
+    private fun stripArchivePath(path: String, count: Int): String? {
+        if (count == 0) return path.removePrefix("./").takeIf { it.isNotBlank() }
+        val components = path.split('/').filter { it.isNotEmpty() && it != "." }
+        if (components.size <= count) return null
+        return components.drop(count).joinToString("/")
+    }
+
+    private fun isCaseInsensitiveSelfAlias(base: File, target: File, linkName: String): Boolean {
+        val rawLink = Paths.get(linkName)
+        val resolved = if (rawLink.isAbsolute) {
+            File(base, linkName.removePrefix("/"))
+        } else {
+            val parent = target.parentFile ?: return false
+            parent.toPath().resolve(rawLink).normalize().toFile()
+        }
+        if (target.toPath().normalize() == resolved.toPath().normalize()) return true
+        return try {
+            target.exists() && resolved.exists() &&
+                Files.isSameFile(target.toPath(), resolved.toPath())
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun safeTarget(base: File, archiveName: String): File {
+        val cleanName = archiveName.removePrefix("./")
+        val target = File(base, cleanName).canonicalFile
+        val basePrefix = base.path + File.separator
+        if (target != base && !target.path.startsWith(basePrefix)) {
+            throw IOException("Unsafe tar path: $archiveName")
+        }
+        return target
+    }
+
+    private fun validateSymlinkTarget(base: File, target: File, linkName: String) {
+        if (linkName.isBlank()) {
+            throw IOException("Symlink has an empty target: ${target.name}")
+        }
+        if (linkName.length > limits.maxPathLength) {
+            throw IOException("Symlink target exceeds ${limits.maxPathLength} characters")
+        }
+        val linkPath = Paths.get(linkName)
+        val basePath = base.toPath().toAbsolutePath().normalize()
+        val hostResolved = if (linkPath.isAbsolute) {
+            basePath.resolve(linkName.removePrefix("/"))
+        } else {
+            (target.parentFile ?: base).toPath().resolve(linkPath)
+        }.toAbsolutePath().normalize()
+        if (!hostResolved.startsWith(basePath)) {
+            throw IOException("Symlink escapes rootfs: ${target.name} -> $linkName")
+        }
+    }
+
+    private fun copyEntry(
+        tar: TarArchiveInputStream,
         target: File,
-        bytes: Long
-    ): Long = target.outputStream().use { out ->
-        val buf = ByteArray(BLOCK_SIZE)
-        var remaining = bytes
+        entry: TarArchiveEntry
+    ): Long = target.outputStream().use { output ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var remaining = entry.size
         var total = 0L
-        while (remaining > 0) {
-            val toRead = minOf(buf.size.toLong(), remaining).toInt()
-            val n = stream.read(buf, 0, toRead)
-            if (n < 0) break
-            out.write(buf, 0, n)
-            remaining -= n
-            total += n
+        while (remaining > 0L) {
+            val read = tar.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            if (read < 0) {
+                throw IOException("Unexpected end of tar entry: ${entry.name}")
+            }
+            output.write(buffer, 0, read)
+            remaining -= read
+            total += read
         }
         total
     }
 
-    private fun skipData(stream: InputStream, bytes: Long) {
-        var remaining = bytes
-        val buf = ByteArray(BLOCK_SIZE)
-        while (remaining > 0) {
-            val toRead = minOf(buf.size.toLong(), remaining).toInt()
-            val n = stream.read(buf, 0, toRead)
-            if (n < 0) break
-            remaining -= n
-        }
-        padTo512(stream, bytes)
+    private fun applyMode(file: File, mode: Int) {
+        file.setReadable(mode and 0b100_100_100 != 0, true)
+        file.setWritable(mode and 0b010_010_010 != 0, true)
+        file.setExecutable(mode and 0b001_001_001 != 0, true)
     }
-
-    private fun padTo512(stream: InputStream, payloadBytes: Long) {
-        val pad = (BLOCK_SIZE - (payloadBytes % BLOCK_SIZE)) % BLOCK_SIZE
-        if (pad > 0) {
-            val buf = ByteArray(pad.toInt())
-            stream.read(buf)
-        }
-    }
-
-    /**
-     * Read one 512-byte header. Returns null when the header is all zeros
-     * (the standard tar end-of-archive marker, and how we know we've
-     * reached the end).
-     */
-    private fun readHeader(stream: InputStream): TarHeader? {
-        val headerBytes = ByteArray(BLOCK_SIZE)
-        var read = 0
-        while (read < BLOCK_SIZE) {
-            val n = stream.read(headerBytes, read, BLOCK_SIZE - read)
-            if (n < 0) return null
-            read += n
-        }
-        if (isAllZeros(headerBytes)) return null
-        return TarHeader(
-            name = String(
-                headerBytes,
-                NAME_OFFSET,
-                NAME_LENGTH,
-                Charsets.UTF_8
-            ).trimEnd('\u0000', ' '),
-            size = parseOctal(headerBytes, SIZE_OFFSET, SIZE_LENGTH),
-            typeFlag = headerBytes[TYPE_OFFSET].toInt() and 0xFF,
-            linkName = String(
-                headerBytes,
-                LINK_OFFSET,
-                LINK_LENGTH,
-                Charsets.UTF_8
-            ).trimEnd('\u0000', ' ')
-        )
-    }
-
-    private fun parseOctal(bytes: ByteArray, offset: Int, length: Int): Long {
-        // ustar octal stores null-terminated ASCII digits.
-        val s = String(
-            bytes,
-            offset,
-            length,
-            Charsets.US_ASCII
-        ).trimEnd('\u0000', ' ')
-        if (s.isEmpty()) return 0L
-        return try {
-            s.toLong(8)
-        } catch (_: NumberFormatException) {
-            0L
-        }
-    }
-
-    private fun isAllZeros(bytes: ByteArray): Boolean {
-        for (b in bytes) if (b != 0.toByte()) return false
-        return true
-    }
-
-    data class TarHeader(
-        val name: String,
-        val size: Long,
-        val typeFlag: Int,
-        val linkName: String
-    )
 
     data class ExtractResult(
         val entriesExtracted: Int,
@@ -256,20 +304,24 @@ class DistroRootfsExtractor {
     }
 
     companion object {
-        private const val BLOCK_SIZE = 512
-        private const val NAME_OFFSET = 0
-        private const val NAME_LENGTH = 100
-        private const val SIZE_OFFSET = 124
-        private const val SIZE_LENGTH = 12
-        private const val TYPE_OFFSET = 156
-        private const val LINK_OFFSET = 157
-        private const val LINK_LENGTH = 100
+        private const val DEFAULT_BUFFER_SIZE = 32 * 1024
+    }
+}
 
-        private const val TYPE_REGULAR = '0'.code
-        private const val TYPE_DIRECTORY = '5'.code
-        private const val TYPE_SYMLINK = '2'.code
-        private const val TYPE_PAX = 'x'.code
-        private const val TYPE_GNU_LONG_NAME = 'L'.code
+data class ExtractionLimits(
+    val maxEntries: Int = 500_000,
+    val maxTotalBytes: Long = 16L * 1024L * 1024L * 1024L,
+    val maxEntryBytes: Long = 8L * 1024L * 1024L * 1024L,
+    val maxPathLength: Int = 4096
+) {
+    init {
+        require(maxEntries > 0) { "maxEntries must be positive" }
+        require(maxTotalBytes > 0L) { "maxTotalBytes must be positive" }
+        require(maxEntryBytes > 0L) { "maxEntryBytes must be positive" }
+        require(maxEntryBytes <= maxTotalBytes) {
+            "maxEntryBytes must not exceed maxTotalBytes"
+        }
+        require(maxPathLength > 0) { "maxPathLength must be positive" }
     }
 }
 
