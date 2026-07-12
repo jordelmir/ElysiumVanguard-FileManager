@@ -42,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroCatalog
 import com.elysium.vanguard.core.runtime.distros.DistroInstallation
+import com.elysium.vanguard.core.runtime.distros.DistroInstallProgress
 import com.elysium.vanguard.core.runtime.distros.EffectiveCatalogRow
 import com.elysium.vanguard.core.runtime.distros.displayByteSize
 import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
@@ -71,6 +72,7 @@ fun RuntimeScreen(
     val installed by viewModel.installed.collectAsState()
     val installing by viewModel.installing.collectAsState()
     val errors by viewModel.errors.collectAsState()
+    val progress by viewModel.progress.collectAsState()
     val effectiveCatalog by viewModel.effectiveCatalog.collectAsState()
     val healthyCount = installed.count { it.isHealthy }
     val failedCount = installed.size - healthyCount
@@ -157,6 +159,7 @@ fun RuntimeScreen(
                         EffectiveCatalogRowView(
                             row = row,
                             isInstalling = installing.contains(row.distro.id),
+                            progress = progress[row.distro.id],
                             onInstall = { viewModel.installBlocking(row.distro.id) },
                             onRemove = { viewModel.remove(row.distro.id) },
                             onOpenTerminal = { onOpenDistro(row.distro.id) },
@@ -174,6 +177,7 @@ fun RuntimeScreen(
                         EffectiveCatalogRowView(
                             row = row,
                             isInstalling = installing.contains(row.distro.id),
+                            progress = progress[row.distro.id],
                             onInstall = { /* already installed; no-op */ },
                             onRemove = { viewModel.remove(row.distro.id) },
                             onOpenTerminal = { onOpenDistro(row.distro.id) },
@@ -204,8 +208,7 @@ private fun DistroCatalogRow(
     onInstall: () -> Unit,
     onRemove: () -> Unit,
     onOpenTerminal: () -> Unit,
-    onInspect: () -> Unit = {},
-    onOpenDesktop: () -> Unit = {}
+    onInspect: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -399,6 +402,7 @@ private fun SectionHeader(text: String) {
 private fun EffectiveCatalogRowView(
     row: EffectiveCatalogRow,
     isInstalling: Boolean,
+    progress: DistroInstallProgress?,
     onInstall: () -> Unit,
     onRemove: () -> Unit,
     onOpenTerminal: () -> Unit,
@@ -452,11 +456,20 @@ private fun EffectiveCatalogRowView(
             }
             Column(horizontalAlignment = Alignment.End) {
                 when {
-                    isInstalling -> CircularProgressIndicator(
-                        color = Color(0xFF61AFEF),
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
+                    isInstalling -> Column(horizontalAlignment = Alignment.End) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF61AFEF),
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = progress?.displayLabel ?: "preparing",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.sp,
+                            color = Color(0xFF61AFEF),
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
                     !row.isInstalled -> Button(onClick = onInstall) {
                         Icon(
                             Icons.Default.Download,
@@ -528,7 +541,7 @@ private fun FailedInstallActions(
         )
         reason?.takeIf { it.isNotBlank() }?.let { message ->
             Text(
-                text = message.take(72),
+                text = message.take(160),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 8.sp,
                 color = Color(0xFFFFA3A3),

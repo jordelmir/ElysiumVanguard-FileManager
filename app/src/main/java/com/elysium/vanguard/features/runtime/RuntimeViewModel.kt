@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.core.runtime.distros.DistroInstallation
+import com.elysium.vanguard.core.runtime.distros.DistroInstallProgress
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.distros.EffectiveCatalogRow
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,6 +38,7 @@ class RuntimeViewModel @Inject constructor(
     val installed: StateFlow<List<DistroInstallation>> = manager.installed
     val installing: StateFlow<Set<String>> = manager.installing
     val errors: StateFlow<Map<String, String>> = manager.errors
+    val progress: StateFlow<Map<String, DistroInstallProgress>> = manager.progress
 
     /**
      * PHASE 9.6.3.3 — Effective catalog: catalog-official + custom

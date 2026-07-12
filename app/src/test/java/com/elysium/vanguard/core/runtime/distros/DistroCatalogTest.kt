@@ -243,6 +243,39 @@ class DistroRootfsExtractorTest {
 class DistroInstallerTest {
 
     @Test
+    fun `installer retries a transient stream failure and exposes ordered stages`() {
+        val baseDir = kotlin.io.path.createTempDirectory("distro-retry").toFile()
+        val rootfs = buildTinyTar(
+            "etc/os-release", "ID=test\n",
+            "bin/sh", "#!/bin/sh\n"
+        )
+        var opens = 0
+        val stages = mutableListOf<DistroInstallStage>()
+        val downloader = DistroHttpDownloader {
+            opens += 1
+            if (opens == 1) object : java.io.ByteArrayInputStream(rootfs) {
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                    throw IOException("temporary network failure")
+            } else rootfs.inputStream()
+        }
+        val distro = DistroCatalog.find("alpine-latest")!!.copy(
+            rootfsKind = RootfsKind.Custom,
+            sha256 = null
+        )
+
+        val installed = DistroInstaller(
+            downloader = downloader,
+            onProgress = { stages += it.stage },
+            maxDownloadAttempts = 2,
+            retryDelayMillis = 0
+        ).install(distro, baseDir)
+
+        assertEquals(2, opens)
+        assertTrue(RootfsHealth.inspect(installed).isHealthy)
+        assertTrue(stages.containsAll(DistroInstallStage.entries.toList()))
+    }
+
+    @Test
     fun `installer stores rootfs under baseDir id rootfs`() {
         // Mock a downloader that "downloads" an empty gzipped tar by
         // returning an empty stream — the extractor will simply report

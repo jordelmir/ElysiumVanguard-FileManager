@@ -25,8 +25,16 @@ class DistroInstaller(
      * to distinguish (a progress bar doesn't care which side the
      * bytes are moving).
      */
-    private val onByteProgress: (bytesRead: Long) -> Unit = {}
+    private val onByteProgress: (bytesRead: Long) -> Unit = {},
+    /** Emits immutable phase snapshots for UI and diagnostic consumers. */
+    private val onProgress: (DistroInstallProgress) -> Unit = {},
+    private val maxDownloadAttempts: Int = DEFAULT_DOWNLOAD_ATTEMPTS,
+    private val retryDelayMillis: Long = DEFAULT_RETRY_DELAY_MS
 ) {
+    init {
+        require(maxDownloadAttempts > 0) { "maxDownloadAttempts must be positive" }
+        require(retryDelayMillis >= 0L) { "retryDelayMillis cannot be negative" }
+    }
     /**
      * Install [distro] into [baseDir]. Returns the rootfs directory.
      * The directory layout is `baseDir/<distro.id>/rootfs/` for the
@@ -60,10 +68,13 @@ class DistroInstaller(
         manifestStaging.delete()
 
         try {
-            val actualSha256 = runStage("download") {
-                downloadArchive(distro, archive)
+            runStage(DistroInstallStage.PREFLIGHT) {
+                ensureSufficientStorage(rootDir, distro)
             }
-            runStage("verify") {
+            val actualSha256 = runStage(DistroInstallStage.DOWNLOADING) {
+                downloadArchiveWithRetry(distro, archive)
+            }
+            runStage(DistroInstallStage.VERIFYING) {
                 distro.sha256?.let { expected ->
                     if (!actualSha256.equals(expected, ignoreCase = true)) {
                         throw IOException("SHA-256 mismatch: expected $expected, got $actualSha256")
@@ -71,31 +82,37 @@ class DistroInstaller(
                 }
             }
 
-            val result = runStage("extract") {
+            var extractedBytes = 0L
+            val result = runStage(DistroInstallStage.EXTRACTING) {
                 archive.inputStream().buffered().use { input ->
                     extractor.extract(
                         stream = input,
                         destDir = stagingDir,
                         kind = distro.rootfsKind,
-                        progress = progress,
+                        progress = DistroRootfsExtractor.ProgressCallback { name, bytes ->
+                            progress.onEntry(name, bytes)
+                            extractedBytes += bytes
+                            onByteProgress(bytes)
+                            onProgress(DistroInstallProgress(DistroInstallStage.EXTRACTING, extractedBytes))
+                        },
                         stripComponents = distro.stripComponents
                     )
                 }
             }
 
-            runStage("validate") {
+            runStage(DistroInstallStage.VALIDATING) {
                 val health = RootfsHealth.inspect(stagingDir, result.bytesWritten)
                 if (!health.isHealthy) {
                     throw IOException(health.reason ?: "rootfs validation failed")
                 }
             }
 
-            runStage("prepare manifest") {
+            runStage(DistroInstallStage.ACTIVATING) {
                 manifestStaging.writeText(
                     """{"id":"${distro.id}","installedAtMs":${System.currentTimeMillis()},"sha256":"$actualSha256","entries":${result.entriesExtracted},"bytes":${result.bytesWritten}}"""
                 )
             }
-            runStage("activate") {
+            runStage(DistroInstallStage.ACTIVATING) {
                 activateAtomically(
                     stagingDir = stagingDir,
                     rootfsDir = rootfsDir,
@@ -116,19 +133,41 @@ class DistroInstaller(
         }
     }
 
-    private inline fun <T> runStage(stage: String, block: () -> T): T {
+    private inline fun <T> runStage(stage: DistroInstallStage, block: () -> T): T {
+        onProgress(DistroInstallProgress(stage))
         return try {
             block()
         } catch (failure: Exception) {
             throw IOException(
-                "$stage failed: ${failure.message ?: failure.javaClass.simpleName}",
+                "${stage.label} failed: ${failure.message ?: failure.javaClass.simpleName}",
                 failure
             )
         }
     }
 
-    private fun downloadArchive(distro: Distro, archive: File): String {
+    private fun downloadArchiveWithRetry(distro: Distro, archive: File): String {
+        var lastFailure: IOException? = null
+        for (attempt in 1..maxDownloadAttempts) {
+            try {
+                archive.delete()
+                return downloadArchive(distro, archive, attempt)
+            } catch (failure: IOException) {
+                lastFailure = failure
+                archive.delete()
+                if (attempt == maxDownloadAttempts || !isRetryableDownloadFailure(failure)) break
+                sleepBeforeRetry(attempt)
+            }
+        }
+        throw IOException(
+            "download exhausted $maxDownloadAttempts attempt(s): ${lastFailure?.message ?: "unknown failure"}",
+            lastFailure
+        )
+    }
+
+    private fun downloadArchive(distro: Distro, archive: File, attempt: Int): String {
         val digest = MessageDigest.getInstance("SHA-256")
+        var downloadedBytes = 0L
+        onProgress(DistroInstallProgress(DistroInstallStage.DOWNLOADING, attempt = attempt, maxAttempts = maxDownloadAttempts))
         downloader.open(distro.rootfsUrl).use { input ->
             archive.outputStream().buffered().use { output ->
                 val buffer = ByteArray(64 * 1024)
@@ -138,12 +177,54 @@ class DistroInstaller(
                     if (read == 0) continue
                     output.write(buffer, 0, read)
                     digest.update(buffer, 0, read)
+                    downloadedBytes += read
                     onByteProgress(read.toLong())
+                    onProgress(
+                        DistroInstallProgress(
+                            stage = DistroInstallStage.DOWNLOADING,
+                            bytesProcessed = downloadedBytes,
+                            attempt = attempt,
+                            maxAttempts = maxDownloadAttempts
+                        )
+                    )
                 }
             }
         }
         return digest.digest().joinToString(separator = "") { byte ->
             "%02x".format(byte.toInt() and 0xff)
+        }
+    }
+
+    private fun ensureSufficientStorage(rootDir: File, distro: Distro) {
+        // The archive, a staging tree and the previous rootfs can coexist
+        // during atomic activation. Reserve twice the catalog estimate plus
+        // a small filesystem overhead rather than beginning a download that
+        // will inevitably fail halfway through extraction.
+        val required = (distro.approxSizeBytes.coerceAtLeast(MIN_ROOTFS_ESTIMATE) * 2L)
+            .coerceAtMost(Long.MAX_VALUE - STORAGE_OVERHEAD_BYTES) + STORAGE_OVERHEAD_BYTES
+        val available = rootDir.usableSpace
+        if (available in 0 until required) {
+            throw IOException(
+                "insufficient free storage: need ${required.displayByteSize()}, " +
+                    "available ${available.displayByteSize()}"
+            )
+        }
+    }
+
+    private fun isRetryableDownloadFailure(failure: IOException): Boolean {
+        val message = failure.message.orEmpty()
+        val status = Regex("HTTP (\\d{3})").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        return status == null || status == 408 || status == 429 || status >= 500
+    }
+
+    private fun sleepBeforeRetry(attempt: Int) {
+        val delay = retryDelayMillis * (1L shl (attempt - 1).coerceAtMost(4))
+        if (delay == 0L) return
+        try {
+            Thread.sleep(delay)
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IOException("download interrupted before retry", interrupted)
         }
     }
 
@@ -192,6 +273,10 @@ class DistroInstaller(
     }
 
     companion object {
+        private const val DEFAULT_DOWNLOAD_ATTEMPTS = 3
+        private const val DEFAULT_RETRY_DELAY_MS = 350L
+        private const val MIN_ROOTFS_ESTIMATE = 32L * 1024L * 1024L
+        private const val STORAGE_OVERHEAD_BYTES = 64L * 1024L * 1024L
         /**
          * Suggested base directory for installed distros. We compute a
          * default `<filesDir>/distros/` but the caller is free to put

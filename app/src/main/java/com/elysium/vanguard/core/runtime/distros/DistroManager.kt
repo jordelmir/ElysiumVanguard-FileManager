@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * PHASE 9.6.2 — Orchestrates every distro operation.
@@ -64,8 +63,9 @@ class DistroManager(
 
     private val _errors = MutableStateFlow<Map<String, String>>(emptyMap())
     val errors: StateFlow<Map<String, String>> = _errors.asStateFlow()
-
-    private val activeJobs = ConcurrentHashMap<String, Thread>()
+    private val _progress = MutableStateFlow<Map<String, DistroInstallProgress>>(emptyMap())
+    val progress: StateFlow<Map<String, DistroInstallProgress>> = _progress.asStateFlow()
+    private val installLock = Any()
 
     /**
      * Synchronous install: blocks the calling thread until the download
@@ -75,20 +75,17 @@ class DistroManager(
     fun installBlocking(id: String): Result<File> {
         val distro = DistroCatalog.find(id)
             ?: return Result.failure(IOException("Unknown distro: $id"))
-        if (_installing.value.contains(id)) {
+        if (!beginInstall(id)) {
             return Result.failure(IOException("Already installing $id"))
         }
-        markInstalling(id, true)
-        val installer = DistroInstaller(downloader)
+        val installer = DistroInstaller(downloader, onProgress = { updateProgress(id, it) })
         return try {
             val rootfs = installer.install(distro, baseDir)
-            markInstalling(id, false)
-            _errors.value = _errors.value - id
+            finishInstall(id, error = null)
             refreshInstalled()
             Result.success(rootfs)
         } catch (io: IOException) {
-            markInstalling(id, false)
-            _errors.value = _errors.value + (id to (io.message ?: "install failed"))
+            finishInstall(id, error = io.message ?: "install failed")
             refreshInstalled()
             Result.failure(io)
         }
@@ -206,9 +203,20 @@ class DistroManager(
         return catalogRows + customRows
     }
 
-    private fun markInstalling(id: String, on: Boolean) {
-        val current = _installing.value.toMutableSet()
-        if (on) current += id else current -= id
-        _installing.value = current
+    private fun beginInstall(id: String): Boolean = synchronized(installLock) {
+        if (id in _installing.value) return@synchronized false
+        _installing.value = _installing.value + id
+        _progress.value = _progress.value + (id to DistroInstallProgress(DistroInstallStage.PREFLIGHT))
+        true
+    }
+
+    private fun updateProgress(id: String, progress: DistroInstallProgress) = synchronized(installLock) {
+        if (id in _installing.value) _progress.value = _progress.value + (id to progress)
+    }
+
+    private fun finishInstall(id: String, error: String?) = synchronized(installLock) {
+        _installing.value = _installing.value - id
+        _progress.value = _progress.value - id
+        _errors.value = if (error == null) _errors.value - id else _errors.value + (id to error)
     }
 }
