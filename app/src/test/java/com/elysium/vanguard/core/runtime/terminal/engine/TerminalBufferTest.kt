@@ -414,4 +414,16 @@ class TerminalParserTest {
         assertEquals('m', b.cellAt(0, 0).char)
         assertEquals('n', b.cellAt(0, 3).char)
     }
+
+    @Test
+    fun `DEC input modes are published and reset independently`() {
+        val parser = TerminalParser(TerminalBuffer(cols = 8, rows = 2))
+        parser.feed("\u001b[?1h\u001b[?2004h")
+        assertTrue(parser.inputModes().applicationCursorKeys)
+        assertTrue(parser.inputModes().bracketedPaste)
+
+        parser.feed("\u001b[?1l")
+        assertFalse(parser.inputModes().applicationCursorKeys)
+        assertTrue(parser.inputModes().bracketedPaste)
+    }
 }

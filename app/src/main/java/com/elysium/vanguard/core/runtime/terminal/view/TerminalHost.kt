@@ -40,6 +40,7 @@ internal fun TerminalHost(
     val surface = remember {
         TerminalSurfaceView(context).apply {
             onInput = { bytes -> onBytesTyped(bytes) }
+            onPaste = { bytes -> session.writePaste(bytes) }
         }
     }
 

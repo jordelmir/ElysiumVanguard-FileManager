@@ -1,6 +1,8 @@
 package com.elysium.vanguard.core.runtime.terminal.view
 
 import android.content.Context
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.graphics.Canvas
 import android.util.AttributeSet
 import android.view.KeyEvent
@@ -12,6 +14,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
+import com.elysium.vanguard.core.runtime.terminal.input.TerminalInputEncoder
+import com.elysium.vanguard.core.runtime.terminal.input.TerminalKey
 import com.elysium.vanguard.core.runtime.terminal.render.TerminalRenderer
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 
@@ -69,6 +73,9 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
 
     /** Implemented by host to forward typed bytes to the session. */
     var onInput: ((ByteArray) -> Unit)? = null
+
+    /** Implemented by host to forward clipboard bytes as a distinct paste action. */
+    var onPaste: ((ByteArray) -> Unit)? = null
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         session?.buffer?.requestFullRedraw()
@@ -132,19 +139,17 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         // Translate keys to bytes the shell understands. We prioritize
         // correctness over completeness: Ctrl-A..Z, Enter, Backspace,
         // Tab, Esc, arrows.
+        val modes = session?.inputModes()
         val bytes: ByteArray? = when (val key = mapKeyEvent(event, eventCode)) {
-            // A real PTY preserves terminal line discipline: terminal Enter
-            // is carriage-return and backspace defaults to DEL in xterm.
-            KeyStroke.Enter -> byteArrayOf(0x0D)
-            KeyStroke.Backspace -> byteArrayOf(0x7F)
-            KeyStroke.Tab -> byteArrayOf(0x09)
-            KeyStroke.Esc -> byteArrayOf(0x1B)
-            KeyStroke.Up -> "\u001b[A".toByteArray()
-            KeyStroke.Down -> "\u001b[B".toByteArray()
-            KeyStroke.Right -> "\u001b[C".toByteArray()
-            KeyStroke.Left -> "\u001b[D".toByteArray()
-            is KeyStroke.Char -> String(Character.toChars(key.code)).toByteArray(Charsets.UTF_8)
-            is KeyStroke.CtrlChar -> byteArrayOf(key.controlByte)
+            is KeyStroke.Special -> TerminalInputEncoder.key(
+                key = key.key,
+                modes = modes ?: com.elysium.vanguard.core.runtime.terminal.engine.TerminalInputModes.DEFAULT,
+                shift = event.isShiftPressed,
+                alt = event.isAltPressed,
+                ctrl = event.isCtrlPressed
+            )
+            is KeyStroke.Char -> TerminalInputEncoder.text(key.code, alt = event.isAltPressed)
+            is KeyStroke.CtrlChar -> TerminalInputEncoder.controlLetter(key.letter, alt = event.isAltPressed)
             null -> null
         }
         if (bytes != null && bytes.isNotEmpty()) {
@@ -168,6 +173,11 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         onInput?.invoke(bytes)
     }
 
+    /** Sends clipboard content through the session's negotiated paste protocol. */
+    fun deliverPaste(bytes: ByteArray) {
+        onPaste?.invoke(bytes)
+    }
+
     /**
      * Translate a key event into something the shell parser can react
      * to. Returns null when no translation applies (the framework should
@@ -176,19 +186,24 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     private fun mapKeyEvent(event: KeyEvent, code: Int): KeyStroke? {
         return when {
             event.action != KeyEvent.ACTION_DOWN -> null
-            code == KeyEvent.KEYCODE_ENTER -> KeyStroke.Enter
-            code == KeyEvent.KEYCODE_DEL -> KeyStroke.Backspace
-            code == KeyEvent.KEYCODE_TAB -> KeyStroke.Tab
-            code == KeyEvent.KEYCODE_ESCAPE -> KeyStroke.Esc
-            code == KeyEvent.KEYCODE_DPAD_UP -> KeyStroke.Up
-            code == KeyEvent.KEYCODE_DPAD_DOWN -> KeyStroke.Down
-            code == KeyEvent.KEYCODE_DPAD_LEFT -> KeyStroke.Left
-            code == KeyEvent.KEYCODE_DPAD_RIGHT -> KeyStroke.Right
+            code == KeyEvent.KEYCODE_ENTER -> KeyStroke.Special(TerminalKey.ENTER)
+            code == KeyEvent.KEYCODE_DEL -> KeyStroke.Special(TerminalKey.BACKSPACE)
+            code == KeyEvent.KEYCODE_TAB -> KeyStroke.Special(TerminalKey.TAB)
+            code == KeyEvent.KEYCODE_ESCAPE -> KeyStroke.Special(TerminalKey.ESCAPE)
+            code == KeyEvent.KEYCODE_DPAD_UP -> KeyStroke.Special(TerminalKey.UP)
+            code == KeyEvent.KEYCODE_DPAD_DOWN -> KeyStroke.Special(TerminalKey.DOWN)
+            code == KeyEvent.KEYCODE_DPAD_LEFT -> KeyStroke.Special(TerminalKey.LEFT)
+            code == KeyEvent.KEYCODE_DPAD_RIGHT -> KeyStroke.Special(TerminalKey.RIGHT)
+            code == KeyEvent.KEYCODE_MOVE_HOME -> KeyStroke.Special(TerminalKey.HOME)
+            code == KeyEvent.KEYCODE_MOVE_END -> KeyStroke.Special(TerminalKey.END)
+            code == KeyEvent.KEYCODE_INSERT -> KeyStroke.Special(TerminalKey.INSERT)
+            code == KeyEvent.KEYCODE_FORWARD_DEL -> KeyStroke.Special(TerminalKey.DELETE)
+            code == KeyEvent.KEYCODE_PAGE_UP -> KeyStroke.Special(TerminalKey.PAGE_UP)
+            code == KeyEvent.KEYCODE_PAGE_DOWN -> KeyStroke.Special(TerminalKey.PAGE_DOWN)
+            code in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12 ->
+                KeyStroke.Special(TerminalKey.entries[TerminalKey.F1.ordinal + code - KeyEvent.KEYCODE_F1])
             event.isCtrlPressed && code in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
-                val charIdx = code - KeyEvent.KEYCODE_A
-                // Ctrl+A..Z maps to control bytes 1..26. The lower 5 bits
-                // of the ASCII letter are the control byte.
-                KeyStroke.CtrlChar((charIdx + 1).toByte())
+                KeyStroke.CtrlChar(('A'.code + code - KeyEvent.KEYCODE_A).toChar())
             }
             // KeyEvent.getUnicodeChar() returns Int. We compare with
             // the literal 0 (Int) so the comparison is well-typed.
@@ -199,18 +214,11 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     }
 
     private sealed class KeyStroke {
-        data object Enter : KeyStroke()
-        data object Backspace : KeyStroke()
-        data object Tab : KeyStroke()
-        data object Esc : KeyStroke()
-        data object Up : KeyStroke()
-        data object Down : KeyStroke()
-        data object Left : KeyStroke()
-        data object Right : KeyStroke()
+        data class Special(val key: TerminalKey) : KeyStroke()
         /** Unicode codepoint produced by the key event; rendered to UTF-8 in the host. */
         data class Char(val code: Int) : KeyStroke()
-        /** Control-byte for a Ctrl+letter combo; the byte value itself, ready to write. */
-        data class CtrlChar(val controlByte: Byte) : KeyStroke()
+        /** ASCII letter for a Ctrl+letter combo. */
+        data class CtrlChar(val letter: kotlin.Char) : KeyStroke()
     }
 }
 
@@ -232,14 +240,26 @@ private class TerminalInputConnection(
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
         if (beforeLength > 0) {
-            // Convert "backspace" into the standard DEL control byte the
-            // shell expects. Some apps prefer DEL = 0x7F; both work for
-            // most shells.
-            repeat(beforeLength) { view.deliverInput(byteArrayOf(0x08)) }
+            repeat(beforeLength) { view.deliverInput(byteArrayOf(0x7f)) }
         }
         if (afterLength > 0) {
-            repeat(afterLength) { view.deliverInput(byteArrayOf(0x7F)) }
+            repeat(afterLength) { view.deliverInput(byteArrayOf(0x1b, '['.code.toByte(), '3'.code.toByte(), '~'.code.toByte())) }
         }
+        return true
+    }
+
+    override fun performContextMenuAction(id: Int): Boolean {
+        if (id != android.R.id.paste && id != android.R.id.pasteAsPlainText) {
+            return super.performContextMenuAction(id)
+        }
+        val clipboard = view.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip ?: return false
+        if (!clip.description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) &&
+            !clip.description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)
+        ) return false
+        val text = clip.getItemAt(0).coerceToText(view.context)?.toString() ?: return false
+        if (text.isEmpty()) return false
+        view.deliverPaste(text.toByteArray(Charsets.UTF_8))
         return true
     }
 }

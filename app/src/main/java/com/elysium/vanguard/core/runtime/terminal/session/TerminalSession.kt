@@ -3,7 +3,9 @@ package com.elysium.vanguard.core.runtime.terminal.session
 import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncher
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherPick
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
+import com.elysium.vanguard.core.runtime.terminal.engine.TerminalInputModes
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalParser
+import com.elysium.vanguard.core.runtime.terminal.input.TerminalInputEncoder
 import com.elysium.vanguard.core.runtime.terminal.pty.NativePty
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -180,6 +182,12 @@ class TerminalSession(
             }
         }
     }
+
+    /** Current VT input protocol requested by the program in the PTY. */
+    internal fun inputModes(): TerminalInputModes = parser.inputModes()
+
+    /** Sends clipboard text without exposing it to the terminal command parser. */
+    fun writePaste(bytes: ByteArray) = write(TerminalInputEncoder.paste(bytes, parser.inputModes()))
 
     /** Convenience for text input — converts String → bytes as UTF-8. */
     fun writeText(s: String) = write(s.toByteArray(Charsets.UTF_8))

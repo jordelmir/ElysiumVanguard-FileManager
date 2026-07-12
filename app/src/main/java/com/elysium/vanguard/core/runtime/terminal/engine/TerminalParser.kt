@@ -8,8 +8,8 @@ import java.nio.charset.StandardCharsets
 /**
  * PHASE 9.6.1 — VT100 / ECMA-48 escape-sequence parser.
  *
- * The parser is a tiny state machine. It accepts a stream of UTF-8 bytes
- * (we decode to a single Java String before handing to the parser) and
+ * The parser is a tiny state machine. It accepts an arbitrarily fragmented
+ * stream of UTF-8 bytes, incrementally decodes it, and
  * produces mutations on a [TerminalBuffer] through a sequence of method
  * calls. It is **deliberately** a write-side-only component — the buffer
  * owns layout, the parser only emits operations like "put char" or
@@ -26,10 +26,9 @@ import java.nio.charset.StandardCharsets
  *
  * Not in scope (deferred):
  *
- *   - DEC private modes (private mode set/reset, DECTCEM, alt buffer).
+ *   - DEC cursor-key and bracketed-paste modes, plus alternate buffers.
  *   - SGR 38;5;n (256-color) and SGR 38;2;r;g;b (truecolor).
  *   - Mouse reporting (CSI ?...h / CSI ?...l).
- *   - Bracketed paste mode.
  *   - Sixel graphics.
  *   - Scroll regions (DECSTBM).
  *
@@ -49,6 +48,11 @@ internal class TerminalParser(
         .onMalformedInput(CodingErrorAction.REPLACE)
         .onUnmappableCharacter(CodingErrorAction.REPLACE)
     private var incompleteUtf8: ByteArray = ByteArray(0)
+    @Volatile
+    private var negotiatedInputModes: TerminalInputModes = TerminalInputModes.DEFAULT
+
+    /** Thread-safe snapshot read by the Android input layer. */
+    fun inputModes(): TerminalInputModes = negotiatedInputModes
 
     /**
      * Consume raw PTY bytes. UTF-8 and escape state are both retained across
@@ -228,15 +232,19 @@ internal class TerminalParser(
 
     private fun setMode(parameters: IntArray, enabled: Boolean) {
         if (privateMarker != '?') return
+        var modes = negotiatedInputModes
         parameters.forEach { mode ->
             when (mode) {
+                1 -> modes = modes.copy(applicationCursorKeys = enabled)
                 // xterm's alternate-screen variants. 1049 is the modern
                 // save/restore form used by vim and less; 47/1047 remain for
                 // tmux and older programs.
                 47, 1047, 1049 -> if (enabled) buffer.enterAlternateScreen(clear = true)
                 else buffer.exitAlternateScreen()
+                2004 -> modes = modes.copy(bracketedPaste = enabled)
             }
         }
+        negotiatedInputModes = modes
     }
 
     /**
