@@ -23,7 +23,11 @@ unchanged.
 - Binary package SHA-256: `ac81ad623d74c209718b9f3acb2dd702cc8a88c431e820d212229910b4db29da`
 - Source: https://www.samba.org/ftp/talloc/talloc-2.4.3.tar.gz
 - Source archive SHA-256: `dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd`
-- License: GPL-3.0-only (see `GPL-3.0-only.txt`)
+- Library source license: LGPL-3.0-or-later (see
+  `LGPL-3.0-or-later.txt` and the incorporated GPLv3 terms in
+  `GPL-3.0-only.txt`). The Termux package recipe labels the package
+  `GPL-3.0`; the upstream `talloc.c` and `talloc.h` notices govern the
+  library and state LGPL-3.0-or-later.
 
 The packaged library's SONAME is correspondingly changed from
 `libtalloc.so.2` to `libtalloc2.so`.

@@ -2,7 +2,7 @@
 
 **Estado:** aprobado por el propietario del proyecto  
 **Fecha:** 2026-07-12  
-**Rama de ejecución:** `codex/elysium-universal-runtime`  
+**Rama de ejecución:** `main`, por autorización expresa posterior del propietario
 **Orden rectora SHA-256:** `34dbd1f87e267b4db3a24de8395681ac4c659f9b879161f3d62c141af392e486`
 
 ## 1. Autoridad y alcance
@@ -65,7 +65,8 @@ o estados falsos. Se corregirán por prioridad y con pruebas de regresión.
 
 ## 3. Principios no negociables
 
-- No modificar ni hacer push directo a `main`.
+- Trabajar directamente en `main`, según la instrucción expresa del propietario;
+  el push remoto continúa fuera de alcance hasta una orden explícita.
 - Preservar el trabajo funcional existente y migrarlo incrementalmente.
 - No eliminar una función hasta demostrar que su reemplazo cubre su contrato.
 - No mostrar capacidades simuladas como disponibles.
@@ -354,4 +355,3 @@ El WinLayer requiere prefixes aislados, detección de arquitectura, fallback de
 renderer, registro de compatibilidad, contención de fallos y cleanup completo.
 Windows VM seguirá siendo opcional, condicionado a capability real y a una
 imagen legal suministrada por el usuario.
-
