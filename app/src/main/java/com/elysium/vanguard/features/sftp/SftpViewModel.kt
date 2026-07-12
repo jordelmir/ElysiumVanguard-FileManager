@@ -59,6 +59,8 @@ class SftpViewModel @Inject constructor(
     fun start(rootDir: File) {
         val cfg = SftpConfig(
             port = SftpConfig.DEFAULT_PORT,
+            // Starting from the sharing screen is the explicit LAN-exposure action.
+            bindAddress = SftpConfig.LAN_BIND_ADDRESS,
             root = SftpConfig.RootSpec.Filesystem(rootDir)
         )
         if (orchestrator.start(cfg)) {

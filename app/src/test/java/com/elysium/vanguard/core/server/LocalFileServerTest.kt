@@ -35,6 +35,11 @@ class LocalFileServerTest {
     private lateinit var server: LocalFileServer
     private val token = "test-token-1234567890"
 
+    @Test fun `network binding is loopback unless LAN exposure is explicit`() {
+        assertEquals("127.0.0.1", LocalFileServer.DEFAULT_BIND_ADDRESS)
+        assertEquals("0.0.0.0", LocalFileServer.LAN_BIND_ADDRESS)
+    }
+
     @Before fun setUp() {
         server = LocalFileServer(
             port = 0,

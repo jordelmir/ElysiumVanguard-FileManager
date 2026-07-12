@@ -49,7 +49,9 @@ class LocalFileServer(
 
     companion object {
         const val DEFAULT_PORT = 8765
-        const val DEFAULT_BIND_ADDRESS = "0.0.0.0"  // all interfaces — phone is the server
+        /** Safe default. A caller must opt into [LAN_BIND_ADDRESS] explicitly. */
+        const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
+        const val LAN_BIND_ADDRESS = "0.0.0.0"
         private const val TAG = "LocalFileServer"
 
         /** Generate a 24-byte URL-safe auth token (≈ 32 base64url chars). */

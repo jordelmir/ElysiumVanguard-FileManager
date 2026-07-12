@@ -71,6 +71,8 @@ class LocalServerOrchestrator(
 
         val srv = LocalFileServer(
             port = port,
+            // start() is only reached from the user's explicit Wi-Fi sharing flow.
+            bindAddress = LocalFileServer.LAN_BIND_ADDRESS,
             authTokenSupplier = { authToken },
             rootDir = { fsRootSupplier()?.absolutePath ?: "" }
         )

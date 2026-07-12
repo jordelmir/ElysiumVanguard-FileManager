@@ -35,6 +35,11 @@ class SftpConfigTest {
         assertEquals("elysium", SftpConfig.DEFAULT_USER)
     }
 
+    @Test fun `network binding is loopback unless LAN exposure is explicit`() {
+        assertEquals("127.0.0.1", SftpConfig.DEFAULT_BIND_ADDRESS)
+        assertEquals("0.0.0.0", SftpConfig.LAN_BIND_ADDRESS)
+    }
+
     @Test fun `filesystem root spec carries the directory`() {
         val dir = File("/tmp/test")
         val cfg = SftpConfig(root = SftpConfig.RootSpec.Filesystem(dir))

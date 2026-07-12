@@ -39,7 +39,9 @@ data class SftpConfig(
 
     companion object {
         const val DEFAULT_PORT = 2222
-        const val DEFAULT_BIND_ADDRESS = "0.0.0.0"
+        /** Safe default for internal/testing use. LAN exposure must be deliberate. */
+        const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
+        const val LAN_BIND_ADDRESS = "0.0.0.0"
         const val DEFAULT_USER = "elysium"
 
         /** 16-byte URL-safe password. 22 base64url chars, copy-paste friendly. */
