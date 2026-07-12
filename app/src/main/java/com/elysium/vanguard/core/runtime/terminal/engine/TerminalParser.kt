@@ -43,6 +43,7 @@ internal class TerminalParser(
     private var state: State = State.GROUND
     private val params: ArrayList<Int> = ArrayList(8)
     private var intermediate: Char = ' '
+    private var privateMarker: Char? = null
     private var oscBuffer: StringBuilder = StringBuilder(64)
     private val utf8Decoder = StandardCharsets.UTF_8.newDecoder()
         .onMalformedInput(CodingErrorAction.REPLACE)
@@ -165,6 +166,10 @@ internal class TerminalParser(
 
     private fun handleCsiEntry(c: Char) {
         when (c) {
+            '?', '>', '!' -> {
+                if (params.isEmpty() && privateMarker == null) privateMarker = c
+                else state = State.GROUND
+            }
             in '0'..'9' -> {
                 if (params.isEmpty()) params.add(0)
                 val lastIdx = params.size - 1
@@ -212,12 +217,26 @@ internal class TerminalParser(
                 }
             }
             'm' -> applySgr(p)
-            'h', 'l' -> { /* SET/RESET mode — ignored in 9.6.1 */ }
+            'h' -> setMode(p, enabled = true)
+            'l' -> setMode(p, enabled = false)
             'r' -> { /* DECSTBM scroll region — ignored */ }
             else -> { /* ignore unknowns */ }
         }
         // Reset intermediate per sequence.
         if (i != ' ') intermediate = ' '
+    }
+
+    private fun setMode(parameters: IntArray, enabled: Boolean) {
+        if (privateMarker != '?') return
+        parameters.forEach { mode ->
+            when (mode) {
+                // xterm's alternate-screen variants. 1049 is the modern
+                // save/restore form used by vim and less; 47/1047 remain for
+                // tmux and older programs.
+                47, 1047, 1049 -> if (enabled) buffer.enterAlternateScreen(clear = true)
+                else buffer.exitAlternateScreen()
+            }
+        }
     }
 
     /**
@@ -364,6 +383,7 @@ internal class TerminalParser(
     private fun resetParams() {
         params.clear()
         intermediate = ' '
+        privateMarker = null
     }
 
     companion object {

@@ -3,11 +3,8 @@ package com.elysium.vanguard.core.runtime.terminal.engine
 import java.util.ArrayDeque
 
 /**
- * Mutable terminal screen model with bounded scrollback and frame snapshots.
- *
- * Parser mutations happen on a PTY I/O coroutine while Canvas rendering runs
- * elsewhere. A renderer therefore consumes one immutable [TerminalSnapshot]
- * rather than observing a grid while it is being resized or scrolled.
+ * Mutable terminal model with a primary screen, alternate screen, bounded
+ * primary scrollback and immutable renderer snapshots.
  */
 internal class TerminalBuffer(
     cols: Int,
@@ -19,16 +16,18 @@ internal class TerminalBuffer(
     var rows: Int = rows
         private set
 
-    private var primary: Array<TerminalCell> = blankGrid(cols, rows)
+    private var primaryScreen = ScreenState(blankGrid(cols, rows))
+    private var alternateScreen: ScreenState? = null
+    private var activeScreen: ScreenState = primaryScreen
     private val scrollback = ArrayDeque<TerminalCellArray>(scrollbackLines)
-    private var dirtyRows: BooleanArray = BooleanArray(rows) { true }
+    private var dirtyRows = BooleanArray(rows) { true }
     private var fullRedraw = true
 
-    var cursorRow: Int = 0
-        private set
-    var cursorCol: Int = 0
-        private set
-    var currentAttributes: TerminalAttributes = TerminalAttributes.DEFAULT
+    val cursorRow: Int get() = activeScreen.cursorRow
+    val cursorCol: Int get() = activeScreen.cursorCol
+    var currentAttributes: TerminalAttributes
+        get() = activeScreen.attributes
+        set(value) { activeScreen.attributes = value }
 
     init {
         require(cols > 0 && rows > 0) { "grid must be non-empty" }
@@ -41,35 +40,20 @@ internal class TerminalBuffer(
         advanceCursorAfterChar()
     }
 
-    @Synchronized
-    fun lineFeed() = cursorDownOne()
+    @Synchronized fun lineFeed() = cursorDownOne()
+    @Synchronized fun carriageReturn() = setCursor(cursorRow, 0)
+    @Synchronized fun backspace() = setCursor(cursorRow, (cursorCol - 1).coerceAtLeast(0))
+    @Synchronized fun horizontalTab() =
+        setCursor(cursorRow, (((cursorCol / TAB_WIDTH) + 1) * TAB_WIDTH).coerceAtMost(cols - 1))
 
     @Synchronized
-    fun carriageReturn() = setCursor(cursorRow, 0)
-
-    @Synchronized
-    fun backspace() = setCursor(cursorRow, (cursorCol - 1).coerceAtLeast(0))
-
-    @Synchronized
-    fun horizontalTab() = setCursor(cursorRow, (((cursorCol / TAB_WIDTH) + 1) * TAB_WIDTH).coerceAtMost(cols - 1))
-
-    /** Sets cursor to a one-based VT coordinate and clips it to the grid. */
-    @Synchronized
-    fun setCursorPosition(row: Int, col: Int) {
+    fun setCursorPosition(row: Int, col: Int) =
         setCursor((row - 1).coerceIn(0, rows - 1), (col - 1).coerceIn(0, cols - 1))
-    }
 
-    @Synchronized
-    fun cursorUp(n: Int) = setCursor((cursorRow - n.coerceAtLeast(1)).coerceAtLeast(0), cursorCol)
-
-    @Synchronized
-    fun cursorDown(n: Int) = setCursor((cursorRow + n.coerceAtLeast(1)).coerceAtMost(rows - 1), cursorCol)
-
-    @Synchronized
-    fun cursorRight(n: Int) = setCursor(cursorRow, (cursorCol + n.coerceAtLeast(1)).coerceAtMost(cols - 1))
-
-    @Synchronized
-    fun cursorLeft(n: Int) = setCursor(cursorRow, (cursorCol - n.coerceAtLeast(1)).coerceAtLeast(0))
+    @Synchronized fun cursorUp(n: Int) = setCursor((cursorRow - n.coerceAtLeast(1)).coerceAtLeast(0), cursorCol)
+    @Synchronized fun cursorDown(n: Int) = setCursor((cursorRow + n.coerceAtLeast(1)).coerceAtMost(rows - 1), cursorCol)
+    @Synchronized fun cursorRight(n: Int) = setCursor(cursorRow, (cursorCol + n.coerceAtLeast(1)).coerceAtMost(cols - 1))
+    @Synchronized fun cursorLeft(n: Int) = setCursor(cursorRow, (cursorCol - n.coerceAtLeast(1)).coerceAtLeast(0))
 
     @Synchronized
     fun eraseFromCursorToEndOfScreen() {
@@ -83,60 +67,52 @@ internal class TerminalBuffer(
         clearRowUpToInclusive(cursorRow, cursorCol)
     }
 
+    @Synchronized fun eraseEntireScreen() { for (row in 0 until rows) clearRow(row) }
+    @Synchronized fun eraseFromCursorToEndOfLine() = clearRowFrom(cursorRow, cursorCol)
+    @Synchronized fun eraseFromStartOfLineToCursor() = clearRowUpToInclusive(cursorRow, cursorCol)
+    @Synchronized fun eraseEntireLine() = clearRow(cursorRow)
+
+    /** Enters DEC alternate screen; primary cells and scrollback remain intact. */
     @Synchronized
-    fun eraseEntireScreen() {
-        for (row in 0 until rows) clearRow(row)
+    fun enterAlternateScreen(clear: Boolean = true) {
+        val alternate = if (clear || alternateScreen == null) {
+            ScreenState(blankGrid(cols, rows))
+        } else {
+            alternateScreen!!
+        }
+        alternateScreen = alternate
+        activeScreen = alternate
+        markAllDirty()
+    }
+
+    /** Restores the primary screen and discards the transient alternate grid. */
+    @Synchronized
+    fun exitAlternateScreen() {
+        if (activeScreen === primaryScreen) return
+        activeScreen = primaryScreen
+        alternateScreen = null
+        markAllDirty()
     }
 
     @Synchronized
-    fun eraseFromCursorToEndOfLine() = clearRowFrom(cursorRow, cursorCol)
+    fun isUsingAlternateScreen(): Boolean = activeScreen !== primaryScreen
 
-    @Synchronized
-    fun eraseFromStartOfLineToCursor() = clearRowUpToInclusive(cursorRow, cursorCol)
-
-    @Synchronized
-    fun eraseEntireLine() = clearRow(cursorRow)
-
-    /**
-     * Reflows visible rows into a new mutable grid without clearing terminal
-     * history. Rows are conservative hard boundaries because this model does
-     * not yet retain DEC wrap flags; content is never silently discarded except
-     * the oldest visible rows when shrinking height.
-     */
+    /** Reflows both screens so fold/rotation does not corrupt a hidden main screen. */
     @Synchronized
     fun resize(newCols: Int, newRows: Int) {
         require(newCols > 0 && newRows > 0) { "grid must be non-empty" }
         if (newCols == cols && newRows == rows) return
 
-        val oldCursorRow = cursorRow
-        val oldCursorCol = cursorCol
-        val visibleRows = ArrayList<TerminalCellArray>(rows)
-        for (row in 0 until rows) visibleRows += rowCopy(row)
-        val reflowed = reflowRows(visibleRows, newCols)
-        val retained = reflowed.takeLast(newRows)
-        val skipped = reflowed.size - retained.size
+        val activeWasAlternate = activeScreen !== primaryScreen
+        val resizedPrimary = reflowScreen(primaryScreen, newCols, newRows)
+        val resizedAlternate = alternateScreen?.let { reflowScreen(it, newCols, newRows) }
+        val reflowedHistory = reflowRows(scrollback.toList(), newCols)
 
         cols = newCols
         rows = newRows
-        primary = blankGrid(newCols, newRows)
-        // Keep the existing top-left viewport stable while a larger display
-        // becomes available. When shrinking, `takeLast` has already removed
-        // the oldest rows and the retained viewport still starts at row zero.
-        val firstTargetRow = 0
-        retained.forEachIndexed { index, row ->
-            System.arraycopy(row.cells, 0, primary, (firstTargetRow + index) * newCols, newCols)
-        }
-
-        val rowsBeforeCursor = reflowRows(visibleRows.take(oldCursorRow), newCols).size
-        val cursorChunk = oldCursorCol / newCols
-        val mappedRow = rowsBeforeCursor + cursorChunk - skipped + firstTargetRow
-        val mappedCol = oldCursorCol % newCols
-        cursorRow = mappedRow.coerceIn(0, newRows - 1)
-        cursorCol = mappedCol.coerceIn(0, newCols - 1)
-
-        // Preserve history but normalize row width for consumers that inspect
-        // scrollback after a fold/unfold resize.
-        val reflowedHistory = reflowRows(scrollback.toList(), newCols)
+        primaryScreen = resizedPrimary
+        alternateScreen = resizedAlternate
+        activeScreen = if (activeWasAlternate && resizedAlternate != null) resizedAlternate else resizedPrimary
         scrollback.clear()
         reflowedHistory.takeLast(scrollbackLines).forEach(scrollback::addLast)
         dirtyRows = BooleanArray(newRows) { true }
@@ -146,27 +122,23 @@ internal class TerminalBuffer(
     @Synchronized
     fun cellAt(row: Int, col: Int): TerminalCell {
         require(row in 0 until rows && col in 0 until cols) { "cell outside terminal grid" }
-        return primary[row * cols + col]
+        return activeScreen.cells[row * cols + col]
     }
 
-    @Synchronized
-    fun primaryRows(): Int = rows
+    @Synchronized fun primaryRows(): Int = rows
+    @Synchronized fun primaryCols(): Int = cols
 
-    @Synchronized
-    fun primaryCols(): Int = cols
-
-    /** Immutable frame state. Calling this consumes accumulated dirty rows. */
+    /** Immutable frame state. Calling this consumes the dirty-row accumulator. */
     @Synchronized
     fun snapshot(): TerminalSnapshot {
-        val dirty = if (fullRedraw) IntArray(rows) { it } else {
-            dirtyRows.indices.filter { dirtyRows[it] }.toIntArray()
-        }
+        val dirty = if (fullRedraw) IntArray(rows) { it }
+        else dirtyRows.indices.filter { dirtyRows[it] }.toIntArray()
         val snapshot = TerminalSnapshot(
             cols = cols,
             rows = rows,
             cursorRow = cursorRow,
             cursorCol = cursorCol,
-            cells = primary.copyOf(),
+            cells = activeScreen.cells.copyOf(),
             dirtyRows = dirty,
             fullRedraw = fullRedraw
         )
@@ -175,89 +147,96 @@ internal class TerminalBuffer(
         return snapshot
     }
 
-    @Synchronized
-    fun requestFullRedraw() {
-        fullRedraw = true
-        dirtyRows.fill(true)
-    }
-
-    @Synchronized
-    fun scrollbackSnapshot(): Array<TerminalCellArray> = scrollback.toTypedArray()
+    @Synchronized fun requestFullRedraw() = markAllDirty()
+    @Synchronized fun scrollbackSnapshot(): Array<TerminalCellArray> = scrollback.toTypedArray()
 
     private fun advanceCursorAfterChar() {
-        if (cursorCol + 1 < cols) {
-            setCursor(cursorRow, cursorCol + 1)
-        } else {
+        if (cursorCol + 1 < cols) setCursor(cursorRow, cursorCol + 1)
+        else {
             setCursor(cursorRow, 0)
             cursorDownOne()
         }
     }
 
     private fun cursorDownOne() {
-        if (cursorRow + 1 < rows) setCursor(cursorRow + 1, cursorCol)
-        else scrollUpOne()
+        if (cursorRow + 1 < rows) setCursor(cursorRow + 1, cursorCol) else scrollUpOne()
     }
 
     private fun scrollUpOne() {
-        // A one-row terminal cannot shift content upward. Keeping the row is
-        // the least surprising VT behavior and avoids erasing the last glyph
-        // every time output wraps at the right edge.
         if (rows <= 1) {
             dirtyRows[0] = true
             return
         }
-        if (scrollbackLines > 0) {
+        val screen = activeScreen
+        if (screen === primaryScreen && scrollbackLines > 0) {
             if (scrollback.size == scrollbackLines) scrollback.removeFirst()
-            scrollback.addLast(rowCopy(0))
+            scrollback.addLast(rowCopy(screen, 0))
         }
-        System.arraycopy(primary, cols, primary, 0, (rows - 1) * cols)
+        System.arraycopy(screen.cells, cols, screen.cells, 0, (rows - 1) * cols)
         val blank = TerminalCell(' ', currentAttributes)
         val bottom = (rows - 1) * cols
-        for (column in 0 until cols) primary[bottom + column] = blank
+        for (column in 0 until cols) screen.cells[bottom + column] = blank
+        screen.cursorRow = rows - 1
         dirtyRows.fill(true)
-        // Cursor stays on the bottom row, retaining its column.
-        cursorRow = rows - 1
-        dirtyRows[cursorRow] = true
     }
 
     private fun setCursor(row: Int, column: Int) {
-        val previousRow = cursorRow
-        cursorRow = row
-        cursorCol = column
-        dirtyRows[previousRow] = true
+        val screen = activeScreen
+        dirtyRows[screen.cursorRow] = true
+        screen.cursorRow = row
+        screen.cursorCol = column
         dirtyRows[row] = true
     }
 
     private fun setCellRaw(row: Int, col: Int, cell: TerminalCell) {
-        primary[row * cols + col] = cell
+        activeScreen.cells[row * cols + col] = cell
         dirtyRows[row] = true
     }
 
     private fun clearRow(row: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
-        for (column in 0 until cols) primary[start + column] = blank
+        for (column in 0 until cols) activeScreen.cells[start + column] = blank
         dirtyRows[row] = true
     }
 
     private fun clearRowFrom(row: Int, fromCol: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
-        for (column in fromCol until cols) primary[start + column] = blank
+        for (column in fromCol until cols) activeScreen.cells[start + column] = blank
         dirtyRows[row] = true
     }
 
     private fun clearRowUpToInclusive(row: Int, column: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
-        for (col in 0..column.coerceAtMost(cols - 1)) primary[start + col] = blank
+        for (col in 0..column.coerceAtMost(cols - 1)) activeScreen.cells[start + col] = blank
         dirtyRows[row] = true
     }
 
-    private fun rowCopy(row: Int): TerminalCellArray {
-        val cells = Array(cols) { index -> primary[row * cols + index] }
-        return TerminalCellArray(cells)
+    private fun reflowScreen(screen: ScreenState, targetCols: Int, targetRows: Int): ScreenState {
+        val visibleRows = ArrayList<TerminalCellArray>(rows)
+        for (row in 0 until rows) visibleRows += rowCopy(screen, row)
+        val reflowed = reflowRows(visibleRows, targetCols)
+        val retained = reflowed.takeLast(targetRows)
+        val skipped = reflowed.size - retained.size
+        val cells = blankGrid(targetCols, targetRows)
+        retained.forEachIndexed { index, row ->
+            System.arraycopy(row.cells, 0, cells, index * targetCols, targetCols)
+        }
+        val rowsBeforeCursor = reflowRows(visibleRows.take(screen.cursorRow), targetCols).size
+        val cursorRow = (rowsBeforeCursor + screen.cursorCol / targetCols - skipped)
+            .coerceIn(0, targetRows - 1)
+        return ScreenState(
+            cells = cells,
+            cursorRow = cursorRow,
+            cursorCol = (screen.cursorCol % targetCols).coerceIn(0, targetCols - 1),
+            attributes = screen.attributes
+        )
     }
+
+    private fun rowCopy(screen: ScreenState, row: Int): TerminalCellArray =
+        TerminalCellArray(Array(cols) { column -> screen.cells[row * cols + column] })
 
     private fun reflowRows(source: List<TerminalCellArray>, targetCols: Int): List<TerminalCellArray> {
         val result = ArrayList<TerminalCellArray>()
@@ -281,8 +260,20 @@ internal class TerminalBuffer(
         return result
     }
 
+    private fun markAllDirty() {
+        fullRedraw = true
+        dirtyRows.fill(true)
+    }
+
     private fun blankGrid(columns: Int, rowCount: Int): Array<TerminalCell> =
         Array(columns * rowCount) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
+
+    private data class ScreenState(
+        var cells: Array<TerminalCell>,
+        var cursorRow: Int = 0,
+        var cursorCol: Int = 0,
+        var attributes: TerminalAttributes = TerminalAttributes.DEFAULT
+    )
 
     companion object {
         const val DEFAULT_SCROLLBACK = 1_000
@@ -302,13 +293,10 @@ internal data class TerminalSnapshot(
     fun cellAt(row: Int, col: Int): TerminalCell = cells[row * cols + col]
 }
 
-/** One immutable row used by scrollback and resize reflow. */
 internal class TerminalCellArray(val cells: Array<TerminalCell>) {
     constructor(cols: Int) : this(Array(cols) { TerminalCell(' ', TerminalAttributes.DEFAULT) })
-
     fun cellAt(col: Int): TerminalCell = cells[col]
     val size: Int get() = cells.size
 }
 
-/** A single glyph cell plus its immutable rendition attributes. */
 internal data class TerminalCell(val char: Char, val attributes: TerminalAttributes)

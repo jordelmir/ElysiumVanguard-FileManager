@@ -1,7 +1,9 @@
 package com.elysium.vanguard.core.runtime.terminal.engine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -170,6 +172,27 @@ class TerminalBufferTest {
         assertEquals(intArrayOf(0).toList(), changed.dirtyRows.toList())
         assertEquals('x', changed.cellAt(0, 0).char)
         assertEquals(0, b.snapshot().dirtyRows.size)
+    }
+
+    @Test
+    fun `alternate screen restores untouched primary content after resize`() {
+        val b = TerminalBuffer(cols = 6, rows = 2)
+        b.putChar('m')
+        b.putChar('a')
+        b.putChar('i')
+        b.putChar('n')
+        b.enterAlternateScreen()
+        b.putChar('v')
+        b.putChar('i')
+        b.putChar('m')
+        b.resize(10, 3)
+        assertTrue(b.isUsingAlternateScreen())
+        assertEquals('v', b.cellAt(0, 0).char)
+
+        b.exitAlternateScreen()
+        assertFalse(b.isUsingAlternateScreen())
+        assertEquals('m', b.cellAt(0, 0).char)
+        assertEquals('n', b.cellAt(0, 3).char)
     }
 }
 
@@ -375,5 +398,20 @@ class TerminalParserTest {
         assertEquals('A', b.cellAt(0, 0).char)
         assertEquals('B', b.cellAt(0, 1).char)
         assertEquals(' ', b.cellAt(0, 2).char)
+    }
+
+    @Test
+    fun `DEC alternate screen mode keeps main terminal intact`() {
+        val b = TerminalBuffer(cols = 8, rows = 2)
+        val parser = TerminalParser(b)
+        parser.feed("main")
+        parser.feed("\u001b[?1049hvim")
+        assertTrue(b.isUsingAlternateScreen())
+        assertEquals('v', b.cellAt(0, 0).char)
+
+        parser.feed("\u001b[?1049l")
+        assertFalse(b.isUsingAlternateScreen())
+        assertEquals('m', b.cellAt(0, 0).char)
+        assertEquals('n', b.cellAt(0, 3).char)
     }
 }
