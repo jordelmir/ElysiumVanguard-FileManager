@@ -16,7 +16,7 @@ internal class TerminalBuffer(
     var rows: Int = rows
         private set
 
-    private var primaryScreen = ScreenState(blankGrid(cols, rows))
+    private var primaryScreen = ScreenState(blankGrid(cols, rows), scrollBottom = rows - 1)
     private var alternateScreen: ScreenState? = null
     private var activeScreen: ScreenState = primaryScreen
     private val scrollback = ArrayDeque<TerminalCellArray>(scrollbackLines)
@@ -41,6 +41,11 @@ internal class TerminalBuffer(
     }
 
     @Synchronized fun lineFeed() = cursorDownOne()
+    @Synchronized fun reverseIndex() {
+        val screen = activeScreen
+        if (screen.cursorRow == screen.scrollTop) scrollDownRegion(screen.scrollTop, screen.scrollBottom, 1)
+        else if (screen.cursorRow > 0) setCursor(screen.cursorRow - 1, screen.cursorCol)
+    }
     @Synchronized fun carriageReturn() = setCursor(cursorRow, 0)
     @Synchronized fun backspace() = setCursor(cursorRow, (cursorCol - 1).coerceAtLeast(0))
     @Synchronized fun horizontalTab() =
@@ -72,11 +77,87 @@ internal class TerminalBuffer(
     @Synchronized fun eraseFromStartOfLineToCursor() = clearRowUpToInclusive(cursorRow, cursorCol)
     @Synchronized fun eraseEntireLine() = clearRow(cursorRow)
 
+    /** DECSTBM: sets a one-based inclusive scroll region and homes the cursor. */
+    @Synchronized
+    fun setScrollRegion(top: Int = 1, bottom: Int = rows) {
+        val normalizedTop = (top - 1).coerceIn(0, rows - 1)
+        val normalizedBottom = (bottom - 1).coerceIn(0, rows - 1)
+        if (normalizedTop >= normalizedBottom) return
+        activeScreen.scrollTop = normalizedTop
+        activeScreen.scrollBottom = normalizedBottom
+        setCursor(0, 0)
+    }
+
+    @Synchronized fun resetScrollRegion() = setScrollRegion(1, rows)
+
+    /** IL — inserts blank lines at the cursor within the active scroll region. */
+    @Synchronized
+    fun insertLines(count: Int) {
+        val screen = activeScreen
+        if (cursorRow !in screen.scrollTop..screen.scrollBottom) return
+        val actual = count.coerceAtLeast(1).coerceAtMost(screen.scrollBottom - cursorRow + 1)
+        for (row in screen.scrollBottom downTo cursorRow + actual) copyRow(screen, row - actual, row)
+        for (row in cursorRow until cursorRow + actual) blankRow(screen, row)
+        markDirtyRows(cursorRow, screen.scrollBottom)
+    }
+
+    /** DL — deletes lines at the cursor within the active scroll region. */
+    @Synchronized
+    fun deleteLines(count: Int) {
+        val screen = activeScreen
+        if (cursorRow !in screen.scrollTop..screen.scrollBottom) return
+        val actual = count.coerceAtLeast(1).coerceAtMost(screen.scrollBottom - cursorRow + 1)
+        for (row in cursorRow..screen.scrollBottom - actual) copyRow(screen, row + actual, row)
+        for (row in screen.scrollBottom - actual + 1..screen.scrollBottom) blankRow(screen, row)
+        markDirtyRows(cursorRow, screen.scrollBottom)
+    }
+
+    /** ICH — shifts cells right and inserts blanks without modifying other rows. */
+    @Synchronized
+    fun insertBlankChars(count: Int) {
+        val actual = count.coerceAtLeast(1).coerceAtMost(cols - cursorCol)
+        val screen = activeScreen
+        val rowStart = cursorRow * cols
+        for (column in cols - 1 downTo cursorCol + actual) {
+            screen.cells[rowStart + column] = screen.cells[rowStart + column - actual]
+        }
+        val blank = TerminalCell(' ', currentAttributes)
+        for (column in cursorCol until cursorCol + actual) screen.cells[rowStart + column] = blank
+        dirtyRows[cursorRow] = true
+    }
+
+    /** DCH — shifts cells left and clears the exposed right-hand cells. */
+    @Synchronized
+    fun deleteChars(count: Int) {
+        val actual = count.coerceAtLeast(1).coerceAtMost(cols - cursorCol)
+        val screen = activeScreen
+        val rowStart = cursorRow * cols
+        for (column in cursorCol until cols - actual) {
+            screen.cells[rowStart + column] = screen.cells[rowStart + column + actual]
+        }
+        val blank = TerminalCell(' ', currentAttributes)
+        for (column in cols - actual until cols) screen.cells[rowStart + column] = blank
+        dirtyRows[cursorRow] = true
+    }
+
+    /** ECH — erases cells from the cursor without shifting text. */
+    @Synchronized
+    fun eraseChars(count: Int) {
+        val actual = count.coerceAtLeast(1).coerceAtMost(cols - cursorCol)
+        val blank = TerminalCell(' ', currentAttributes)
+        val rowStart = cursorRow * cols
+        for (column in cursorCol until cursorCol + actual) activeScreen.cells[rowStart + column] = blank
+        dirtyRows[cursorRow] = true
+    }
+
+    @Synchronized fun scrollUp(count: Int) = scrollUpRegion(activeScreen.scrollTop, activeScreen.scrollBottom, count)
+    @Synchronized fun scrollDown(count: Int) = scrollDownRegion(activeScreen.scrollTop, activeScreen.scrollBottom, count)
+
     /** Enters DEC alternate screen; primary cells and scrollback remain intact. */
     @Synchronized
     fun enterAlternateScreen(clear: Boolean = true) {
         val alternate = if (clear || alternateScreen == null) {
-            ScreenState(blankGrid(cols, rows))
+            ScreenState(blankGrid(cols, rows), scrollBottom = rows - 1)
         } else {
             alternateScreen!!
         }
@@ -159,25 +240,46 @@ internal class TerminalBuffer(
     }
 
     private fun cursorDownOne() {
-        if (cursorRow + 1 < rows) setCursor(cursorRow + 1, cursorCol) else scrollUpOne()
+        val screen = activeScreen
+        when {
+            screen.cursorRow == screen.scrollBottom -> scrollUpRegion(screen.scrollTop, screen.scrollBottom, 1)
+            screen.cursorRow + 1 < rows -> setCursor(screen.cursorRow + 1, screen.cursorCol)
+        }
     }
 
-    private fun scrollUpOne() {
-        if (rows <= 1) {
-            dirtyRows[0] = true
+    private fun scrollUpRegion(top: Int, bottom: Int, count: Int) {
+        val screen = activeScreen
+        if (top == bottom) {
+            // A one-row terminal has nowhere to scroll. Retaining its last
+            // glyph matches established VT behavior and avoids erasing text
+            // merely because the cursor wrapped at the right edge.
+            dirtyRows[top] = true
             return
         }
-        val screen = activeScreen
-        if (screen === primaryScreen && scrollbackLines > 0) {
-            if (scrollback.size == scrollbackLines) scrollback.removeFirst()
-            scrollback.addLast(rowCopy(screen, 0))
+        val actual = count.coerceAtLeast(1).coerceAtMost(bottom - top + 1)
+        repeat(actual) {
+            if (top == 0 && bottom == rows - 1 && screen === primaryScreen && scrollbackLines > 0) {
+                if (scrollback.size == scrollbackLines) scrollback.removeFirst()
+                scrollback.addLast(rowCopy(screen, 0))
+            }
+            for (row in top until bottom) copyRow(screen, row + 1, row)
+            blankRow(screen, bottom)
         }
-        System.arraycopy(screen.cells, cols, screen.cells, 0, (rows - 1) * cols)
-        val blank = TerminalCell(' ', currentAttributes)
-        val bottom = (rows - 1) * cols
-        for (column in 0 until cols) screen.cells[bottom + column] = blank
-        screen.cursorRow = rows - 1
-        dirtyRows.fill(true)
+        markDirtyRows(top, bottom)
+    }
+
+    private fun scrollDownRegion(top: Int, bottom: Int, count: Int) {
+        val screen = activeScreen
+        if (top == bottom) {
+            dirtyRows[top] = true
+            return
+        }
+        val actual = count.coerceAtLeast(1).coerceAtMost(bottom - top + 1)
+        repeat(actual) {
+            for (row in bottom downTo top + 1) copyRow(screen, row - 1, row)
+            blankRow(screen, top)
+        }
+        markDirtyRows(top, bottom)
     }
 
     private fun setCursor(row: Int, column: Int) {
@@ -214,6 +316,20 @@ internal class TerminalBuffer(
         dirtyRows[row] = true
     }
 
+    private fun copyRow(screen: ScreenState, source: Int, target: Int) {
+        System.arraycopy(screen.cells, source * cols, screen.cells, target * cols, cols)
+    }
+
+    private fun blankRow(screen: ScreenState, row: Int) {
+        val start = row * cols
+        val blank = TerminalCell(' ', screen.attributes)
+        for (column in 0 until cols) screen.cells[start + column] = blank
+    }
+
+    private fun markDirtyRows(first: Int, last: Int) {
+        for (row in first..last) dirtyRows[row] = true
+    }
+
     private fun reflowScreen(screen: ScreenState, targetCols: Int, targetRows: Int): ScreenState {
         val visibleRows = ArrayList<TerminalCellArray>(rows)
         for (row in 0 until rows) visibleRows += rowCopy(screen, row)
@@ -231,7 +347,9 @@ internal class TerminalBuffer(
             cells = cells,
             cursorRow = cursorRow,
             cursorCol = (screen.cursorCol % targetCols).coerceIn(0, targetCols - 1),
-            attributes = screen.attributes
+            attributes = screen.attributes,
+            scrollTop = 0,
+            scrollBottom = targetRows - 1
         )
     }
 
@@ -272,7 +390,9 @@ internal class TerminalBuffer(
         var cells: Array<TerminalCell>,
         var cursorRow: Int = 0,
         var cursorCol: Int = 0,
-        var attributes: TerminalAttributes = TerminalAttributes.DEFAULT
+        var attributes: TerminalAttributes = TerminalAttributes.DEFAULT,
+        var scrollTop: Int = 0,
+        var scrollBottom: Int = 0
     )
 
     companion object {

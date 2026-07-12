@@ -194,6 +194,51 @@ class TerminalBufferTest {
         assertEquals('m', b.cellAt(0, 0).char)
         assertEquals('n', b.cellAt(0, 3).char)
     }
+
+    @Test
+    fun `scroll region preserves rows outside the margin`() {
+        val b = TerminalBuffer(cols = 3, rows = 4)
+        writeRow(b, 1, "AA")
+        writeRow(b, 2, "BB")
+        writeRow(b, 3, "CC")
+        writeRow(b, 4, "DD")
+        b.setScrollRegion(2, 3)
+        b.setCursorPosition(3, 1)
+        b.lineFeed()
+
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals('C', b.cellAt(1, 0).char)
+        assertEquals(' ', b.cellAt(2, 0).char)
+        assertEquals('D', b.cellAt(3, 0).char)
+    }
+
+    @Test
+    fun `line and character edits stay within their VT boundaries`() {
+        val b = TerminalBuffer(cols = 6, rows = 4)
+        writeRow(b, 1, "AAAAA")
+        writeRow(b, 2, "BBBBB")
+        writeRow(b, 3, "CCCCC")
+        writeRow(b, 4, "DDDDD")
+        b.setScrollRegion(2, 4)
+        b.setCursorPosition(2, 1)
+        b.insertLines(1)
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals(' ', b.cellAt(1, 0).char)
+        assertEquals('B', b.cellAt(2, 0).char)
+
+        b.setCursorPosition(3, 3)
+        b.deleteChars(2)
+        assertEquals('B', b.cellAt(2, 0).char)
+        assertEquals('B', b.cellAt(2, 1).char)
+        assertEquals('B', b.cellAt(2, 2).char)
+        assertEquals(' ', b.cellAt(2, 3).char)
+        assertEquals(' ', b.cellAt(2, 4).char)
+    }
+
+    private fun writeRow(buffer: TerminalBuffer, row: Int, text: String) {
+        buffer.setCursorPosition(row, 1)
+        text.forEach(buffer::putChar)
+    }
 }
 
 class TerminalParserTest {
@@ -425,5 +470,18 @@ class TerminalParserTest {
         parser.feed("\u001b[?1l")
         assertFalse(parser.inputModes().applicationCursorKeys)
         assertTrue(parser.inputModes().bracketedPaste)
+    }
+
+    @Test
+    fun `DECSTBM and reverse index operate only on the declared margins`() {
+        val b = TerminalBuffer(cols = 3, rows = 4)
+        val parser = TerminalParser(b)
+        parser.feed("AA\r\nBB\r\nCC\r\nDD")
+        parser.feed("\u001b[2;3r\u001b[2;1H\u001bM")
+
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals(' ', b.cellAt(1, 0).char)
+        assertEquals('B', b.cellAt(2, 0).char)
+        assertEquals('D', b.cellAt(3, 0).char)
     }
 }

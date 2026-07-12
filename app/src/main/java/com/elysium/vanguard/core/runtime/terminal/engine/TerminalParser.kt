@@ -26,11 +26,11 @@ import java.nio.charset.StandardCharsets
  *
  * Not in scope (deferred):
  *
- *   - DEC cursor-key and bracketed-paste modes, plus alternate buffers.
+ *   - DEC cursor-key and bracketed-paste modes, alternate buffers and
+ *     scroll-region / line-edit operations used by full-screen programs.
  *   - SGR 38;5;n (256-color) and SGR 38;2;r;g;b (truecolor).
  *   - Mouse reporting (CSI ?...h / CSI ?...l).
  *   - Sixel graphics.
- *   - Scroll regions (DECSTBM).
  *
  * Phase 9.6.1 — first build; intentionally minimal.
  */
@@ -156,9 +156,17 @@ internal class TerminalParser(
                 // fall over. Future version should implement this fully.
                 state = State.GROUND
             }
-            'D', 'E', 'M' -> {
-                // IND / NEL / RI — minimal handling, treated as LF-ish.
+            'D' -> { // IND
                 buffer.lineFeed()
+                state = State.GROUND
+            }
+            'E' -> { // NEL
+                buffer.carriageReturn()
+                buffer.lineFeed()
+                state = State.GROUND
+            }
+            'M' -> { // RI
+                buffer.reverseIndex()
                 state = State.GROUND
             }
             else -> {
@@ -200,6 +208,7 @@ internal class TerminalParser(
             'B' -> buffer.cursorDown(p.getOrElse(0) { 1 })
             'C' -> buffer.cursorRight(p.getOrElse(0) { 1 })
             'D' -> buffer.cursorLeft(p.getOrElse(0) { 1 })
+            '@' -> buffer.insertBlankChars(p.getOrElse(0) { 1 })
             'H', 'f' -> {
                 // CUP — cursor position 1-based.
                 val row = p.getOrElse(0) { 1 }
@@ -220,10 +229,22 @@ internal class TerminalParser(
                     2 -> buffer.eraseEntireLine()
                 }
             }
+            'L' -> buffer.insertLines(p.getOrElse(0) { 1 })
+            'M' -> buffer.deleteLines(p.getOrElse(0) { 1 })
+            'P' -> buffer.deleteChars(p.getOrElse(0) { 1 })
+            'S' -> buffer.scrollUp(p.getOrElse(0) { 1 })
+            'T' -> buffer.scrollDown(p.getOrElse(0) { 1 })
+            'X' -> buffer.eraseChars(p.getOrElse(0) { 1 })
             'm' -> applySgr(p)
             'h' -> setMode(p, enabled = true)
             'l' -> setMode(p, enabled = false)
-            'r' -> { /* DECSTBM scroll region — ignored */ }
+            'r' -> if (privateMarker == null) {
+                if (p.isEmpty()) buffer.resetScrollRegion()
+                else buffer.setScrollRegion(
+                    top = p.getOrElse(0) { 1 }.takeIf { it > 0 } ?: 1,
+                    bottom = p.getOrElse(1) { buffer.rows }.takeIf { it > 0 } ?: buffer.rows
+                )
+            }
             else -> { /* ignore unknowns */ }
         }
         // Reset intermediate per sequence.
