@@ -205,17 +205,21 @@ class MainActivity : ComponentActivity() {
                             onBack = { navController.popBackStack() }
                         )
                     }
-                    // PHASE 9.6.5 — Linux desktop (VNC stub + app launcher catalog).
+                    // Linux workspace: a capability-accurate graphical route
+                    // that never substitutes a fake VNC bitmap for Linux.
                     composable(
                         route = "runtime_desktop/{distroId}",
                         arguments = listOf(
                             navArgument("distroId") { type = NavType.StringType }
                         )
                     ) { backStackEntry ->
-                        @Suppress("UNUSED_VARIABLE")
-                        val unused = backStackEntry.arguments
+                        val distroId = backStackEntry.arguments?.getString("distroId").orEmpty()
                         com.elysium.vanguard.features.runtime.desktop.LinuxDesktopScreen(
-                            onBack = { navController.popBackStack() }
+                            onBack = { navController.popBackStack() },
+                            onOpenTerminal = {
+                                val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
+                                navController.navigate("terminal_distro/$encoded")
+                            }
                         )
                     }
                     composable(

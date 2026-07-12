@@ -1,9 +1,5 @@
 package com.elysium.vanguard.features.runtime.desktop
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,16 +7,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,39 +30,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.elysium.vanguard.core.runtime.distros.RootfsIntrospectorSnapshot
+import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapability
 import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppEntry
 
 /**
  * PHASE 9.6.5 — Linux desktop screen.
  *
- * Two regions:
- *
- *   - **Top**: a Canvas drawing the VNC-style frame (stub today).
- *     Tapping the refresh icon re-captures; in a real implementation
- *     we would push the libvncclient handle's framebuffer here.
- *   - **Bottom**: list of `LinuxAppEntry` rows — apps discovered
- *     inside the distro (no launch wired yet, just the catalog).
- *
- * Phase 9.6.5 — first build; intentionally minimal.
+ * The graphical route never paints a placeholder desktop. Its top card shows
+ * the real availability of a graphical guest and sends the user to the PTY
+ * terminal whenever no actual framebuffer renderer is present.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LinuxDesktopScreen(
     onBack: () -> Unit,
-    onOpenApp: (String, String) -> Unit = { _, _ -> },
+    onOpenTerminal: () -> Unit,
     viewModel: LinuxDesktopViewModel = hiltViewModel()
 ) {
-    val frame by viewModel.frame.collectAsState()
     val apps by viewModel.apps.collectAsState()
     val snapshot by viewModel.snapshot.collectAsState()
+    val capability by viewModel.capability.collectAsState()
 
     Scaffold(
         containerColor = Color(0xFF0B0D10),
@@ -98,15 +86,6 @@ fun LinuxDesktopScreen(
                         )
                     }
                 },
-                actions = {
-                    IconButton(onClick = { viewModel.captureFrame() }) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Capture frame",
-                            tint = Color(0xFFE4E7EB)
-                        )
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF0F1115)
                 )
@@ -120,21 +99,23 @@ fun LinuxDesktopScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FrameCard(frame = frame)
+            WorkspaceCapabilityCard(capability = capability, onOpenTerminal = onOpenTerminal)
             if (apps.isEmpty()) {
                 Text(
-                    text = "no GUI apps discovered yet (need proot to actually launch them)",
+                    text = "no desktop entries discovered in this rootfs",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     color = Color(0xFF8B949E)
                 )
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(apps, key = { it.id }) { app ->
-                        AppRow(app = app, onTap = { onOpenApp(app.id, app.name) })
+                        AppRow(app = app)
                     }
                 }
             }
@@ -143,35 +124,68 @@ fun LinuxDesktopScreen(
 }
 
 @Composable
-private fun FrameCard(frame: Bitmap?) {
+private fun WorkspaceCapabilityCard(
+    capability: GraphicalDesktopCapability,
+    onOpenTerminal: () -> Unit
+) {
+    val accent = when (capability.state) {
+        GraphicalDesktopCapability.State.ROOTFS_UNAVAILABLE -> Color(0xFFFF3D71)
+        GraphicalDesktopCapability.State.TERMINAL_READY -> Color(0xFF00E5FF)
+        GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE -> Color(0xFFFFE600)
+    }
     Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1115))
+            .fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Black)
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0B0D10)),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .background(Color.Black)
+                .padding(18.dp)
         ) {
-            if (frame != null) {
-                Image(
-                    bitmap = frame.asImageBitmap(),
-                    contentDescription = "Desktop frame (stub)",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "GRAPHICS / CAPABILITY",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    color = accent
                 )
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color(0xFF61AFEF))
+                Text(
+                    text = capability.title,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 17.sp,
+                    color = Color(0xFFE4E7EB)
+                )
+                Text(
+                    text = capability.detail,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = Color(0xFFB7C1CC)
+                )
+                capability.detectedServer?.let { server ->
                     Text(
-                        text = "capturing first frame…",
+                        text = "server: /$server",
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = Color(0xFF8B949E),
-                        modifier = Modifier.padding(top = 8.dp)
+                        fontSize = 10.sp,
+                        color = accent
+                    )
+                }
+                Button(
+                    onClick = onOpenTerminal,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent,
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Icon(Icons.Default.Terminal, contentDescription = null)
+                    Text(
+                        text = "OPEN REAL TERMINAL",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }
@@ -180,12 +194,10 @@ private fun FrameCard(frame: Bitmap?) {
 }
 
 @Composable
-private fun AppRow(app: LinuxAppEntry, onTap: () -> Unit) {
+private fun AppRow(app: LinuxAppEntry) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onTap() },
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1115))
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.Black)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -196,7 +208,7 @@ private fun AppRow(app: LinuxAppEntry, onTap: () -> Unit) {
                 color = Color(0xFFE4E7EB)
             )
             Text(
-                text = "exec: ${app.exec}",
+                text = "terminal command: ${app.exec}",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
                 color = Color(0xFF61AFEF),
