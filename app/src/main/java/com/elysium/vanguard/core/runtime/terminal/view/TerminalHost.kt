@@ -48,7 +48,6 @@ internal fun TerminalHost(
     // the composable leaves the composition.
     DisposableEffect(session) {
         surface.session = session
-        session.start()
         val drawJob = scope.launch {
             session.output.collectLatest {
                 // Force a repaint on every output chunk. We don't try
@@ -71,7 +70,9 @@ internal fun TerminalHost(
             drawJob.cancel()
             exitJob.cancel()
             surface.session = null
-            session.stop()
+            // The application-scoped session manager owns process lifetime.
+            // Leaving this composable only detaches the renderer, allowing a
+            // Linux command to continue while the user changes screens.
         }
     }
 

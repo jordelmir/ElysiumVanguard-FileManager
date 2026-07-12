@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -101,6 +102,16 @@ fun TerminalScreen(
                             Icons.Default.Refresh,
                             contentDescription = "Send Ctrl-C",
                             tint = Color(0xFFE4E7EB)
+                        )
+                    }
+                    IconButton(onClick = {
+                        viewModel.closeSession()
+                        onBack()
+                    }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Stop Linux session",
+                            tint = Color(0xFFFF6E6E)
                         )
                     }
                 },

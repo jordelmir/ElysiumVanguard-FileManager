@@ -12,14 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -76,8 +74,8 @@ class TerminalSession(
     val output: SharedFlow<String> = _output.asSharedFlow()
 
     /** One-shot notifications like "exited with code N". */
-    private val _events = Channel<Event>(Channel.BUFFERED)
-    val events = _events.consumeAsFlow()
+    private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 32)
+    val events: SharedFlow<Event> = _events.asSharedFlow()
 
     /** Internal coroutine scope tied to the process lifecycle. */
     private val sessionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -117,14 +115,14 @@ class TerminalSession(
                     } catch (io: IOException) {
                         if (_state.value !is State.Stopped) {
                             _state.value = State.Error(io.message ?: "native wait failed")
-                            _events.trySend(Event.Failed(io.message ?: "native wait failed"))
+                            _events.tryEmit(Event.Failed(io.message ?: "native wait failed"))
                         }
                         return@launch
                     }
                     if (rc == null) continue
                     if (_state.value !is State.Stopped) {
                         _state.value = State.Exited(rc)
-                        _events.trySend(Event.Exited(rc))
+                        _events.tryEmit(Event.Exited(rc))
                     }
                     return@launch
                 }
@@ -132,7 +130,7 @@ class TerminalSession(
         } catch (io: IOException) {
             val message = io.message ?: "native PTY start failed"
             _state.value = State.Error(message)
-            _events.trySend(Event.Failed(message))
+            _events.tryEmit(Event.Failed(message))
         }
     }
 
@@ -150,7 +148,7 @@ class TerminalSession(
                 nativePty.read(buf)
             } catch (io: IOException) {
                 if (_state.value !is State.Stopped && _state.value !is State.Exited) {
-                    _events.trySend(Event.Failed("read failed: ${io.message}"))
+                    _events.tryEmit(Event.Failed("read failed: ${io.message}"))
                 }
                 break
             }
@@ -178,7 +176,7 @@ class TerminalSession(
             try {
                 nativePty.write(bytes)
             } catch (io: IOException) {
-                _events.trySend(Event.Failed("write failed: ${io.message}"))
+                _events.tryEmit(Event.Failed("write failed: ${io.message}"))
             }
         }
     }
@@ -203,7 +201,7 @@ class TerminalSession(
                 nativePty.resize(columns = cols, rows = rows)
                 buffer.resize(cols, rows)
             } catch (io: IOException) {
-                _events.trySend(Event.Failed("resize failed: ${io.message}"))
+                _events.tryEmit(Event.Failed("resize failed: ${io.message}"))
             }
         }
     }

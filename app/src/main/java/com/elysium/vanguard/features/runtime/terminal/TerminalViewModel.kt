@@ -6,7 +6,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherPick
+import com.elysium.vanguard.core.runtime.terminal.service.TerminalService
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
+import com.elysium.vanguard.core.runtime.terminal.session.TerminalSessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,19 +30,15 @@ import javax.inject.Inject
  * is up before Compose renders its first frame; we tear it down in
  * [onCleared].
  *
- * Phase 9.6.2 will keep the session alive across Activity recreation
- * (via the [com.elysium.vanguard.core.runtime.terminal.service.TerminalService]
- * + a hilt-scoped provider). For now we don't need that complexity —
- * the shell dies with the screen, which matches readline / vim
- * behavior on a rotate-anyway mobile app.
- *
- * Phase 9.6.1 — first build; intentionally minimal.
+ * The session is manager-owned, so this ViewModel attaches/detaches without
+ * killing a long-running Linux command when the user changes screen.
  */
 @HiltViewModel
 class TerminalViewModel @Inject constructor(
     application: Application,
-    savedStateHandle: SavedStateHandle,
-    private val distroManager: DistroManager
+    private val savedStateHandle: SavedStateHandle,
+    private val distroManager: DistroManager,
+    private val sessionManager: TerminalSessionManager
 ) : AndroidViewModel(application) {
 
     /**
@@ -59,12 +57,11 @@ class TerminalViewModel @Inject constructor(
     val launcherPick: StateFlow<LauncherPick?> = _launcherPick.asStateFlow()
 
     /**
-     * One session per VM instance. The VM lives across configuration
-     * changes when scoped to the Activity via hilt's
-     * `hiltViewModel()` (Compose default). That's good enough for the
-     * single-session MVP.
+     * Reattaches after configuration changes when the app process is alive.
+     * If Android has reclaimed the process, no fake restoration occurs: a
+     * fresh shell is created and visibly reports its new PID.
      */
-    val session: TerminalSession = buildSession()
+    val session: TerminalSession = acquireSession()
 
     /** Mirror of the session's lifecycle state. */
     private val _lifecycle = MutableStateFlow<TerminalSession.State>(
@@ -80,7 +77,6 @@ class TerminalViewModel @Inject constructor(
     val typed: SharedFlow<ByteArray> = _typed.asSharedFlow()
 
     init {
-        session.start()
         viewModelScope.launch {
             session.state.collectLatest { state ->
                 _lifecycle.value = state
@@ -89,6 +85,14 @@ class TerminalViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun acquireSession(): TerminalSession {
+        val restored = savedStateHandle.get<String>(SESSION_ID_ARG)?.let(sessionManager::find)
+        val attached = restored ?: sessionManager.adopt(buildSession())
+        savedStateHandle[SESSION_ID_ARG] = attached.id
+        TerminalService.promote(getApplication(), attached.id)
+        return attached
     }
 
     /**
@@ -153,6 +157,12 @@ class TerminalViewModel @Inject constructor(
         session.sendInterrupt()
     }
 
+    /** Explicit user action; screen navigation alone keeps the process alive. */
+    fun closeSession() {
+        sessionManager.close(session.id)
+        savedStateHandle.remove<String>(SESSION_ID_ARG)
+    }
+
     /** Replace the current shell with a fresh one (SIGINT + restart). */
     fun restart() {
         session.sendInterrupt()
@@ -162,7 +172,6 @@ class TerminalViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        session.stop()
         super.onCleared()
     }
 
@@ -174,5 +183,6 @@ class TerminalViewModel @Inject constructor(
          * to the 9.6.1 local-shell behavior.
          */
         const val DISTRO_ID_ARG = "distroId"
+        const val SESSION_ID_ARG = "terminalSessionId"
     }
 }
