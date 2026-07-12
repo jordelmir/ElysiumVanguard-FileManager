@@ -62,7 +62,7 @@ internal fun TerminalHost(
                 when (e) {
                     is TerminalSession.Event.Exited -> onSessionExited(e.exitCode)
                     is TerminalSession.Event.Failed -> onSessionExited(-1)
-                    is TerminalSession.Event.TitleChanged -> { /* noop in 9.6.1 */ }
+                    is TerminalSession.Event.TitleChanged -> { /* ViewModel owns title state. */ }
                 }
             }
         }

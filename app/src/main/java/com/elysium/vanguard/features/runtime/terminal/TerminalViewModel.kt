@@ -72,6 +72,9 @@ class TerminalViewModel @Inject constructor(
     private val _exitCode = MutableStateFlow<Int?>(null)
     val exitCode: StateFlow<Int?> = _exitCode.asStateFlow()
 
+    private val _terminalTitle = MutableStateFlow<String?>(null)
+    val terminalTitle: StateFlow<String?> = _terminalTitle.asStateFlow()
+
     /** Already-typed raw bytes; mostly for debugging/dev tools. */
     private val _typed = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
     val typed: SharedFlow<ByteArray> = _typed.asSharedFlow()
@@ -83,6 +86,11 @@ class TerminalViewModel @Inject constructor(
                 if (state is TerminalSession.State.Exited) {
                     _exitCode.value = state.exitCode
                 }
+            }
+        }
+        viewModelScope.launch {
+            session.events.collectLatest { event ->
+                if (event is TerminalSession.Event.TitleChanged) _terminalTitle.value = event.title
             }
         }
     }

@@ -64,6 +64,7 @@ fun TerminalScreen(
 ) {
     val lifecycle by viewModel.lifecycle.collectAsState()
     val exitCode by viewModel.exitCode.collectAsState()
+    val terminalTitle by viewModel.terminalTitle.collectAsState()
     val launcherPick by viewModel.launcherPick.collectAsState()
 
     Scaffold(
@@ -73,7 +74,7 @@ fun TerminalScreen(
                 title = {
                     Column {
                         Text(
-                            text = headerTitle(launcherPick?.launcher?.kind),
+                            text = terminalTitle ?: headerTitle(launcherPick?.launcher?.kind),
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,

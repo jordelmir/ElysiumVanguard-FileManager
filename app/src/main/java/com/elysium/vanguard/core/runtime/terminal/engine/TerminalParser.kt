@@ -35,7 +35,8 @@ import java.nio.charset.StandardCharsets
  * Phase 9.6.1 — first build; intentionally minimal.
  */
 internal class TerminalParser(
-    private val buffer: TerminalBuffer
+    private val buffer: TerminalBuffer,
+    private val onTitleChanged: (String) -> Unit = {}
 ) {
     /** Per VT100 §5.4: ground, escape, csi-entry, osc-string, etc. */
     private enum class State { GROUND, ESCAPE, CSI_ENTRY, OSC_STRING, OSC_ESCAPE }
@@ -386,11 +387,10 @@ internal class TerminalParser(
     }
 
     private fun handleOscString(c: Char) {
-        // OSC: terminated by BEL or ST (ESC \). We never actually use
-        // anything inside; this is purely a sink so we don't trip the
-        // state machine.
+        // OSC is terminated by BEL or ST (ESC \). We retain only titles
+        // (OSC 0/1/2); all other requests remain a bounded sink.
         when (c) {
-            '\u0007' -> state = State.GROUND
+            '\u0007' -> finishOsc()
             '\u001b' -> state = State.OSC_ESCAPE
             else -> if (oscBuffer.length < MAX_OSC_CHARS) oscBuffer.append(c)
         }
@@ -398,7 +398,7 @@ internal class TerminalParser(
 
     private fun handleOscEscape(c: Char) {
         when (c) {
-            '\\' -> state = State.GROUND // String Terminator: ESC \
+            '\\' -> finishOsc() // String Terminator: ESC \
             '\u001b' -> Unit // retain OSC escape state for repeated ESC
             else -> {
                 if (oscBuffer.length < MAX_OSC_CHARS - 1) {
@@ -409,6 +409,22 @@ internal class TerminalParser(
         }
     }
 
+    private fun finishOsc() {
+        val separator = oscBuffer.indexOf(";")
+        if (separator > 0) {
+            val command = oscBuffer.substring(0, separator)
+            if (command == "0" || command == "1" || command == "2") {
+                val title = oscBuffer.substring(separator + 1)
+                    .filterNot { it.isISOControl() }
+                    .trim()
+                    .take(MAX_TITLE_CHARS)
+                if (title.isNotEmpty()) onTitleChanged(title)
+            }
+        }
+        oscBuffer.setLength(0)
+        state = State.GROUND
+    }
+
     private fun resetParams() {
         params.clear()
         intermediate = ' '
@@ -417,5 +433,6 @@ internal class TerminalParser(
 
     companion object {
         private const val MAX_OSC_CHARS = 8 * 1024
+        private const val MAX_TITLE_CHARS = 256
     }
 }

@@ -446,6 +446,18 @@ class TerminalParserTest {
     }
 
     @Test
+    fun `OSC title updates are surfaced without rendering OSC bytes`() {
+        val b = TerminalBuffer(cols = 8, rows = 1)
+        val titles = mutableListOf<String>()
+        val parser = TerminalParser(b, onTitleChanged = titles::add)
+        parser.feed("A\u001b]2;vim — /etc/hosts\u0007B")
+
+        assertEquals(listOf("vim — /etc/hosts"), titles)
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals('B', b.cellAt(0, 1).char)
+    }
+
+    @Test
     fun `DEC alternate screen mode keeps main terminal intact`() {
         val b = TerminalBuffer(cols = 8, rows = 2)
         val parser = TerminalParser(b)

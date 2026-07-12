@@ -83,7 +83,7 @@ class TerminalSession(
     private var pumpOut: Job? = null
     private var waitJob: Job? = null
 
-    private val parser = TerminalParser(buffer)
+    private val parser = TerminalParser(buffer) { title -> _events.tryEmit(Event.TitleChanged(title)) }
 
     /**
      * Start the process. This must be called exactly once per session;
@@ -245,7 +245,7 @@ class TerminalSession(
     sealed class Event {
         data class Exited(val exitCode: Int) : Event()
         data class Failed(val message: String) : Event()
-        data object TitleChanged : Event()
+        data class TitleChanged(val title: String) : Event()
     }
 
     companion object {

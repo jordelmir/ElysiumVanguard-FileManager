@@ -75,24 +75,22 @@ class TerminalSessionForDistroTest {
     }
 
     @Test
-    fun `forDistro's command switches to the proot launcher output when supplied`() {
-        // Future-proofing: when 9.6.3.1 lands and a stub proot launcher
-        // is wired, this verifies the wire still adapts. For 9.6.3 we
-        // emulate the contract by passing a fake launcher that returns
-        // a recognizable marker.
+    fun `forDistro preserves the native proot launcher command`() {
+        // A contract double isolates the command handoff from a real Android
+        // ELF process while retaining the exact launcher interface.
         val rootfs = Files.createTempDirectory("elysium-term-for-distro").toFile()
         try {
             val fakeProot = object : com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncher {
                 override val kind = com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind.NATIVE_PROOT
                 override val capabilities = com.elysium.vanguard.core.runtime.distros.launcher.LauncherCapabilities.JAILED_BASELINE
-                override fun buildShellCommand(r: File, script: String) =
-                    listOf("FAKE-PROOT", "-r", r.absolutePath, "/bin/sh", "-c", script)
-                override fun buildProbeCommand(r: File, args: List<String>) =
-                    listOf("FAKE-PROOT", "-r", r.absolutePath, "/bin/sh", "-c", args.joinToString(" "))
-                override fun isAvailable(r: File) = true
+                override fun buildShellCommand(rootfsDir: File, script: String) =
+                    listOf("TEST-PROOT", "-r", rootfsDir.absolutePath, "/bin/sh", "-c", script)
+                override fun buildProbeCommand(rootfsDir: File, args: List<String>) =
+                    listOf("TEST-PROOT", "-r", rootfsDir.absolutePath, "/bin/sh", "-c", args.joinToString(" "))
+                override fun isAvailable(rootfsDir: File) = rootfsDir.isDirectory
             }
             val session = TerminalSession.forDistro(rootfs, LauncherPick(fakeProot, "fake"))
-            assertEquals("FAKE-PROOT", session.config.command.first())
+            assertEquals("TEST-PROOT", session.config.command.first())
             assertTrue(session.config.command.contains(rootfs.absolutePath))
         } finally {
             rootfs.deleteRecursively()
