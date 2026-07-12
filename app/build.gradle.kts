@@ -13,6 +13,7 @@ android {
     namespace = "com.elysium.vanguard"
     compileSdk = 34
     buildToolsVersion = "34.0.0"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.elysium.vanguard"
