@@ -1,6 +1,9 @@
 package com.elysium.vanguard.core.runtime.distros.launcher
 
 import java.io.File
+import java.io.IOException
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfig
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
 
 /**
  * PHASE 9.6.4 — Native-proot launcher (wired but binary-pending).
@@ -48,7 +51,10 @@ open class NativeProotLauncher(
     private val runtimeTmpDir: File? = null,
 
     /** Host paths explicitly exposed inside the guest namespace. */
-    private val additionalMounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList()
+    private val additionalMounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList(),
+
+    /** Android-network DNS rendered into a transient PRoot bind mount. */
+    private val guestDnsConfigProvider: GuestDnsConfigProvider = GuestDnsConfigProvider.NONE
 ) : DistroLauncher {
 
     override val kind: LauncherKind = LauncherKind.NATIVE_PROOT
@@ -93,6 +99,15 @@ open class NativeProotLauncher(
             if (mount.readOnly) continue
             args += "-b"
             args += "${mount.hostPath}:${mount.guestPath}"
+        }
+        prepareGuestDnsFile(rootfsDir)?.let { resolvConf ->
+            // Ubuntu often makes /etc/resolv.conf a link into /run, while
+            // other distros use the path directly. Bind all standard targets
+            // to one app-private file so we do not mutate the user's rootfs.
+            GUEST_RESOLV_PATHS.forEach { guestPath ->
+                args += "-b"
+                args += "${resolvConf.absolutePath}:$guestPath"
+            }
         }
         args += "-w"
         args += "/root"
@@ -164,4 +179,46 @@ open class NativeProotLauncher(
 
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
+
+    private fun prepareGuestDnsFile(rootfsDir: File): File? {
+        val config = guestDnsConfigProvider.current()
+        if (config.nameservers.isEmpty()) return null
+        val runtimeDir = runtimeTmpDir ?: return null
+        return try {
+            val dnsDir = File(runtimeDir, "dns")
+            if (!dnsDir.isDirectory && !dnsDir.mkdirs()) return null
+            cleanupStaleDnsFiles(dnsDir)
+            val key = rootfsDir.parentFile?.name.orEmpty()
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .ifBlank { "guest" }
+            val target = File(dnsDir, "$key.resolv.conf")
+            val staging = File(dnsDir, "$key.resolv.conf.part")
+            staging.writeText(config.renderResolvConf())
+            if (!staging.renameTo(target)) {
+                staging.copyTo(target, overwrite = true)
+                staging.delete()
+            }
+            target
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    private fun cleanupStaleDnsFiles(dnsDir: File) {
+        val cutoff = System.currentTimeMillis() - DNS_FILE_MAX_AGE_MS
+        dnsDir.listFiles()?.forEach { file ->
+            if (file.name.endsWith(".resolv.conf") && file.lastModified() < cutoff) file.delete()
+            if (file.name.endsWith(".resolv.conf.part")) file.delete()
+        }
+    }
+
+    private companion object {
+        val GUEST_RESOLV_PATHS = listOf(
+            "/etc/resolv.conf",
+            "/run/systemd/resolve/stub-resolv.conf",
+            "/run/systemd/resolve/resolv.conf",
+            "/run/NetworkManager/no-stub-resolv.conf"
+        )
+        const val DNS_FILE_MAX_AGE_MS = 24L * 60L * 60L * 1_000L
+    }
 }

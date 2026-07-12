@@ -8,6 +8,7 @@ import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncherRegistry
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolver
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolution
 import com.elysium.vanguard.core.runtime.distros.launcher.ProotNativeLibrary
+import com.elysium.vanguard.core.runtime.network.AndroidGuestDnsConfigProvider
 import com.elysium.vanguard.core.runtime.distros.snapshot.RootfsSnapshot
 import dagger.Module
 import dagger.Provides
@@ -90,7 +91,9 @@ object DistroModule {
         return DistroLauncherRegistry.production(
             supportedAbis = currentSupportedAbis(),
             nativeLibrary = nativeLibrary,
-            prootTmpDir = java.io.File(context.cacheDir, "proot")
+            prootTmpDir = java.io.File(context.cacheDir, "proot"),
+            mounts = emptyList(),
+            guestDnsConfigProvider = AndroidGuestDnsConfigProvider(context)
         )
     }
 

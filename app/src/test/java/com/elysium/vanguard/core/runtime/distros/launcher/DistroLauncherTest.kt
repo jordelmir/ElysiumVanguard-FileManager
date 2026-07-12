@@ -1,5 +1,7 @@
 package com.elysium.vanguard.core.runtime.distros.launcher
 
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfig
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -196,6 +198,41 @@ class NativeProotLauncherTest {
             val env = launcher.environmentVariables(rootfs).toMap()
             assertEquals(File(runtimeDir, "libproot_loader.so").absolutePath, env["PROOT_LOADER"])
             assertEquals(runtimeDir.absolutePath, env["LD_LIBRARY_PATH"])
+        } finally {
+            rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `proot binds transient Android DNS without changing the rootfs`() {
+        val runtimeDir = Files.createTempDirectory("elysium-proot-dns-runtime").toFile()
+        val rootfs = File(File(runtimeDir, "guest"), "rootfs").apply { mkdirs() }
+        try {
+            File(runtimeDir, "libproot.so").writeText("proot")
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp"),
+                guestDnsConfigProvider = GuestDnsConfigProvider {
+                    GuestDnsConfig(nameservers = listOf("192.0.2.53"), searchDomains = listOf("lab.example"))
+                }
+            )
+
+            val command = launcher.buildShellCommand(rootfs, "")
+            val dnsFile = File(File(runtimeDir, "tmp/dns"), "guest.resolv.conf")
+            assertTrue(dnsFile.isFile)
+            assertTrue(dnsFile.readText().contains("nameserver 192.0.2.53"))
+            assertTrue(command.contains("${dnsFile.absolutePath}:/etc/resolv.conf"))
+            assertTrue(command.contains("${dnsFile.absolutePath}:/run/systemd/resolve/stub-resolv.conf"))
+            assertFalse(File(rootfs, "etc/resolv.conf").exists())
         } finally {
             rootfs.deleteRecursively()
             runtimeDir.deleteRecursively()

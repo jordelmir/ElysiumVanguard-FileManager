@@ -1,6 +1,7 @@
 package com.elysium.vanguard.core.runtime.distros.launcher
 
 import java.io.File
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
 
 /**
  * PHASE 9.6.3 — Picks the best [DistroLauncher] for a given rootfs.
@@ -88,6 +89,21 @@ class DistroLauncherRegistry(
             nativeLibrary: ProotNativeLibrary? = null,
             prootTmpDir: File? = null,
             mounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList()
+        ): DistroLauncherRegistry = production(
+            supportedAbis = supportedAbis,
+            nativeLibrary = nativeLibrary,
+            prootTmpDir = prootTmpDir,
+            mounts = mounts,
+            guestDnsConfigProvider = GuestDnsConfigProvider.NONE
+        )
+
+        /** Explicit five-argument overload for runtime-only services such as guest DNS. */
+        fun production(
+            supportedAbis: Set<String>,
+            nativeLibrary: ProotNativeLibrary?,
+            prootTmpDir: File?,
+            mounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
+            guestDnsConfigProvider: GuestDnsConfigProvider
         ): DistroLauncherRegistry =
             DistroLauncherRegistry(
                 listOf(
@@ -95,7 +111,8 @@ class DistroLauncherRegistry(
                         bundledAbis = supportedAbis,
                         nativeLibrary = nativeLibrary,
                         runtimeTmpDir = prootTmpDir,
-                        additionalMounts = mounts
+                        additionalMounts = mounts,
+                        guestDnsConfigProvider = guestDnsConfigProvider
                     ),
                     DirectExecDistroLauncher(),
                     JailedDistroLauncher()
