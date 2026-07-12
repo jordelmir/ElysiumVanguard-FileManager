@@ -10,6 +10,7 @@ import android.view.SurfaceView
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import com.elysium.vanguard.core.runtime.terminal.engine.TerminalBuffer
 import com.elysium.vanguard.core.runtime.terminal.render.TerminalRenderer
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
@@ -52,6 +53,7 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     var session: TerminalSession? = null
         set(value) {
             field = value
+            value?.resize(cols, rows)
             drawOnce()
         }
 
@@ -82,12 +84,13 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     }
 
     private fun recomputeMetrics(width: Int, height: Int) {
-        // Pick a monospace cell size that fills the surface without
-        // slicing the last column. We prefer 7×14 px as a sane default
-        // (matches the typical font preview in Material 3) and let the
-        // actual character advance fill the column.
-        cellHeightPx = 14f * resources.displayMetrics.scaledDensity
+        // Derive rows/columns from the actual window so phones,
+        // foldables and tablets use the available terminal canvas.
+        cellHeightPx = 16f * resources.displayMetrics.density * resources.configuration.fontScale
         cellWidthPx = cellHeightPx * 0.6f  // monospace aspect ≈ 0.6
+        cols = (width / cellWidthPx).toInt().coerceIn(40, 220)
+        rows = (height / cellHeightPx).toInt().coerceIn(12, 120)
+        session?.resize(cols, rows)
         renderer = TerminalRenderer(cellWidthPx, cellHeightPx)
     }
 
@@ -118,8 +121,14 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN) requestFocus()
-        return super.onTouchEvent(event)
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            requestFocus()
+            post {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        return true
     }
 
     override fun onKeyDown(eventCode: Int, event: KeyEvent): Boolean {
@@ -127,7 +136,10 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
         // correctness over completeness: Ctrl-A..Z, Enter, Backspace,
         // Tab, Esc, arrows.
         val bytes: ByteArray? = when (val key = mapKeyEvent(event, eventCode)) {
-            KeyStroke.Enter -> "\r".toByteArray()
+            // ProcessBuilder gives us a pipe rather than a PTY. A pipe
+            // has no terminal line discipline to translate CR to LF,
+            // so Enter must send a real newline.
+            KeyStroke.Enter -> "\n".toByteArray()
             KeyStroke.Backspace -> byteArrayOf(0x08)
             KeyStroke.Tab -> byteArrayOf(0x09)
             KeyStroke.Esc -> byteArrayOf(0x1B)
@@ -135,7 +147,7 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
             KeyStroke.Down -> "\u001b[B".toByteArray()
             KeyStroke.Right -> "\u001b[C".toByteArray()
             KeyStroke.Left -> "\u001b[D".toByteArray()
-            is KeyStroke.Char -> byteArrayOf(key.code.toByte())
+            is KeyStroke.Char -> String(Character.toChars(key.code)).toByteArray(Charsets.UTF_8)
             is KeyStroke.CtrlChar -> byteArrayOf(key.controlByte)
             null -> null
         }
@@ -148,8 +160,12 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         return TerminalInputConnection(this)
     }
+
+    override fun onCheckIsTextEditor(): Boolean = true
 
     /** Public bridge for [TerminalInputConnection] to forward chars. */
     fun deliverInput(bytes: ByteArray) {
