@@ -24,7 +24,7 @@ fun Modifier.premiumGlass(
     cornerRadius: Dp = 16.dp,
     borderColor: Color = Color.White.copy(alpha = 0.2f),
     glassAlpha: Float = 0.3f,
-    glowRadius: Dp = 0.dp
+    glowRadius: Dp = 14.dp
 ): Modifier = composed {
     val shape = RoundedCornerShape(cornerRadius)
     this
@@ -33,21 +33,21 @@ fun Modifier.premiumGlass(
                 Modifier.shadow(
                     elevation = glowRadius,
                     shape = shape,
-                    spotColor = borderColor.copy(alpha = 0.5f),
-                    ambientColor = borderColor.copy(alpha = 0.5f),
+                    spotColor = borderColor.copy(alpha = 0.85f),
+                    ambientColor = borderColor.copy(alpha = 0.65f),
                     clip = false
                 )
             } else Modifier
         )
         .clip(shape)
-        .background(TitanColors.CarbonGray.copy(alpha = glassAlpha))
+        .background(neonSurfaceBrush(borderColor, glassAlpha))
         .border(
-            width = 1.dp,
+            width = 1.2.dp,
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    borderColor.copy(alpha = 0.5f),
+                    borderColor.copy(alpha = 0.7f),
                     Color.Transparent,
-                    borderColor.copy(alpha = 0.2f)
+                    borderColor.copy(alpha = 0.35f)
                 )
             ),
             shape = shape
@@ -59,26 +59,26 @@ fun Modifier.reactorGlass(
     cornerRadius: Dp = 20.dp,
     glowColor: Color = TitanColors.NeonCyan,
     alpha: Float = 0.45f,
-    glowRadius: Dp = 12.dp
+    glowRadius: Dp = 18.dp
 ): Modifier = composed {
     val shape = RoundedCornerShape(cornerRadius)
     this
         .shadow(
             elevation = glowRadius,
             shape = shape,
-            spotColor = glowColor,
-            ambientColor = glowColor,
+            spotColor = glowColor.copy(alpha = 0.95f),
+            ambientColor = glowColor.copy(alpha = 0.75f),
             clip = false
         )
         .clip(shape)
-        .background(TitanColors.AbsoluteBlack.copy(alpha = alpha))
+        .background(neonSurfaceBrush(glowColor, alpha))
         .border(
-            width = 1.2.dp,
+            width = 1.5.dp,
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = 0.3f),
+                    Color.White.copy(alpha = 0.35f),
                     Color.Transparent,
-                    Color.White.copy(alpha = 0.1f)
+                    Color.White.copy(alpha = 0.15f)
                 )
             ),
             shape = shape
@@ -89,26 +89,26 @@ fun Modifier.reactorGlass(
 fun Modifier.neonGlass(
     cornerRadius: Dp = 16.dp,
     glowColor: Color = TitanColors.NeonCyan,
-    strokeWidth: Dp = 1.dp
+    strokeWidth: Dp = 1.2.dp
 ): Modifier = composed {
     val shape = RoundedCornerShape(cornerRadius)
     this
         .shadow(
-            elevation = 16.dp,
+            elevation = 22.dp,
             shape = shape,
-            spotColor = glowColor,
-            ambientColor = glowColor,
+            spotColor = glowColor.copy(alpha = 0.95f),
+            ambientColor = glowColor.copy(alpha = 0.7f),
             clip = false
         )
         .clip(shape)
-        .background(TitanColors.CarbonGray.copy(alpha = 0.6f))
+        .background(neonSurfaceBrush(glowColor, 0.22f))
         .border(
             width = strokeWidth,
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    glowColor.copy(alpha = 0.8f),
+                    glowColor.copy(alpha = 0.95f),
                     Color.Transparent,
-                    glowColor.copy(alpha = 0.3f)
+                    glowColor.copy(alpha = 0.5f)
                 )
             ),
             shape = shape
@@ -119,7 +119,7 @@ fun Modifier.neonGlass(
 fun Modifier.holographicGlass(
     cornerRadius: Dp = 20.dp,
     glassAlpha: Float = 0.25f,
-    glowRadius: Dp = 16.dp
+    glowRadius: Dp = 22.dp
 ): Modifier = composed {
     val shape = RoundedCornerShape(cornerRadius)
     val infiniteTransition = rememberInfiniteTransition(label = "holo")
@@ -152,19 +152,19 @@ fun Modifier.holographicGlass(
         .shadow(
             elevation = glowRadius,
             shape = shape,
-            spotColor = currentColor.copy(alpha = 0.6f),
-            ambientColor = currentColor.copy(alpha = 0.4f),
+            spotColor = currentColor.copy(alpha = 0.85f),
+            ambientColor = currentColor.copy(alpha = 0.55f),
             clip = false
         )
         .clip(shape)
-        .background(TitanColors.DeepVoid.copy(alpha = glassAlpha))
+        .background(neonSurfaceBrush(currentColor, glassAlpha))
         .border(
-            width = 1.5.dp,
+            width = 1.8.dp,
             brush = Brush.linearGradient(
                 colors = listOf(
-                    currentColor.copy(alpha = 0.9f),
-                    currentColor.copy(alpha = 0.2f),
-                    currentColor.copy(alpha = 0.7f)
+                    currentColor.copy(alpha = 0.95f),
+                    currentColor.copy(alpha = 0.3f),
+                    currentColor.copy(alpha = 0.8f)
                 )
             ),
             shape = shape
@@ -210,7 +210,7 @@ fun Modifier.pulsingNeonBorder(
             clip = false
         )
         .clip(shape)
-        .background(TitanColors.AbsoluteBlack.copy(alpha = glassAlpha))
+        .background(neonSurfaceBrush(glowColor, glassAlpha))
         .border(
             width = 1.5.dp,
             brush = Brush.verticalGradient(
@@ -232,4 +232,34 @@ private fun lerp(start: Color, stop: Color, fraction: Float): Color {
         blue = start.blue + (stop.blue - start.blue) * fraction,
         alpha = start.alpha + (stop.alpha - start.alpha) * fraction
     )
+}
+
+/**
+ * Shared translucent fill for every glass/neon surface.
+ *
+ * The old suite used black or carbon-gray fills, which made repeated
+ * rectangular "holes" show up inside cards across the APK. This keeps the
+ * cyber-dark mood but derives the interior from the active glow color, so
+ * every surface reads as a lit pane instead of a black patch.
+ */
+internal fun uniformNeonSurfaceColor(color: Color, intensity: Float): Color {
+    val strength = intensity.coerceIn(0f, 1f)
+    if (strength == 0f) return Color.Transparent
+    return Color(
+        red = color.red * strength,
+        green = color.green * strength,
+        blue = color.blue * strength,
+        alpha = 1f
+    )
+}
+
+internal fun uniformNeonSurfaceBrush(color: Color, intensity: Float): Brush {
+    val solid = uniformNeonSurfaceColor(color, intensity)
+    return Brush.linearGradient(colors = listOf(solid, solid))
+}
+
+private fun neonSurfaceBrush(color: Color, alpha: Float): Brush {
+    val a = alpha.coerceIn(0f, 1f)
+    val surfaceIntensity = (a * 0.70f).coerceAtMost(0.22f)
+    return uniformNeonSurfaceBrush(color, surfaceIntensity)
 }

@@ -47,6 +47,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.premiumGlass
 import com.elysium.vanguard.ui.theme.neonGlass
 import com.elysium.vanguard.ui.theme.holographicGlass
@@ -56,6 +58,7 @@ import com.elysium.vanguard.ui.components.NeonGlowIcon
 import com.elysium.vanguard.ui.components.MatrixRain
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.geometry.Offset
 import com.elysium.vanguard.core.util.CompressionEngine
@@ -111,6 +114,7 @@ fun FileManagerScreen(
 
     var showColorDialog by remember { mutableStateOf(false) }
     val accentColor = SectionColorManager.fileAccent
+    val adaptive = LocalAdaptiveMetrics.current
     val currentPath by viewModel.currentPath.collectAsState()
     val selectedFiles by viewModel.selectedFiles.collectAsState()
     val storageStats by viewModel.storageStats.collectAsState()
@@ -178,7 +182,7 @@ fun FileManagerScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(TitanColors.DeepVoidGradient)) {
+    Box(modifier = Modifier.fillMaxSize().background(TitanColors.AbsoluteBlack)) {
         // ── MATRIX RAIN BACKGROUND ──
         MatrixRain(
             color = TitanColors.RadioactiveGreen.copy(alpha = 0.3f), // Subtler rain
@@ -228,14 +232,14 @@ fun FileManagerScreen(
                                 Icon(
                                     imageVector = if (viewMode == FileViewMode.TACTICAL) Icons.Default.GridView else Icons.Default.ViewList,
                                     contentDescription = "Toggle View",
-                                    tint = TitanColors.NeonCyan
+                                    tint = GlobalColors.primary
                                 )
                             }
                             IconButton(onClick = { isTerminalMode = !isTerminalMode }) {
                                 Icon(
                                     imageVector = if (isTerminalMode) Icons.Default.Apps else Icons.Default.Terminal,
                                     contentDescription = "Switch Mode",
-                                    tint = TitanColors.NeonCyan
+                                    tint = GlobalColors.primary
                                 )
                             }
                             // PHASE 1+2 — Tools overflow menu
@@ -244,7 +248,7 @@ fun FileManagerScreen(
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
                                     contentDescription = "Tools",
-                                    tint = TitanColors.NeonCyan
+                                    tint = GlobalColors.primary
                                 )
                             }
                             DropdownMenu(
@@ -253,7 +257,7 @@ fun FileManagerScreen(
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Vault") },
-                                    leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    leadingIcon = { Icon(Icons.Default.Shield, contentDescription = null, tint = GlobalColors.primary) },
                                     onClick = {
                                         toolsOpen = false
                                         onNavigateToVault?.invoke()
@@ -261,7 +265,7 @@ fun FileManagerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Trash") },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = TitanColors.QuantumPink) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = GlobalColors.secondary) },
                                     onClick = {
                                         toolsOpen = false
                                         onNavigateToTrash?.invoke()
@@ -285,7 +289,7 @@ fun FileManagerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Storage Analyzer") },
-                                    leadingIcon = { Icon(Icons.Default.PieChart, contentDescription = null, tint = TitanColors.ElectricBlue) },
+                                    leadingIcon = { Icon(Icons.Default.PieChart, contentDescription = null, tint = GlobalColors.quaternary) },
                                     onClick = {
                                         toolsOpen = false
                                         onNavigateToAnalyzer?.invoke()
@@ -293,7 +297,7 @@ fun FileManagerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Local Server") },
-                                    leadingIcon = { Icon(Icons.Default.QrCode2, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    leadingIcon = { Icon(Icons.Default.QrCode2, contentDescription = null, tint = GlobalColors.primary) },
                                     onClick = {
                                         toolsOpen = false
                                         onNavigateToServer?.invoke()
@@ -309,7 +313,7 @@ fun FileManagerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Dual Pane") },
-                                    leadingIcon = { Icon(Icons.Default.ViewColumn, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    leadingIcon = { Icon(Icons.Default.ViewColumn, contentDescription = null, tint = GlobalColors.primary) },
                                     onClick = {
                                         toolsOpen = false
                                         onNavigateToDualPane?.invoke()
@@ -333,7 +337,7 @@ fun FileManagerScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Archive Files (ZIP / 7Z / TAR)…") },
-                                    leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = TitanColors.NeonCyan) },
+                                    leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null, tint = GlobalColors.primary) },
                                     onClick = {
                                         toolsOpen = false
                                         // PHASE 10.3: pre-load the archive
@@ -370,7 +374,7 @@ fun FileManagerScreen(
                             }
                             viewModel.showArchiveSheetForCompress(toCompress)
                         },
-                        containerColor = TitanColors.NeonCyan,
+                        containerColor = GlobalColors.primary,
                         contentColor = Color.Black,
                         icon = { Icon(Icons.Default.Archive, contentDescription = null) },
                         text = {
@@ -573,10 +577,15 @@ fun FileManagerScreen(
                                         }
                                     } else {
                                         LazyVerticalGrid(
-                                            columns = GridCells.Fixed(3),
-                                            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
-                                            verticalArrangement = Arrangement.spacedBy(24.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                            columns = GridCells.Adaptive(adaptive.fileCardMinWidth),
+                                            contentPadding = PaddingValues(
+                                                start = adaptive.listContentPadding,
+                                                top = adaptive.listContentPadding,
+                                                end = adaptive.listContentPadding,
+                                                bottom = 100.dp
+                                            ),
+                                            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing + 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing),
                                             modifier = Modifier.weight(1f)
                                         ) {
                                             items(
@@ -710,11 +719,14 @@ fun StorageMetricsBar(stats: StorageStats) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         cornerRadius = 16.dp,
-        glassAlpha = 0.2f,
+        glassAlpha = 0.0f,
         glowRadius = 24.dp
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .background(statusColor.copy(alpha = 0.16f))
+                .padding(16.dp)
         ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -770,7 +782,7 @@ fun SelectionToolbar(
         modifier = Modifier
             .fillMaxWidth()
             .height(90.dp)
-            .background(TitanColors.AbsoluteBlack)
+            .background(TitanColors.NeonRed.copy(alpha = 0.18f))
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -981,10 +993,10 @@ fun SovereignAccessDeniedScreen() {
                         } catch (e: Exception) { }
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = TitanColors.NeonCyan.copy(alpha = 0.2f)),
-                border = BorderStroke(1.dp, TitanColors.NeonCyan)
+                colors = ButtonDefaults.buttonColors(containerColor = GlobalColors.primary.copy(alpha = 0.2f)),
+                border = BorderStroke(1.dp, GlobalColors.primary)
             ) {
-                Text("GRANT ROOT ACCESS", color = TitanColors.NeonCyan)
+                Text("GRANT ROOT ACCESS", color = GlobalColors.primary)
             }
         }
     }
@@ -1081,7 +1093,7 @@ private fun NeuralSearchBar(
                 Icon(
                     Icons.Default.Search, 
                     contentDescription = null, 
-                    tint = TitanColors.NeonCyan,
+                    tint = GlobalColors.primary,
                     modifier = Modifier.size(20.dp)
                 ) 
             },
@@ -1091,7 +1103,7 @@ private fun NeuralSearchBar(
                 disabledContainerColor = Color.Transparent,
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
-                cursorColor = TitanColors.NeonCyan,
+                cursorColor = GlobalColors.primary,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
             ),
@@ -1118,12 +1130,20 @@ private fun StorageCategoryRow(
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .background(TitanColors.CarbonGray.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                .shadow(
+                    elevation = 14.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    spotColor = GlobalColors.primary.copy(alpha = 0.7f),
+                    ambientColor = GlobalColors.primary.copy(alpha = 0.4f),
+                    clip = false
+                )
+                .clip(RoundedCornerShape(12.dp))
+                .background(GlobalColors.primary.copy(alpha = 0.12f))
+                .border(1.2.dp, GlobalColors.primary.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
                 .clickable { onAddClick() },
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = TitanColors.NeonCyan)
+            Icon(Icons.Default.Add, contentDescription = null, tint = GlobalColors.primary)
         }
         
         StorageChip(
@@ -1163,16 +1183,21 @@ private fun StorageChip(
             .height(48.dp)
             .clickable { onClick() },
         cornerRadius = 12.dp,
-        glassAlpha = 0.2f,
-        glowRadius = 16.dp
+        glassAlpha = 0.0f,
+        glowRadius = 18.dp
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(GlobalColors.primary.copy(alpha = 0.16f))
+        ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             NeonGlowIcon(
                 icon = icon,
-                color = TitanColors.NeonCyan,
+                color = GlobalColors.primary,
                 size = 18.dp,
                 glowRadius = 8.dp
             )
@@ -1184,6 +1209,7 @@ private fun StorageChip(
             fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.SansSerif
         )
+        } // close the colored-fill Box wrapper
     }
 }
 }
@@ -1197,6 +1223,13 @@ fun ReactorFileCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
+    val cardSize = when {
+        adaptive.isCompact -> 88.dp
+        adaptive.isMedium -> 104.dp
+        else -> 118.dp
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1208,7 +1241,7 @@ fun ReactorFileCard(
     ) {
         SovereignCard(
             modifier = Modifier
-                .size(90.dp)
+                .size(cardSize)
                 .then(
                     if (isSelected) {
                         Modifier.border(2.dp, TitanColors.NeonRed, RoundedCornerShape(24.dp))
@@ -1217,13 +1250,13 @@ fun ReactorFileCard(
                     }
                 ),
             cornerRadius = 24.dp,
-            glassAlpha = if (isSelected) 0.25f else 0.2f,
+            glassAlpha = 0.0f,
             glowRadius = if (isSelected) 32.dp else 24.dp
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(file.thematicColor.copy(alpha = 0.15f)), // Global vivid tint
+                    .background(file.thematicColor.copy(alpha = 0.18f)),
                 contentAlignment = Alignment.Center
             ) {
                 // Enhanced Preview Logic: Images, Videos, APKs
@@ -1307,11 +1340,11 @@ fun SovereignOptionsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack,
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = {
             Text(
                 text = "SOVEREIGN OPTIONS",
-                color = TitanColors.NeonCyan,
+                color = GlobalColors.primary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 16.sp
             )
@@ -1343,7 +1376,7 @@ fun SovereignOptionsDialog(
                     OptionItem(
                         Icons.Default.Archive,
                         "Compress to archive…",
-                        TitanColors.NeonCyan
+                        GlobalColors.primary
                     ) { onAction("COMPRESS") }
                 }
                 
@@ -1358,11 +1391,11 @@ fun SovereignOptionsDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("DISMISS", color = TitanColors.NeonCyan)
+                Text("DISMISS", color = GlobalColors.primary)
             }
         },
         modifier = Modifier
-            .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(28.dp))
+            .border(1.dp, GlobalColors.primary.copy(alpha = 0.3f), RoundedCornerShape(28.dp))
             .clip(RoundedCornerShape(28.dp))
     )
 }
@@ -1400,13 +1433,13 @@ fun AdvancedProgressDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
-                .neonGlass(cornerRadius = 24.dp, glowColor = TitanColors.NeonCyan)
+                .neonGlass(cornerRadius = 24.dp, glowColor = GlobalColors.primary)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 "QUANTUM COMPRESSION",
-                color = TitanColors.NeonCyan,
+                color = GlobalColors.primary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
@@ -1428,7 +1461,7 @@ fun AdvancedProgressDialog(
                         CircularProgressIndicator(
                             progress = state.percentage / 100f,
                             modifier = Modifier.size(120.dp),
-                            color = TitanColors.NeonCyan,
+                            color = GlobalColors.primary,
                             strokeWidth = 8.dp,
                             trackColor = Color.White.copy(alpha = 0.1f)
                         )
@@ -1464,14 +1497,14 @@ fun AdvancedProgressDialog(
                     checked = keepScreenOn,
                     onCheckedChange = { onKeepScreenOnChange(it) },
                     colors = CheckboxDefaults.colors(
-                        checkedColor = TitanColors.NeonCyan,
+                        checkedColor = GlobalColors.primary,
                         uncheckedColor = Color.White.copy(alpha = 0.5f),
                         checkmarkColor = TitanColors.AbsoluteBlack
                     )
                 )
                 Text(
                     "KEEP SCREEN ON",
-                    color = if (keepScreenOn) TitanColors.NeonCyan else Color.White.copy(alpha = 0.5f),
+                    color = if (keepScreenOn) GlobalColors.primary else Color.White.copy(alpha = 0.5f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -1496,10 +1529,10 @@ fun AdvancedProgressDialog(
                     Button(
                         onClick = onBackground,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = TitanColors.NeonCyan.copy(alpha = 0.2f)),
-                        border = BorderStroke(1.dp, TitanColors.NeonCyan)
+                        colors = ButtonDefaults.buttonColors(containerColor = GlobalColors.primary.copy(alpha = 0.2f)),
+                        border = BorderStroke(1.dp, GlobalColors.primary)
                     ) {
-                        Text("BACKGROUND", color = TitanColors.NeonCyan, fontSize = 12.sp)
+                        Text("BACKGROUND", color = GlobalColors.primary, fontSize = 12.sp)
                     }
                 }
             } else {
@@ -1570,7 +1603,7 @@ fun TacticalFileRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = file.permissions,
-                        color = TitanColors.NeonCyan.copy(alpha = 0.7f),
+                        color = GlobalColors.primary.copy(alpha = 0.7f),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -1586,7 +1619,7 @@ fun TacticalFileRow(
             // Size
             Text(
                 text = file.size,
-                color = if (file.isFolder) TitanColors.NeonCyan else Color.White,
+                color = if (file.isFolder) GlobalColors.primary else Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 fontFamily = FontFamily.Monospace,
@@ -1686,7 +1719,7 @@ fun TerminalList(
             Spacer(modifier = Modifier.height(8.dp))
         }
         items(files) { file ->
-            val color = if (file.isFolder) TitanColors.NeonCyan else file.thematicColor
+            val color = if (file.isFolder) GlobalColors.primary else file.thematicColor
             val prefix = if (file.isFolder) "DIR" else "FIL"
             
             SovereignLifeWrapper {
@@ -1752,7 +1785,7 @@ fun RenameDialog(
     
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack,
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = { Text("RENAME PROTOCOL", color = accentColor, fontFamily = FontFamily.Monospace) },
         text = {
             TextField(
@@ -1775,10 +1808,10 @@ fun RenameDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirm(name) },
-                colors = ButtonDefaults.buttonColors(containerColor = TitanColors.NeonCyan.copy(alpha = 0.2f)),
-                border = BorderStroke(1.dp, TitanColors.NeonCyan)
+                colors = ButtonDefaults.buttonColors(containerColor = GlobalColors.primary.copy(alpha = 0.2f)),
+                border = BorderStroke(1.dp, GlobalColors.primary)
             ) {
-                Text("EXECUTE", color = TitanColors.NeonCyan)
+                Text("EXECUTE", color = GlobalColors.primary)
             }
         },
         dismissButton = {
@@ -1796,7 +1829,7 @@ fun FileDetailsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack,
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = { Text("FILE INTEL", color = accentColor, fontFamily = FontFamily.Monospace) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1807,7 +1840,7 @@ fun FileDetailsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("CLOSE", color = TitanColors.NeonCyan) }
+            TextButton(onClick = onDismiss) { Text("CLOSE", color = GlobalColors.primary) }
         }
     )
 }
@@ -1838,7 +1871,7 @@ fun TacticalHeaderRow() {
         Text(
             text = "NAME / PERMS",
             modifier = Modifier.weight(1f),
-            color = TitanColors.NeonCyan.copy(alpha = 0.5f),
+            color = GlobalColors.primary.copy(alpha = 0.5f),
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp,
@@ -1847,7 +1880,7 @@ fun TacticalHeaderRow() {
         
         Text(
             text = "SIZE",
-            color = TitanColors.NeonCyan.copy(alpha = 0.5f),
+            color = GlobalColors.primary.copy(alpha = 0.5f),
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp,
@@ -1874,21 +1907,21 @@ fun LoadingDiagnosticPulse(text: String) {
         Box(
             modifier = Modifier
                 .size(100.dp)
-                .background(TitanColors.NeonCyan.copy(alpha = 0.1f * alpha), CircleShape)
-                .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.5f * alpha), CircleShape),
+                .background(GlobalColors.primary.copy(alpha = 0.1f * alpha), CircleShape)
+                .border(1.dp, GlobalColors.primary.copy(alpha = 0.5f * alpha), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Default.Refresh,
                 null,
-                tint = TitanColors.NeonCyan,
+                tint = GlobalColors.primary,
                 modifier = Modifier.size(48.dp)
             )
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text(
             text,
-            color = TitanColors.NeonCyan,
+            color = GlobalColors.primary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 2.sp,
@@ -1910,6 +1943,11 @@ fun RadarScanningPlaceholder(mainText: String) {
         ),
         label = "scan"
     )
+
+    // PHASE 10.9 — read GlobalColors here (composable context) so
+    // the Canvas DrawScope below can use them without triggering
+    // @Composable invocation errors.
+    val radarPrimary = GlobalColors.primary
     
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -1920,7 +1958,7 @@ fun RadarScanningPlaceholder(mainText: String) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize(radiusScale)
-                        .border(0.5.dp, TitanColors.NeonCyan.copy(alpha = 0.1f), CircleShape)
+                        .border(0.5.dp, GlobalColors.primary.copy(alpha = 0.1f), CircleShape)
                 )
             }
             
@@ -1929,7 +1967,7 @@ fun RadarScanningPlaceholder(mainText: String) {
                 drawArc(
                     brush = Brush.sweepGradient(
                         0f to Color.Transparent,
-                        0.25f to TitanColors.NeonCyan.copy(alpha = 0.2f),
+                        0.25f to radarPrimary.copy(alpha = 0.2f),
                         0.5f to Color.Transparent,
                         center = center
                     ),
@@ -1942,7 +1980,7 @@ fun RadarScanningPlaceholder(mainText: String) {
             Icon(
                 Icons.Default.Radar,
                 null,
-                tint = TitanColors.NeonCyan.copy(alpha = 0.4f),
+                tint = GlobalColors.primary.copy(alpha = 0.4f),
                 modifier = Modifier.size(64.dp)
             )
         }
@@ -1950,7 +1988,7 @@ fun RadarScanningPlaceholder(mainText: String) {
         Spacer(modifier = Modifier.height(32.dp))
         Text(
             mainText,
-            color = TitanColors.NeonCyan,
+            color = GlobalColors.primary,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp,

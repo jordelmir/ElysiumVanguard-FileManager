@@ -19,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.neonGlass
 import com.elysium.vanguard.ui.components.MatrixRain
 import com.elysium.vanguard.ui.components.NeonGlowIcon
@@ -34,10 +36,11 @@ fun AlbumDetailScreen(
     val albums by viewModel.albums.collectAsState()
     val album = albums.find { it.name == albumName }
     val mediaList = album?.media ?: emptyList()
+    val adaptive = LocalAdaptiveMetrics.current
 
     Box(modifier = Modifier.fillMaxSize().background(TitanColors.AbsoluteBlack)) {
         MatrixRain(
-            color = TitanColors.NeonCyan.copy(alpha = 0.3f),
+            color = GlobalColors.primary.copy(alpha = 0.3f),
             speed = 60L
         )
         
@@ -52,7 +55,7 @@ fun AlbumDetailScreen(
                 IconButton(
                     onClick = onBack,
                     modifier = Modifier
-                        .neonGlass(cornerRadius = 12.dp, glowColor = TitanColors.NeonCyan)
+                        .neonGlass(cornerRadius = 12.dp, glowColor = GlobalColors.primary)
                         .size(48.dp)
                 ) {
                     NeonGlowIcon(
@@ -72,7 +75,7 @@ fun AlbumDetailScreen(
                     )
                     Text(
                         "${mediaList.size} Items",
-                        color = TitanColors.NeonCyan,
+                        color = GlobalColors.primary,
                         fontSize = 12.sp
                     )
                 }
@@ -80,10 +83,10 @@ fun AlbumDetailScreen(
 
             // Grid
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                columns = GridCells.Adaptive(adaptive.mediaThumbMinWidth),
+                contentPadding = PaddingValues(adaptive.screenPadding),
+                verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2),
+                horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2)
             ) {
                 items(mediaList) { media ->
                     SovereignLifeWrapper {

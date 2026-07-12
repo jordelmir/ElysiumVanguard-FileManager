@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.neonGlass
 import com.elysium.vanguard.ui.theme.pulsingNeonBorder
 import com.elysium.vanguard.ui.components.NeonGlowIcon
@@ -90,7 +92,7 @@ fun GalleryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .neonGlass(cornerRadius = 0.dp, glowColor = TitanColors.NeonCyan.copy(alpha = 0.1f))
+                    .neonGlass(cornerRadius = 0.dp, glowColor = GlobalColors.primary.copy(alpha = 0.1f))
                     .padding(vertical = 8.dp, horizontal = 12.dp)
             ) {
                 Row(
@@ -135,7 +137,7 @@ fun GalleryScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().background(TitanColors.DeepVoidGradient).padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().background(TitanColors.AbsoluteBlack).padding(padding)) {
             MatrixRain(
                 color = accentColor,
                 alpha = 0.15f,
@@ -177,6 +179,7 @@ fun GalleryScreen(
 private fun PhotosTab(viewModel: GalleryViewModel) {
     val mediaFiles by viewModel.mediaFiles.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     val groupedMedia = remember(mediaFiles) {
         val sdf = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
@@ -185,27 +188,27 @@ private fun PhotosTab(viewModel: GalleryViewModel) {
 
     if (isLoading && mediaFiles.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = TitanColors.NeonCyan, strokeWidth = 2.dp)
+            CircularProgressIndicator(color = GlobalColors.primary, strokeWidth = 2.dp)
         }
     } else if (mediaFiles.isEmpty()) {
         AnimatedEmptyState(
             icon = Icons.Default.PhotoCamera,
             message = "NO PHOTOS DETECTED",
-            color = TitanColors.NeonCyan
+            color = GlobalColors.primary
         )
     } else {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 90.dp),
+            columns = GridCells.Adaptive(minSize = adaptive.mediaThumbMinWidth),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            contentPadding = PaddingValues(adaptive.screenPadding / 2),
+            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2),
+            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2)
         ) {
             for ((date, files) in groupedMedia) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     GlassPillBadge(
                         text = date.uppercase(),
-                        color = TitanColors.NeonCyan,
+                        color = GlobalColors.primary,
                         modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
                     )
                 }
@@ -237,16 +240,17 @@ private fun PhotosTab(viewModel: GalleryViewModel) {
 @Composable
 private fun AlbumsTab(viewModel: GalleryViewModel, onAlbumClick: (String) -> Unit) {
     val albums by viewModel.albums.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (albums.isEmpty()) {
-        AnimatedEmptyState(icon = Icons.Default.PhotoAlbum, message = "NO ALBUMS FOUND", color = TitanColors.QuantumPink)
+        AnimatedEmptyState(icon = Icons.Default.PhotoAlbum, message = "NO ALBUMS FOUND", color = GlobalColors.secondary)
     } else {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
+            columns = GridCells.Adaptive(minSize = adaptive.albumCardMinWidth),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(adaptive.screenPadding),
+            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing),
+            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing)
         ) {
             items(albums) { album ->
                 SovereignLifeWrapper {
@@ -270,7 +274,7 @@ private fun AlbumItem(album: GalleryAlbum, onClick: () -> Unit) {
                 .fillMaxWidth()
                 .aspectRatio(1f),
             cornerRadius = 16.dp,
-            glassAlpha = 0.35f,
+            glassAlpha = 0.0f,
             glowRadius = 20.dp
         ) {
             if (album.media.isNotEmpty()) {
@@ -283,7 +287,7 @@ private fun AlbumItem(album: GalleryAlbum, onClick: () -> Unit) {
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(TitanColors.QuantumPink.copy(alpha = 0.2f)), // Vivid fallback
+                        .background(GlobalColors.secondary.copy(alpha = 0.2f)), // Vivid fallback
                     contentScale = ContentScale.Crop
                 )
             }
@@ -303,11 +307,11 @@ private fun AlbumItem(album: GalleryAlbum, onClick: () -> Unit) {
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(8.dp)
-                    .background(TitanColors.QuantumPink.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                    .border(0.5.dp, TitanColors.QuantumPink.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .background(GlobalColors.secondary.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    .border(0.5.dp, GlobalColors.secondary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
-                Text("${album.media.size}", color = TitanColors.QuantumPink, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("${album.media.size}", color = GlobalColors.secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -323,16 +327,17 @@ private fun AlbumItem(album: GalleryAlbum, onClick: () -> Unit) {
 private fun RecentTab(viewModel: GalleryViewModel) {
     val mediaFiles by viewModel.mediaFiles.collectAsState()
     val recent = mediaFiles.take(50)
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (recent.isEmpty()) {
-        AnimatedEmptyState(icon = Icons.Default.History, message = "NO RECENT MEDIA", color = TitanColors.RadioactiveGreen)
+        AnimatedEmptyState(icon = Icons.Default.History, message = "NO RECENT MEDIA", color = GlobalColors.tertiary)
     } else {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 90.dp),
+            columns = GridCells.Adaptive(minSize = adaptive.mediaThumbMinWidth),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            contentPadding = PaddingValues(adaptive.screenPadding / 2),
+            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2),
+            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2)
         ) {
             items(
                 count = recent.size,
@@ -355,16 +360,17 @@ private fun RecentTab(viewModel: GalleryViewModel) {
 private fun FavoritesTab(viewModel: GalleryViewModel) {
     val mediaFiles by viewModel.mediaFiles.collectAsState()
     val favorites = mediaFiles.filter { it.isFavorite }
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (favorites.isEmpty()) {
         AnimatedEmptyState(icon = Icons.Default.FavoriteBorder, message = "NO FAVORITES YET", color = TitanColors.NeonRed)
     } else {
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 90.dp),
+            columns = GridCells.Adaptive(minSize = adaptive.mediaThumbMinWidth),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            contentPadding = PaddingValues(adaptive.screenPadding / 2),
+            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2),
+            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing / 2)
         ) {
             items(
                 count = favorites.size,
@@ -410,7 +416,7 @@ fun MediaThumbnail(
                 onLongClick = { showMenu = true }
             ),
         cornerRadius = 10.dp,
-        glassAlpha = 0.12f,
+        glassAlpha = 0.0f,
         glowRadius = 10.dp
     ) {
         AsyncImage(
@@ -422,7 +428,7 @@ fun MediaThumbnail(
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
-                .background(TitanColors.NeonCyan.copy(alpha = 0.2f)), // Vivid fallback
+                .background(GlobalColors.primary.copy(alpha = 0.2f)), // Vivid fallback
             contentScale = ContentScale.Crop
         )
 
@@ -457,10 +463,10 @@ fun MediaThumbnail(
             onDismissRequest = { showMenu = false },
             modifier = Modifier
                 .background(TitanColors.CarbonGray)
-                .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.3f))
+                .border(1.dp, GlobalColors.primary.copy(alpha = 0.3f))
         ) {
             DropdownMenuItem(
-                text = { Text("Favorite", color = TitanColors.NeonCyan, fontSize = 12.sp) },
+                text = { Text("Favorite", color = GlobalColors.primary, fontSize = 12.sp) },
                 onClick = { showMenu = false; onOptionClick("FAVORITE") },
                 leadingIcon = { Icon(Icons.Default.Favorite, null, tint = TitanColors.NeonRed, modifier = Modifier.size(16.dp)) }
             )
@@ -504,13 +510,13 @@ fun MediaThumbnail(
                     modifier = Modifier
                         .size(32.dp)
                         .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                        .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.5f), CircleShape),
+                        .border(1.dp, GlobalColors.primary.copy(alpha = 0.5f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = TitanColors.NeonCyan,
+                        tint = GlobalColors.primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -523,7 +529,7 @@ fun MediaThumbnail(
                 ) {
                     Text(
                         "VID",
-                        color = TitanColors.NeonCyan,
+                        color = GlobalColors.primary,
                         fontSize = 7.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -564,7 +570,7 @@ private fun MediaMetadataDialog(
                 Text("CLOSE", color = accentColor, fontWeight = FontWeight.Bold)
             }
         },
-        containerColor = TitanColors.AbsoluteBlack.copy(alpha = 0.95f)
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f)
     )
 }
 

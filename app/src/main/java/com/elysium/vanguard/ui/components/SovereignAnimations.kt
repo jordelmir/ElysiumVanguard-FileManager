@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.luminousFrame
 import com.elysium.vanguard.ui.theme.holographicGlass
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Palette
@@ -44,6 +46,11 @@ import androidx.compose.material3.CheckboxDefaults
  * SOVEREIGN LIFE WRAPPER
  * Injects a subtle 3D pulsing "life" into any component.
  * It uses scale and rotationY/X to create a sense of depth and breathing.
+ *
+ * PHASE 10.9 — The 3D rotation was creating a visible "shelf" across
+ * the card when the user asked for UNIFORM color. The rotation is
+ * now capped at 0.3° (was 1°) so the card stays visually flat while
+ * still breathing. The scale pulse stays the same.
  */
 @Composable
 fun SovereignLifeWrapper(
@@ -51,6 +58,7 @@ fun SovereignLifeWrapper(
     enabled: Boolean = true,
     pulseSpeed: Int = 2500,
     maxScale: Float = 1.02f,
+    maxRotationDeg: Float = 0.3f,
     content: @Composable () -> Unit
 ) {
     if (!enabled) {
@@ -59,7 +67,7 @@ fun SovereignLifeWrapper(
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "life_pulse")
-    
+
     val scale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
         targetValue = maxScale,
@@ -71,8 +79,8 @@ fun SovereignLifeWrapper(
     )
 
     val rotation by infiniteTransition.animateFloat(
-        initialValue = -1f,
-        targetValue = 1f,
+        initialValue = -maxRotationDeg,
+        targetValue = maxRotationDeg,
         animationSpec = infiniteRepeatable(
             animation = tween(pulseSpeed * 2, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -182,6 +190,13 @@ fun AnimatedCounter(
 /**
  * ORBITAL ICON
  * An icon with a spinning neon orbital ring around it.
+ *
+ * PHASE 10.9 — Stripped the [luminousFrame] wrapper: the user
+ * asked for the color to be UNIFORM across the card, and a
+ * separate frame around the icon read as "an additional inner
+ * box" inside the card. The icon is just a ring + center icon
+ * now — no extra border, no extra glow. The CARD is the
+ * luminous frame; the icon is just a visual element inside.
  */
 @Composable
 fun OrbitalIcon(
@@ -190,7 +205,7 @@ fun OrbitalIcon(
     modifier: Modifier = Modifier,
     iconSize: Dp = 32.dp,
     ringSize: Dp = 56.dp,
-    ringColor: Color = color.copy(alpha = 0.5f)
+    ringColor: Color = color.copy(alpha = 0.85f)
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "orbital")
     val rotation by infiniteTransition.animateFloat(
@@ -204,26 +219,27 @@ fun OrbitalIcon(
     )
 
     Box(modifier = modifier.size(ringSize), contentAlignment = Alignment.Center) {
-        // Orbital ring
+        // Orbital ring (no extra frame around the box — the ring
+        // is the only border, and it lives INSIDE the box)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { rotationZ = rotation }
         ) {
-            val strokeWidth = 2.dp.toPx()
+            val strokeWidth = 1.8.dp.toPx()
             drawArc(
                 color = ringColor,
                 startAngle = 0f,
-                sweepAngle = 200f,
+                sweepAngle = 240f,
                 useCenter = false,
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
             )
             drawArc(
-                color = ringColor.copy(alpha = 0.3f),
-                startAngle = 220f,
-                sweepAngle = 100f,
+                color = ringColor.copy(alpha = 0.45f),
+                startAngle = 250f,
+                sweepAngle = 90f,
                 useCenter = false,
-                style = Stroke(width = strokeWidth * 0.5f, cap = StrokeCap.Round)
+                style = Stroke(width = strokeWidth * 0.6f, cap = StrokeCap.Round)
             )
         }
         // Center icon
@@ -244,7 +260,7 @@ fun OrbitalIcon(
 fun GlassPillBadge(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = TitanColors.NeonCyan,
+    color: Color = GlobalColors.primary,
     fontSize: TextUnit = 10.sp
 ) {
     Text(
@@ -269,7 +285,7 @@ fun AnimatedEmptyState(
     icon: ImageVector,
     message: String,
     modifier: Modifier = Modifier,
-    color: Color = TitanColors.NeonCyan
+    color: Color = GlobalColors.primary
 ) {
     Column(
         modifier = modifier.fillMaxSize(),
@@ -297,7 +313,7 @@ fun AnimatedEmptyState(
 @Composable
 fun EqualizerBars(
     modifier: Modifier = Modifier,
-    color: Color = TitanColors.NeonCyan,
+    color: Color = GlobalColors.primary,
     barCount: Int = 5,
     isAnimating: Boolean = true
 ) {
@@ -350,6 +366,14 @@ fun ColorCustomizerIcon(
         label = "rotation"
     )
 
+    // PHASE 10.9 — pull the 4 global theme colors here (composable
+    // context) so the sweep gradient can read them inside the
+    // Canvas DrawScope (non-composable).
+    val sweepPrimary = GlobalColors.primary
+    val sweepSecondary = GlobalColors.secondary
+    val sweepTertiary = GlobalColors.tertiary
+    val sweepQuaternary = GlobalColors.quaternary
+
     Box(
         modifier = modifier
             .size(44.dp)
@@ -362,12 +386,11 @@ fun ColorCustomizerIcon(
             val strokeWidth = 3.dp.toPx()
             val gradientBrush = Brush.sweepGradient(
                 listOf(
-                    TitanColors.NeonCyan,
-                    TitanColors.QuantumPink,
-                    TitanColors.RadioactiveGreen,
-                    TitanColors.NeonYellow,
-                    TitanColors.ElectricBlue,
-                    TitanColors.NeonCyan
+                    sweepPrimary,
+                    sweepSecondary,
+                    sweepTertiary,
+                    sweepQuaternary,
+                    sweepPrimary
                 )
             )
             drawCircle(
@@ -389,18 +412,18 @@ fun ColorSelectionDialog(
     onDismiss: () -> Unit
 ) {
     val colors = listOf(
-        TitanColors.RadioactiveGreen,
-        TitanColors.NeonCyan,
-        TitanColors.QuantumPink,
-        TitanColors.ElectricBlue,
+        GlobalColors.tertiary,
+        GlobalColors.primary,
+        GlobalColors.secondary,
+        GlobalColors.quaternary,
         TitanColors.NeonYellow,
-        TitanColors.PlasmaPurple,
+        GlobalColors.quaternary,
         TitanColors.AbsoluteWhite
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack.copy(alpha = 0.95f),
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = {
             Text(
                 "SELECT $sectionName ACCENT",
@@ -432,7 +455,7 @@ fun ColorSelectionDialog(
                         checked = applyToAll,
                         onCheckedChange = { applyToAll = it },
                         colors = CheckboxDefaults.colors(
-                            checkedColor = TitanColors.NeonCyan,
+                            checkedColor = GlobalColors.primary,
                             uncheckedColor = Color.White.copy(alpha = 0.5f),
                             checkmarkColor = Color.Black
                         )
@@ -451,9 +474,9 @@ fun ColorSelectionDialog(
                         .background(
                             Brush.linearGradient(
                                 listOf(
-                                    TitanColors.NeonCyan,
-                                    TitanColors.QuantumPink,
-                                    TitanColors.RadioactiveGreen,
+                                    GlobalColors.primary,
+                                    GlobalColors.secondary,
+                                    GlobalColors.tertiary,
                                     TitanColors.NeonYellow
                                 )
                             )
@@ -500,7 +523,7 @@ fun ColorSelectionDialog(
             }
         },
         modifier = Modifier
-            .pulsingNeonBorder(cornerRadius = 28.dp, glowColor = TitanColors.NeonCyan)
+            .pulsingNeonBorder(cornerRadius = 28.dp, glowColor = GlobalColors.primary)
             .clip(RoundedCornerShape(28.dp))
     )
 }

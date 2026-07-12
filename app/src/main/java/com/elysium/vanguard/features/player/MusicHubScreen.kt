@@ -35,6 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.neonGlass
 import com.elysium.vanguard.ui.theme.pulsingNeonBorder
 import com.elysium.vanguard.ui.components.NeonGlowIcon
@@ -59,6 +61,7 @@ fun MusicHubScreen(
     val scope = rememberCoroutineScope()
     var showColorDialog by remember { mutableStateOf(false) }
     val accentColor = SectionColorManager.musicAccent
+    val adaptive = LocalAdaptiveMetrics.current
     
     val pagerState = rememberPagerState(pageCount = { 5 })
     val tabs = listOf("RECENTS", "PLAYER", "SONGS", "PLAYLISTS", "FAVORITES")
@@ -88,7 +91,7 @@ fun MusicHubScreen(
                 actions = {
                     if (pagerState.currentPage == 2 && selectedPlaylist == null) {
                         IconButton(onClick = { showCreatePlaylistDialog = true }) {
-                            Icon(Icons.Default.Add, null, tint = TitanColors.NeonCyan)
+                            Icon(Icons.Default.Add, null, tint = GlobalColors.primary)
                         }
                     }
                 }
@@ -99,8 +102,8 @@ fun MusicHubScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .neonGlass(cornerRadius = 0.dp, glowColor = TitanColors.QuantumPink.copy(alpha = 0.1f))
-                    .padding(vertical = 8.dp, horizontal = 12.dp)
+                    .neonGlass(cornerRadius = 0.dp, glowColor = GlobalColors.secondary.copy(alpha = 0.1f))
+                    .padding(vertical = if (adaptive.isCompact) 6.dp else 8.dp, horizontal = adaptive.screenPadding / 2)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -120,7 +123,10 @@ fun MusicHubScreen(
                                         .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                                     else Modifier
                                 )
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                .padding(
+                                    horizontal = if (adaptive.isCompact) 6.dp else 14.dp,
+                                    vertical = if (adaptive.isCompact) 6.dp else 8.dp
+                                ),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
@@ -144,7 +150,7 @@ fun MusicHubScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().background(TitanColors.DeepVoidGradient).padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().background(TitanColors.AbsoluteBlack).padding(padding)) {
             MatrixRain(
                 color = accentColor,
                 alpha = 0.15f,
@@ -208,13 +214,14 @@ private fun RecentsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrac
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val accentColor = SectionColorManager.musicAccent
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (recents.isEmpty()) {
         AnimatedEmptyState(icon = Icons.Default.History, message = "NO RECENT TRACKS", color = accentColor)
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(adaptive.listContentPadding),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             item {
@@ -251,6 +258,7 @@ private fun SongsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrack)
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val accentColor = SectionColorManager.musicAccent
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -261,7 +269,7 @@ private fun SongsTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTrack)
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(adaptive.listContentPadding),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             item {
@@ -323,7 +331,7 @@ private fun TrackItem(
     onAddToPlaylist: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val accentColor = if (isCurrentlyPlaying) TitanColors.NeonCyan else TitanColors.QuantumPink
+    val accentColor = if (isCurrentlyPlaying) GlobalColors.primary else GlobalColors.secondary
 
     SovereignCard(
         modifier = Modifier
@@ -333,10 +341,14 @@ private fun TrackItem(
                 onLongClick = { showMenu = true }
             ),
         cornerRadius = 14.dp,
-        glassAlpha = if (isCurrentlyPlaying) 0.2f else 0.1f,
-        glowRadius = if (isCurrentlyPlaying) 16.dp else 8.dp
+        glassAlpha = 0.0f,
+        glowRadius = if (isCurrentlyPlaying) 16.dp else 10.dp
     ) {
-        Box(modifier = Modifier.fillMaxSize().background(accentColor.copy(alpha = 0.12f))) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(accentColor.copy(alpha = 0.16f))
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -383,7 +395,7 @@ private fun TrackItem(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         track.name,
-                        color = if (isCurrentlyPlaying) TitanColors.NeonCyan else Color.White,
+                        color = if (isCurrentlyPlaying) GlobalColors.primary else Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -411,7 +423,7 @@ private fun TrackItem(
                     Icon(
                         imageVector = if (track.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = null,
-                        tint = if (track.isFavorite) TitanColors.QuantumPink else Color.White.copy(alpha = 0.2f),
+                        tint = if (track.isFavorite) GlobalColors.secondary else Color.White.copy(alpha = 0.2f),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -438,17 +450,19 @@ private fun PlaylistsTab(
     selectedPlaylist: Playlist?,
     onPlaylistClick: (Playlist) -> Unit
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
+
     if (selectedPlaylist != null) {
         PlaylistDetailView(viewModel = viewModel, playlist = selectedPlaylist)
     } else {
         val playlists by viewModel.playlists.collectAsState()
 
         if (playlists.isEmpty()) {
-            AnimatedEmptyState(icon = Icons.Default.PlaylistAdd, message = "NO PLAYLISTS YET", color = TitanColors.RadioactiveGreen)
+            AnimatedEmptyState(icon = Icons.Default.PlaylistAdd, message = "NO PLAYLISTS YET", color = GlobalColors.tertiary)
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(adaptive.listContentPadding),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(playlists) { playlist ->
@@ -467,10 +481,11 @@ private fun PlaylistsTab(
 private fun PlaylistDetailView(viewModel: MusicHubViewModel, playlist: Playlist) {
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(adaptive.listContentPadding),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         if (playlist.tracks.isEmpty()) {
@@ -478,7 +493,7 @@ private fun PlaylistDetailView(viewModel: MusicHubViewModel, playlist: Playlist)
                 AnimatedEmptyState(
                     icon = Icons.Default.MusicOff,
                     message = "NO TRACKS IN PLAYLIST",
-                    color = TitanColors.RadioactiveGreen,
+                    color = GlobalColors.tertiary,
                     modifier = Modifier.height(300.dp)
                 )
             }
@@ -507,10 +522,14 @@ private fun PlaylistItem(
             .fillMaxWidth()
             .clickable { onClick() },
         cornerRadius = 16.dp,
-        glassAlpha = 0.15f,
+        glassAlpha = 0.0f,
         glowRadius = 12.dp
     ) {
-        Box(modifier = Modifier.fillMaxSize().background(TitanColors.NeonCyan.copy(alpha = 0.1f))) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(GlobalColors.tertiary.copy(alpha = 0.16f))
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -523,8 +542,8 @@ private fun PlaylistItem(
                         .background(
                             Brush.linearGradient(
                                 listOf(
-                                    TitanColors.RadioactiveGreen.copy(alpha = 0.15f),
-                                    TitanColors.NeonCyan.copy(alpha = 0.1f)
+                                    GlobalColors.tertiary.copy(alpha = 0.15f),
+                                    GlobalColors.primary.copy(alpha = 0.1f)
                                 )
                             )
                         ),
@@ -532,7 +551,7 @@ private fun PlaylistItem(
                 ) {
                     NeonGlowIcon(
                         icon = Icons.Default.PlaylistPlay,
-                        color = TitanColors.RadioactiveGreen,
+                        color = GlobalColors.tertiary,
                         size = 28.dp,
                         glowRadius = 12.dp
                     )
@@ -566,13 +585,14 @@ private fun FavoritesTab(viewModel: MusicHubViewModel, onAddToPlaylist: (MusicTr
     val favorites = songs.filter { it.isFavorite }
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     if (favorites.isEmpty()) {
         AnimatedEmptyState(icon = Icons.Default.FavoriteBorder, message = "NO FAVORITES YET", color = TitanColors.NeonRed)
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(adaptive.listContentPadding),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             itemsIndexed(favorites) { index, track ->
@@ -614,6 +634,12 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
     val isShuffle by viewModel.isShuffle.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
     val volume by viewModel.volume.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
+    val artworkSize = when {
+        adaptive.isCompact -> 196.dp
+        adaptive.isMedium -> 240.dp
+        else -> 300.dp
+    }
 
     // Vinyl rotation animation
     val infiniteTransition = rememberInfiniteTransition(label = "vinyl")
@@ -630,7 +656,7 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(adaptive.screenPadding),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.weight(0.3f))
@@ -638,12 +664,12 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
         // ── ARTWORK / VINYL ──
         SovereignCard(
             modifier = Modifier
-                .size(240.dp)
+                .size(artworkSize)
                 .graphicsLayer {
                     if (isPlaying) rotationZ = vinylRotation
                 },
             cornerRadius = 120.dp,
-            glassAlpha = 0.2f,
+            glassAlpha = 0.0f,
             glowRadius = 32.dp
         ) {
             Box(
@@ -654,12 +680,12 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                 Box(
                     modifier = Modifier
                         .size(180.dp)
-                        .border(1.dp, TitanColors.QuantumPink.copy(alpha = 0.1f), CircleShape)
+                        .border(1.dp, GlobalColors.secondary.copy(alpha = 0.1f), CircleShape)
                 )
                 Box(
                     modifier = Modifier
                         .size(130.dp)
-                        .border(0.5.dp, TitanColors.QuantumPink.copy(alpha = 0.08f), CircleShape)
+                        .border(0.5.dp, GlobalColors.secondary.copy(alpha = 0.08f), CircleShape)
                 )
                 Box(
                     modifier = Modifier
@@ -709,8 +735,8 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                 onValueChange = { viewModel.seekTo(it) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = SliderDefaults.colors(
-                    thumbColor = TitanColors.NeonCyan,
-                    activeTrackColor = TitanColors.NeonCyan,
+                    thumbColor = GlobalColors.primary,
+                    activeTrackColor = GlobalColors.primary,
                     inactiveTrackColor = Color.White.copy(alpha = 0.08f)
                 )
             )
@@ -733,8 +759,8 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                 onValueChange = { viewModel.setVolume(it) },
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 colors = SliderDefaults.colors(
-                    thumbColor = TitanColors.QuantumPink,
-                    activeTrackColor = TitanColors.QuantumPink,
+                    thumbColor = GlobalColors.secondary,
+                    activeTrackColor = GlobalColors.secondary,
                     inactiveTrackColor = Color.White.copy(alpha = 0.06f)
                 )
             )
@@ -747,8 +773,8 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
         SovereignCard(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = 24.dp,
-            glassAlpha = 0.1f,
-            glowRadius = 12.dp
+            glassAlpha = 0.0f,
+            glowRadius = 14.dp
         ) {
             Row(
                 modifier = Modifier
@@ -760,7 +786,7 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                 IconButton(onClick = { viewModel.toggleShuffle() }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Default.Shuffle, null,
-                        tint = if (isShuffle) TitanColors.NeonCyan else Color.White.copy(alpha = 0.25f),
+                        tint = if (isShuffle) GlobalColors.primary else Color.White.copy(alpha = 0.25f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -772,8 +798,8 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                 Box(
                     modifier = Modifier
                         .size(64.dp)
-                        .pulsingNeonBorder(cornerRadius = 32.dp, glowColor = TitanColors.NeonCyan)
-                        .border(1.dp, TitanColors.NeonCyan.copy(alpha = 0.3f), CircleShape)
+                        .pulsingNeonBorder(cornerRadius = 32.dp, glowColor = GlobalColors.primary)
+                        .border(1.dp, GlobalColors.primary.copy(alpha = 0.3f), CircleShape)
                         .clip(CircleShape)
                         .clickable { viewModel.togglePlayPause() },
                     contentAlignment = Alignment.Center
@@ -793,7 +819,7 @@ private fun SovereignNowPlaying(viewModel: MusicHubViewModel, accentColor: Color
                     Icon(
                         if (repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
                         null,
-                        tint = if (repeatMode != Player.REPEAT_MODE_OFF) TitanColors.NeonCyan else Color.White.copy(alpha = 0.25f),
+                        tint = if (repeatMode != Player.REPEAT_MODE_OFF) GlobalColors.primary else Color.White.copy(alpha = 0.25f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -813,7 +839,7 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Un
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("NEW PLAYLIST", color = TitanColors.NeonCyan, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
+        title = { Text("NEW PLAYLIST", color = GlobalColors.primary, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
         text = {
             TextField(
                 value = name,
@@ -822,8 +848,8 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Un
                 colors = TextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
-                    cursorColor = TitanColors.NeonCyan,
-                    focusedIndicatorColor = TitanColors.NeonCyan,
+                    cursorColor = GlobalColors.primary,
+                    focusedIndicatorColor = GlobalColors.primary,
                     unfocusedIndicatorColor = Color.White.copy(alpha = 0.1f),
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent
@@ -833,13 +859,13 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Un
         },
         confirmButton = {
             TextButton(onClick = { if (name.isNotBlank()) onCreate(name) }) {
-                Text("CREATE", color = TitanColors.NeonCyan, fontWeight = FontWeight.Bold)
+                Text("CREATE", color = GlobalColors.primary, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("CANCEL", color = Color.White.copy(alpha = 0.5f)) }
         },
-        containerColor = TitanColors.AbsoluteBlack.copy(alpha = 0.95f)
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f)
     )
 }
 
@@ -853,7 +879,7 @@ private fun AddToPlaylistDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("SELECT PLAYLIST", color = TitanColors.NeonCyan, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
+        title = { Text("SELECT PLAYLIST", color = GlobalColors.primary, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) },
         text = {
             if (playlists.isEmpty()) {
                 Text("No playlists found. Create one first.", color = Color.White.copy(alpha = 0.5f))
@@ -868,7 +894,7 @@ private fun AddToPlaylistDialog(
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.PlaylistPlay, null, tint = TitanColors.NeonCyan, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.PlaylistPlay, null, tint = GlobalColors.primary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(playlist.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -883,7 +909,7 @@ private fun AddToPlaylistDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("CANCEL", color = Color.White.copy(alpha = 0.5f)) }
         },
-        containerColor = TitanColors.AbsoluteBlack.copy(alpha = 0.95f)
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f)
     )
 }
 
@@ -904,7 +930,7 @@ fun TrackOptionsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack,
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = {
             Column {
                 Text(

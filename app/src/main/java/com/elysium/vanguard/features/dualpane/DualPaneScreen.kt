@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.TitanColors
 import java.io.File
 
@@ -75,6 +76,7 @@ fun DualPaneScreen(
 ) {
     val left by viewModel.left.collectAsState()
     val right by viewModel.right.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     Scaffold(
         topBar = {
@@ -98,29 +100,56 @@ fun DualPaneScreen(
             )
         }
     ) { padding ->
-        Row(modifier = Modifier
-            .padding(padding)
-            .fillMaxSize()
-            .background(Color(0xFF050810))) {
-            Pane(
-                state = left,
-                onUp = { viewModel.goUp(PaneSide.LEFT) },
-                onRefresh = { viewModel.refresh(PaneSide.LEFT) },
-                onOpen = { viewModel.open(PaneSide.LEFT, it) },
-                onCopyHere = { viewModel.copyToOtherPane(PaneSide.LEFT, it) },
-                isSource = true,
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            )
-            VerticalDivider(color = Color(0xFF1A2030), thickness = 1.dp)
-            Pane(
-                state = right,
-                onUp = { viewModel.goUp(PaneSide.RIGHT) },
-                onRefresh = { viewModel.refresh(PaneSide.RIGHT) },
-                onOpen = { viewModel.open(PaneSide.RIGHT, it) },
-                onCopyHere = { viewModel.copyToOtherPane(PaneSide.RIGHT, it) },
-                isSource = false,
-                modifier = Modifier.weight(1f).fillMaxHeight()
-            )
+        if (adaptive.shouldStackPrimaryPanes) {
+            Column(modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .background(Color(0xFF050810))) {
+                Pane(
+                    state = left,
+                    onUp = { viewModel.goUp(PaneSide.LEFT) },
+                    onRefresh = { viewModel.refresh(PaneSide.LEFT) },
+                    onOpen = { viewModel.open(PaneSide.LEFT, it) },
+                    onCopyHere = { viewModel.copyToOtherPane(PaneSide.LEFT, it) },
+                    isSource = true,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+                HorizontalDivider(color = Color(0xFF1A2030), thickness = 1.dp)
+                Pane(
+                    state = right,
+                    onUp = { viewModel.goUp(PaneSide.RIGHT) },
+                    onRefresh = { viewModel.refresh(PaneSide.RIGHT) },
+                    onOpen = { viewModel.open(PaneSide.RIGHT, it) },
+                    onCopyHere = { viewModel.copyToOtherPane(PaneSide.RIGHT, it) },
+                    isSource = false,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+        } else {
+            Row(modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .background(Color(0xFF050810))) {
+                Pane(
+                    state = left,
+                    onUp = { viewModel.goUp(PaneSide.LEFT) },
+                    onRefresh = { viewModel.refresh(PaneSide.LEFT) },
+                    onOpen = { viewModel.open(PaneSide.LEFT, it) },
+                    onCopyHere = { viewModel.copyToOtherPane(PaneSide.LEFT, it) },
+                    isSource = true,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                VerticalDivider(color = Color(0xFF1A2030), thickness = 1.dp)
+                Pane(
+                    state = right,
+                    onUp = { viewModel.goUp(PaneSide.RIGHT) },
+                    onRefresh = { viewModel.refresh(PaneSide.RIGHT) },
+                    onOpen = { viewModel.open(PaneSide.RIGHT, it) },
+                    onCopyHere = { viewModel.copyToOtherPane(PaneSide.RIGHT, it) },
+                    isSource = false,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+            }
         }
     }
 }

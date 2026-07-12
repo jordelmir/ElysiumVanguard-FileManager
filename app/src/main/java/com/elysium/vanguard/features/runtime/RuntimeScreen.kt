@@ -44,6 +44,7 @@ import com.elysium.vanguard.core.runtime.distros.DistroCatalog
 import com.elysium.vanguard.core.runtime.distros.DistroInstallation
 import com.elysium.vanguard.core.runtime.distros.EffectiveCatalogRow
 import com.elysium.vanguard.core.runtime.distros.displayByteSize
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 
 /**
  * PHASE 9.6.2 — Sovereign runtime catalog screen.
@@ -66,10 +67,13 @@ fun RuntimeScreen(
     onOpenDesktop: (String) -> Unit = {},
     viewModel: RuntimeViewModel = hiltViewModel()
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
     val installed by viewModel.installed.collectAsState()
     val installing by viewModel.installing.collectAsState()
     val errors by viewModel.errors.collectAsState()
     val effectiveCatalog by viewModel.effectiveCatalog.collectAsState()
+    val healthyCount = installed.count { it.isHealthy }
+    val failedCount = installed.size - healthyCount
 
     Scaffold(
         containerColor = Color(0xFF0B0D10),
@@ -85,7 +89,11 @@ fun RuntimeScreen(
                             color = Color(0xFFE4E7EB)
                         )
                         Text(
-                            text = "Catalog · ${installed.size} installed",
+                            text = if (failedCount > 0) {
+                                "Catalog · $healthyCount ready · $failedCount repair"
+                            } else {
+                                "Catalog · $healthyCount ready"
+                            },
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = Color(0xFF8B949E)
@@ -125,7 +133,7 @@ fun RuntimeScreen(
                 text = "Total catalog size: ${(DistroCatalog.totalCatalogSizeBytes).displayByteSize()}",
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFF8B949E),
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(adaptive.screenPadding)
             )
 
             // PHASE 9.6.3.2 — "Add custom rootfs" tile.
@@ -137,8 +145,8 @@ fun RuntimeScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(adaptive.screenPadding),
+                verticalArrangement = Arrangement.spacedBy(adaptive.sectionSpacing)
             ) {
                 if (effectiveCatalog.any { !it.isCustom }) {
                     item { SectionHeader("Catalog") }
@@ -285,11 +293,10 @@ private fun DistroCatalogRow(
                                 .clickableNoRipple(onRemove)
                         )
                     }
-                    else -> Text(
-                        text = "install failed",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = Color(0xFFFF6E6E)
+                    else -> FailedInstallActions(
+                        reason = installed.failureReason,
+                        onRetry = onInstall,
+                        onRemove = onRemove
                     )
                 }
             }
@@ -322,11 +329,8 @@ private fun BannerError(message: String) {
  * keep our own implementation so the runtime screen does not grow with
  * every Compose update.
  */
-@Composable
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(
-        Modifier.padding(0.dp)
-    )
+    this.clickable(onClick = onClick)
 
 /**
  * PHASE 9.6.3.2 — Header tile that opens the custom rootfs URL
@@ -498,14 +502,53 @@ private fun EffectiveCatalogRowView(
                                 .clickableNoRipple(onRemove)
                         )
                     }
-                    else -> Text(
-                        text = "install failed",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = Color(0xFFFF6E6E)
+                    else -> FailedInstallActions(
+                        reason = installed?.failureReason,
+                        onRetry = onInstall,
+                        onRemove = onRemove
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FailedInstallActions(
+    reason: String?,
+    onRetry: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = "install failed",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = Color(0xFFFF6E6E)
+        )
+        reason?.takeIf { it.isNotBlank() }?.let { message ->
+            Text(
+                text = message.take(72),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.sp,
+                color = Color(0xFFFFA3A3),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Button(
+            onClick = onRetry,
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Text("Retry", fontFamily = FontFamily.Monospace)
+        }
+        Text(
+            text = "remove broken data",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+            color = Color(0xFF8B949E),
+            modifier = Modifier
+                .padding(top = 6.dp)
+                .clickableNoRipple(onRemove)
+        )
     }
 }

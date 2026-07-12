@@ -8,6 +8,13 @@ import androidx.compose.ui.graphics.Color
 /**
  * SECTION COLOR MANAGER
  * Controls the thematic accent color for each major app module.
+ *
+ * NOTE (PHASE 10.9): defaults are the legacy [TitanColors] values
+ * (compile-time constants). This object is not @Composable, so it
+ * can't read from [GlobalColors] (which requires a composable
+ * context). The defaults are static; once a user picks an accent
+ * via the ColorSelectionDialog, the live value flows from there
+ * and overrides the static default.
  */
 object SectionColorManager {
     var dashboardAccent by mutableStateOf(TitanColors.NeonCyan)

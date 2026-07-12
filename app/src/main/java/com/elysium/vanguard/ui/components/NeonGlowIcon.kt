@@ -13,11 +13,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.elysium.vanguard.ui.theme.luminousFrame
 
 /**
  * NEON GLOW ICON
  * Every icon rendered with an animated backlight halo.
  * The glow is a blurred copy behind the sharp icon, pulsing with life.
+ *
+ * PHASE 10.9 — Stripped the [luminousFrame] wrapper: the user
+ * asked for the color across the card to be UNIFORM, and a
+ * separate border around the icon read as "an additional inner
+ * box" inside the card. The icon now lives in a plain Box with
+ * only its 3-layer glow — no hard border, no extra frame. The
+ * CARD is the luminous frame; the icon just glows inside.
  */
 @Composable
 fun NeonGlowIcon(
@@ -30,7 +38,7 @@ fun NeonGlowIcon(
     contentDescription: String? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "neon_pulse")
-    
+
     val glowAlpha by infiniteTransition.animateFloat(
         initialValue = 0.3f,
         targetValue = if (pulseEnabled) 0.8f else 0.5f,
@@ -40,7 +48,7 @@ fun NeonGlowIcon(
         ),
         label = "glow_alpha"
     )
-    
+
     val glowScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
         targetValue = if (pulseEnabled) 1.3f else 1.1f,
@@ -55,17 +63,19 @@ fun NeonGlowIcon(
         modifier = modifier.size(size + glowRadius),
         contentAlignment = Alignment.Center
     ) {
-        // LAYER 1: Outer halo (large blur, low alpha)
+        // LAYER 1: Outer halo (large blur, low alpha) — this is
+        // the "luminosity on the outside" of the icon, but soft,
+        // not a hard border.
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = color.copy(alpha = glowAlpha * 0.5f),
+            tint = color.copy(alpha = glowAlpha * 0.55f),
             modifier = Modifier
                 .size(size * 1.2f)
                 .blur(glowRadius)
                 .scale(glowScale * 1.1f)
         )
-        
+
         // LAYER 2: Inner halo (tighter blur, higher alpha)
         Icon(
             imageVector = icon,
@@ -76,7 +86,7 @@ fun NeonGlowIcon(
                 .blur(glowRadius / 2)
                 .scale(glowScale)
         )
-        
+
         // LAYER 3: Sharp foreground icon
         Icon(
             imageVector = icon,

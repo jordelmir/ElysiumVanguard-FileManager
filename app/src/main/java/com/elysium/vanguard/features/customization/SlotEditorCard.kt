@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,7 +41,10 @@ import com.elysium.vanguard.ui.theme.TitanColors
 /**
  * PHASE 10.8 — Editor card for one [ColorSlot].
  *
- * The card has four regions, top to bottom:
+ * The card itself is the live preview: the slot's color and
+ * glow render **outward** from the card (via
+ * [SlotRenderers.slotGlow]'s outer shadow), not from an inner
+ * tile. Three regions, top to bottom:
  *
  *  1. Header — slot name, color swatch (taps open the picker),
  *     hex code.
@@ -48,9 +52,11 @@ import com.elysium.vanguard.ui.theme.TitanColors
  *     [SlotStyle]s. The selected one is filled; the others are
  *     outlined.
  *  3. Intensity slider — 0..2 with 1.0 as the default. The
- *     preview updates live as the user drags.
- *  4. Live preview — a `slotGlow`-rendered tile showing the
- *     current base + style + intensity.
+ *     card's border + glow + halo update live as the user drags.
+ *
+ * The card's background is a style-dependent alpha tint of the
+ * slot's base color, so the slot's identity is visible across
+ * the whole card surface, not just at the swatch.
  */
 @Composable
 fun SlotEditorCard(
@@ -65,11 +71,17 @@ fun SlotEditorCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(TitanColors.CarbonGray.copy(alpha = 0.6f))
-            .border(1.dp, TitanColors.AbsoluteWhite.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-            .padding(14.dp)
+            .padding(vertical = 12.dp)
+            .then(
+                SlotRenderers.run {
+                    Modifier.slotGlow(
+                        slot = slot,
+                        cornerRadius = 18.dp,
+                        glowRadius = 22.dp
+                    )
+                }
+            )
+            .padding(16.dp)
     ) {
         // ── Header ─────────────────────────────────────────────
         Row(
@@ -80,36 +92,37 @@ fun SlotEditorCard(
                 slotName,
                 color = TitanColors.AbsoluteWhite,
                 fontWeight = FontWeight.Black,
-                fontSize = 14.sp,
-                letterSpacing = 2.sp,
+                fontSize = 16.sp,
+                letterSpacing = 2.5.sp,
                 modifier = Modifier.weight(1f)
             )
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(slot.base)
-                    .border(2.dp, TitanColors.AbsoluteWhite.copy(alpha = 0.4f), CircleShape)
+                    .border(2.dp, TitanColors.AbsoluteWhite.copy(alpha = 0.55f), CircleShape)
                     .clickable { pickerOpen = true }
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
             Text(
-                "#%06X".format(((slot.base.value and 0xFFFFFFuL).toInt())),
-                color = TitanColors.AbsoluteWhite.copy(alpha = 0.5f),
-                fontSize = 10.sp
+                "#%06X".format((slot.base.toArgb() and 0xFFFFFF)),
+                color = TitanColors.AbsoluteWhite.copy(alpha = 0.65f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
             )
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
 
         // ── Style selector ─────────────────────────────────────
         Text(
             "STYLE",
             color = TitanColors.AbsoluteWhite.copy(alpha = 0.5f),
             fontSize = 10.sp,
-            letterSpacing = 1.sp
+            letterSpacing = 1.5.sp
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(SlotStyle.values().toList()) { style ->
                 StylePill(
@@ -120,7 +133,7 @@ fun SlotEditorCard(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
 
         // ── Intensity slider ───────────────────────────────────
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -128,7 +141,7 @@ fun SlotEditorCard(
                 "INTENSITY",
                 color = TitanColors.AbsoluteWhite.copy(alpha = 0.5f),
                 fontSize = 10.sp,
-                letterSpacing = 1.sp,
+                letterSpacing = 1.5.sp,
                 modifier = Modifier.width(80.dp)
             )
             Slider(
@@ -144,42 +157,11 @@ fun SlotEditorCard(
             )
             Text(
                 "%.1f".format(slot.intensity),
-                color = TitanColors.AbsoluteWhite.copy(alpha = 0.6f),
+                color = TitanColors.AbsoluteWhite.copy(alpha = 0.7f),
                 fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.width(28.dp)
             )
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // ── Live preview ───────────────────────────────────────
-        Text(
-            "PREVIEW",
-            color = TitanColors.AbsoluteWhite.copy(alpha = 0.5f),
-            fontSize = 10.sp,
-            letterSpacing = 1.sp
-        )
-        Spacer(Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .then(SlotRenderers.run { Modifier.slotGlow(slot, cornerRadius = 12.dp, glowRadius = 14.dp) })
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    slotName,
-                    color = TitanColors.AbsoluteWhite,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    letterSpacing = 2.sp
-                )
-            }
         }
     }
 

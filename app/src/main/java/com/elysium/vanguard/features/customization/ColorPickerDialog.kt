@@ -36,6 +36,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.elysium.vanguard.ui.theme.GlobalColors
 import com.elysium.vanguard.ui.theme.TitanColors
 import kotlin.math.abs
 import kotlin.math.max
@@ -77,7 +78,7 @@ fun ColorPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = TitanColors.AbsoluteBlack.copy(alpha = 0.95f),
+        containerColor = GlobalColors.primary.copy(alpha = 0.12f),
         title = {
             Text(
                 title,

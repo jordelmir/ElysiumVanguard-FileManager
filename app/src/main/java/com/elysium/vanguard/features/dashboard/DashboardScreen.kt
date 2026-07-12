@@ -26,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -48,9 +49,13 @@ import com.elysium.vanguard.ui.components.OrbitalIcon
 import com.elysium.vanguard.ui.components.AnimatedCounter
 import com.elysium.vanguard.ui.components.GlassPillBadge
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.holographicGlass
 import com.elysium.vanguard.ui.theme.pulsingNeonBorder
 import com.elysium.vanguard.ui.theme.neonGlass
+import com.elysium.vanguard.ui.theme.uniformNeonSurfaceBrush
+import com.elysium.vanguard.ui.theme.uniformNeonSurfaceColor
 import com.elysium.vanguard.ui.theme.premiumGlass
 import com.elysium.vanguard.ui.theme.SectionColorManager
 import com.elysium.vanguard.ui.components.ColorCustomizerIcon
@@ -71,6 +76,20 @@ fun DashboardScreen(
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
     val accentColor = SectionColorManager.dashboardAccent
+    val adaptive = LocalAdaptiveMetrics.current
+
+    // PHASE 10.9 — Global theme. Read the 4 brand colors once at
+    // composition time. Used to drive every card/tile/border in
+    // the dashboard. When the user picks a new palette on the
+    // COLORS screen, these values flip and the whole dashboard
+    // re-renders in the new colors.
+    val gPrimary = GlobalColors.primary
+    val gSecondary = GlobalColors.secondary
+    val gTertiary = GlobalColors.tertiary
+    val gQuaternary = GlobalColors.quaternary
+
+    /** One opaque, module-derived fill: no transparent color over black. */
+    fun moduleSurface(color: Color): Brush = uniformNeonSurfaceBrush(color, 0.24f)
 
     // ── LIVE DEVICE METRICS ──
     val storageInfo = remember { getStorageInfo() }
@@ -78,12 +97,12 @@ fun DashboardScreen(
     val batteryLevel = remember { getBatteryLevel(context) }
 
     val portalItems = listOf(
-        PortalItem("FILE SYSTEM", "MANAGE · COMPRESS · EXPLORE", Icons.Default.Storage, TitanColors.NeonCyan, onNavigateToStorage,
-            Brush.linearGradient(listOf(TitanColors.NeonCyan.copy(alpha = 0.15f), TitanColors.ElectricBlue.copy(alpha = 0.05f)))),
-        PortalItem("MEDIA VAULT", "PHOTOS · VIDEOS · ALBUMS", Icons.Default.Image, TitanColors.QuantumPink, onNavigateToGallery,
-            Brush.linearGradient(listOf(TitanColors.QuantumPink.copy(alpha = 0.15f), TitanColors.PlasmaPurple.copy(alpha = 0.05f)))),
-        PortalItem("AUDIO HUB", "MUSIC · PLAYLISTS · BASS", Icons.Default.MusicNote, TitanColors.RadioactiveGreen, onNavigateToMusic,
-            Brush.linearGradient(listOf(TitanColors.RadioactiveGreen.copy(alpha = 0.15f), TitanColors.NeonYellow.copy(alpha = 0.05f)))),
+        PortalItem("FILE SYSTEM", "MANAGE · COMPRESS · EXPLORE", Icons.Default.Storage, gPrimary, onNavigateToStorage,
+            moduleSurface(gPrimary)),
+        PortalItem("MEDIA VAULT", "PHOTOS · VIDEOS · ALBUMS", Icons.Default.Image, gSecondary, onNavigateToGallery,
+            moduleSurface(gSecondary)),
+        PortalItem("AUDIO HUB", "MUSIC · PLAYLISTS · BASS", Icons.Default.MusicNote, gTertiary, onNavigateToMusic,
+            moduleSurface(gTertiary)),
         // PHASE 9.6.2 — Sovereign Runtime catalog now opens a
         // dedicated screen that lets the user pick which distro to
         // install. The Terminal tile stays for one-tap access to the
@@ -92,14 +111,9 @@ fun DashboardScreen(
             title = "RUNTIME",
             subtitle = "INSTALL · OPEN · MANAGE",
             icon = Icons.Default.Terminal,
-            neonColor = TitanColors.RadioactiveGreen,
+            neonColor = gQuaternary,
             onClick = onNavigateToRuntime ?: {},
-            gradientBg = Brush.linearGradient(
-                listOf(
-                    TitanColors.RadioactiveGreen.copy(alpha = 0.18f),
-                    TitanColors.PlasmaPurple.copy(alpha = 0.05f)
-                )
-            )
+            gradientBg = moduleSurface(gQuaternary)
         ),
         // PHASE 10.5 — Elysium Word. The full Word clone: font,
         // typography, spacing, alignment, lists, headings, etc.
@@ -107,14 +121,9 @@ fun DashboardScreen(
             title = "WORD",
             subtitle = "WRITE · FORMAT · EXPORT",
             icon = Icons.Default.Article,
-            neonColor = TitanColors.NeonCyan,
+            neonColor = gPrimary,
             onClick = onNavigateToWord ?: {},
-            gradientBg = Brush.linearGradient(
-                listOf(
-                    TitanColors.NeonCyan.copy(alpha = 0.18f),
-                    TitanColors.ElectricBlue.copy(alpha = 0.05f)
-                )
-            )
+            gradientBg = moduleSurface(gPrimary)
         ),
         // PHASE 10.6 — Elysium Sheet. The full Excel clone: cells,
         // formulas (32 functions), formatting, multiple sheets.
@@ -122,14 +131,9 @@ fun DashboardScreen(
             title = "SHEET",
             subtitle = "FORMULAS · CHARTS · EXPORT",
             icon = Icons.Default.GridOn,
-            neonColor = TitanColors.QuantumPink,
+            neonColor = gSecondary,
             onClick = onNavigateToSheet ?: {},
-            gradientBg = Brush.linearGradient(
-                listOf(
-                    TitanColors.QuantumPink.copy(alpha = 0.18f),
-                    TitanColors.PlasmaPurple.copy(alpha = 0.05f)
-                )
-            )
+            gradientBg = moduleSurface(gSecondary)
         ),
         // PHASE 10.8 — Color customization. Live palette editor:
         // primary/secondary/tertiary/quaternary + accent, with
@@ -140,14 +144,9 @@ fun DashboardScreen(
             title = "COLORS",
             subtitle = "PRIMARY · ACCENT · PRESETS",
             icon = Icons.Default.Palette,
-            neonColor = TitanColors.NeonYellow,
+            neonColor = gTertiary,
             onClick = onNavigateToColors ?: {},
-            gradientBg = Brush.linearGradient(
-                listOf(
-                    TitanColors.NeonYellow.copy(alpha = 0.18f),
-                    TitanColors.NeonOrange.copy(alpha = 0.05f)
-                )
-            )
+            gradientBg = moduleSurface(gTertiary)
         )
     )
 
@@ -184,11 +183,16 @@ fun DashboardScreen(
 
         // ── CONTENT ──
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
+            columns = GridCells.Adaptive(minSize = adaptive.dashboardCardMinWidth),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(20.dp, 40.dp, 20.dp, 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(
+                start = adaptive.screenPadding,
+                top = adaptive.screenPadding + 20.dp,
+                end = adaptive.screenPadding,
+                bottom = adaptive.screenPadding + 4.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(adaptive.gridSpacing),
+            horizontalArrangement = Arrangement.spacedBy(adaptive.gridSpacing)
         ) {
             // ══════════ HERO HEADER ══════════
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -210,7 +214,7 @@ fun DashboardScreen(
                     )
                     Text(
                         text = "NEURAL COMMAND CENTER",
-                        color = TitanColors.NeonCyan.copy(alpha = 0.5f),
+                        color = gPrimary.copy(alpha = 0.5f),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 3.sp,
@@ -238,9 +242,14 @@ fun DashboardScreen(
                 SovereignCard(
                     modifier = Modifier.fillMaxWidth(),
                     cornerRadius = 20.dp,
-                    glassAlpha = 0.4f, // Increased opacity to prevent "hole" look
-                    glowRadius = 16.dp
+                    glassAlpha = 0.0f, // PHASE 10.9 — no dark background; the holographic border + gauges carry the visual
+                    glowRadius = 26.dp
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(uniformNeonSurfaceColor(gPrimary, 0.16f))
+                    ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -278,6 +287,7 @@ fun DashboardScreen(
                             detail = "$batteryLevel%"
                         )
                     }
+                    } // close the colored-fill Box wrapper
                 }
             }
 
@@ -325,12 +335,12 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
-                        .pulsingNeonBorder(cornerRadius = 16.dp, glowColor = TitanColors.NeonCyan, glassAlpha = 0.1f)
+                        .pulsingNeonBorder(cornerRadius = 16.dp, glowColor = gPrimary, glassAlpha = 0.1f)
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatusChip(label = "CORE", value = "STABLE", color = TitanColors.NeonCyan)
+                    StatusChip(label = "CORE", value = "STABLE", color = gPrimary)
                     StatusChip(label = "SHIELD", value = "ACTIVE", color = TitanColors.RadioactiveGreen)
                     StatusChip(label = "THREATS", value = "ZERO", color = TitanColors.NeonRed)
                 }
@@ -362,6 +372,7 @@ private fun LiveMetricGauge(
     color: Color,
     detail: String
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
     val animatedSweep by animateFloatAsState(
         targetValue = (value / 100f) * 270f,
         animationSpec = tween(1500, easing = FastOutSlowInEasing),
@@ -369,7 +380,7 @@ private fun LiveMetricGauge(
     )
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(adaptive.metricGaugeSize), contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val strokeWidth = 5.dp.toPx()
                 // Background arc
@@ -392,7 +403,7 @@ private fun LiveMetricGauge(
             AnimatedCounter(
                 targetValue = value,
                 color = color,
-                fontSize = 16.sp,
+                fontSize = if (adaptive.isCompact) 14.sp else 16.sp,
                 fontWeight = FontWeight.Black,
                 suffix = "%"
             )
@@ -405,6 +416,14 @@ private fun LiveMetricGauge(
 
 /**
  * PORTAL CARD — Premium card with orbital icon and gradient background.
+ *
+ * PHASE 10.9 — The inner fill is now a flat tinted color (no
+ * `Color.Transparent` stop). The previous vertical gradient that
+ * faded to transparent at the bottom was making the lower half
+ * of every card show the matrix-rain text behind it, which read
+ * as "black inside the module". Now the whole card is tinted
+ * with the brand color so the color is visible across the
+ * entire surface, not just the top edge.
  */
 @Composable
 private fun PortalCard(
@@ -416,27 +435,19 @@ private fun PortalCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
     SovereignCard(
         modifier = modifier
-            .aspectRatio(0.82f)
+            .aspectRatio(adaptive.portalAspectRatio)
             .clickable { onClick() },
         cornerRadius = 24.dp,
-        glassAlpha = 0.18f,
-        glowRadius = 20.dp
+        glassAlpha = 0.0f,
+        glowRadius = 26.dp
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(TitanColors.DeepVoid.copy(alpha = 0.3f)) // Safety layer for Poco/HyperOS transparency issues
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            neonColor.copy(alpha = 0.35f),
-                            neonColor.copy(alpha = 0.15f),
-                            Color.Transparent
-                        )
-                    )
-                )
+                .background(gradientBg)
         ) {
             Column(
                 modifier = Modifier
@@ -579,7 +590,9 @@ private fun getBatteryLevel(context: Context): Int {
  * Compact row of three glass tiles for "create something new"
  * actions. Each tile pulses its accent color softly so the
  * user perceives them as alive. The whole ribbon is wrapped in
- * a `pulsingNeonBorder` so it never feels static.
+ * a `pulsingNeonBorder` so it never feels static. Colors come
+ * from the [GlobalColors] theme (PHASE 10.9) so the whole
+ * ribbon follows the user's palette pick.
  */
 @Composable
 private fun QuickActionRibbon(
@@ -587,32 +600,33 @@ private fun QuickActionRibbon(
     onNewSheet: () -> Unit,
     onRuntime: () -> Unit
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp)
-            .pulsingNeonBorder(cornerRadius = 18.dp, glowColor = TitanColors.NeonCyan, glassAlpha = 0.06f)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .pulsingNeonBorder(cornerRadius = 18.dp, glowColor = GlobalColors.primary, glassAlpha = 0.0f)
+            .padding(horizontal = adaptive.screenPadding / 2, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (adaptive.isCompact) 6.dp else 8.dp)
     ) {
         QuickActionTile(
             label = "WORD",
             icon = Icons.Default.Article,
-            accent = TitanColors.NeonCyan,
+            accent = GlobalColors.primary,
             modifier = Modifier.weight(1f),
             onClick = onNewWord
         )
         QuickActionTile(
             label = "SHEET",
             icon = Icons.Default.GridOn,
-            accent = TitanColors.QuantumPink,
+            accent = GlobalColors.secondary,
             modifier = Modifier.weight(1f),
             onClick = onNewSheet
         )
         QuickActionTile(
             label = "RUNTIME",
             icon = Icons.Default.Terminal,
-            accent = TitanColors.RadioactiveGreen,
+            accent = GlobalColors.tertiary,
             modifier = Modifier.weight(1f),
             onClick = onRuntime
         )
@@ -627,6 +641,7 @@ private fun QuickActionTile(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val adaptive = LocalAdaptiveMetrics.current
     val infinite = rememberInfiniteTransition(label = "tile_$label")
     val glow by infinite.animateFloat(
         initialValue = 0.5f, targetValue = 1.0f,
@@ -635,10 +650,17 @@ private fun QuickActionTile(
     )
     Box(
         modifier = modifier
-            .height(72.dp)
+            .height(adaptive.quickTileHeight)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(14.dp),
+                spotColor = accent.copy(alpha = 0.85f * glow),
+                ambientColor = accent.copy(alpha = 0.55f * glow),
+                clip = false
+            )
             .clip(RoundedCornerShape(14.dp))
-            .background(accent.copy(alpha = 0.10f))
-            .border(1.dp, accent.copy(alpha = 0.6f * glow), RoundedCornerShape(14.dp))
+            .background(uniformNeonSurfaceColor(accent, 0.24f))
+            .border(1.2.dp, accent.copy(alpha = 0.85f * glow), RoundedCornerShape(14.dp))
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {

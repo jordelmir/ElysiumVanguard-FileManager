@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.elysium.vanguard.ui.theme.TitanColors
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.reactorGlass
 import com.elysium.vanguard.ui.theme.pulsingNeonBorder
 import androidx.compose.animation.core.*
@@ -27,27 +29,30 @@ fun TelemetryHUD(
 ) {
     val viewModel: TelemetryViewModel = hiltViewModel()
     val metrics by viewModel.monitor.metrics.collectAsState(initial = SystemMetrics())
+    val adaptive = LocalAdaptiveMetrics.current
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = adaptive.screenPadding, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (adaptive.isCompact) 6.dp else 12.dp)
     ) {
         MetricWidget(
             label = "CORE_TMP",
             value = "${metrics.cpuTemp}°C",
-            color = if (metrics.cpuTemp > 45) TitanColors.NeonRed else TitanColors.NeonCyan
+            color = if (metrics.cpuTemp > 45) TitanColors.NeonRed else GlobalColors.primary,
+            modifier = Modifier.weight(1f)
         )
         MetricWidget(
             label = "SYST_FPS",
             value = "${metrics.fps}",
-            color = TitanColors.NeonGreen
+            color = TitanColors.NeonGreen,
+            modifier = Modifier.weight(1f)
         )
         MetricWidget(
             label = "MEM_LOAD",
             value = "${metrics.ramUsagePercent}%",
-            color = TitanColors.NeonCyan,
+            color = GlobalColors.primary,
             modifier = Modifier.weight(1f)
         )
     }
@@ -76,7 +81,7 @@ private fun MetricWidget(
             .pulsingNeonBorder(
                 cornerRadius = 12.dp,
                 glowColor = color,
-                glassAlpha = 0.15f
+                glassAlpha = 0.0f
             )
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {

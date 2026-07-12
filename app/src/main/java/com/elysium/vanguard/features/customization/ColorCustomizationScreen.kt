@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.elysium.vanguard.core.palette.ColorPalette
 import com.elysium.vanguard.core.palette.SlotStyle
+import com.elysium.vanguard.ui.theme.GlobalColors
+import com.elysium.vanguard.ui.theme.LocalAdaptiveMetrics
 import com.elysium.vanguard.ui.theme.SlotRenderers
 import com.elysium.vanguard.ui.theme.TitanColors
 
@@ -78,6 +80,7 @@ fun ColorCustomizationScreen(
     val presets by viewModel.presets.collectAsState()
     val saved by viewModel.saved.collectAsState()
     val draftName by viewModel.draftName.collectAsState()
+    val adaptive = LocalAdaptiveMetrics.current
 
     Box(
         modifier = Modifier
@@ -88,7 +91,7 @@ fun ColorCustomizationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = adaptive.screenPadding, vertical = adaptive.screenPadding / 2)
         ) {
             Header(
                 paletteName = palette.name,
@@ -212,7 +215,7 @@ private fun Header(paletteName: String, onBack: () -> Unit, onReset: () -> Unit)
 private fun SectionLabel(text: String) {
     Text(
         text,
-        color = TitanColors.NeonCyan,
+        color = GlobalColors.primary,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 2.sp
@@ -244,12 +247,13 @@ private fun PresetCard(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    val border = if (isActive) TitanColors.NeonCyan else TitanColors.AbsoluteWhite.copy(alpha = 0.15f)
+    val adaptive = LocalAdaptiveMetrics.current
+    val border = if (isActive) GlobalColors.primary else TitanColors.AbsoluteWhite.copy(alpha = 0.15f)
     Column(
         modifier = Modifier
-            .width(110.dp)
+            .width(if (adaptive.isCompact) 104.dp else 126.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(TitanColors.CarbonGray.copy(alpha = 0.7f))
+            .background(GlobalColors.primary.copy(alpha = 0.10f))
             .border(if (isActive) 2.dp else 1.dp, border, RoundedCornerShape(10.dp))
             .clickable { onClick() }
             .padding(8.dp),
@@ -283,15 +287,15 @@ private fun SaveButton(onClick: () -> Unit) {
         modifier = Modifier
             .size(48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(TitanColors.NeonCyan.copy(alpha = 0.2f))
-            .border(1.dp, TitanColors.NeonCyan, RoundedCornerShape(8.dp))
+            .background(GlobalColors.primary.copy(alpha = 0.2f))
+            .border(1.dp, GlobalColors.primary, RoundedCornerShape(8.dp))
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(
             Icons.Default.Save,
             contentDescription = "Save palette",
-            tint = TitanColors.NeonCyan
+            tint = GlobalColors.primary
         )
     }
 }
@@ -307,10 +311,10 @@ private fun SavedPaletteRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(TitanColors.CarbonGray.copy(alpha = 0.5f))
+            .background(GlobalColors.primary.copy(alpha = 0.08f))
             .border(
                 1.dp,
-                if (isActive) TitanColors.NeonCyan else TitanColors.AbsoluteWhite.copy(alpha = 0.1f),
+                if (isActive) GlobalColors.primary else TitanColors.AbsoluteWhite.copy(alpha = 0.1f),
                 RoundedCornerShape(8.dp)
             )
             .clickable { onApply() }
