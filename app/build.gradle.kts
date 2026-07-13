@@ -265,6 +265,11 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.7.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.0.0")
+    // org.json is on Android at runtime; the JVM test path needs
+    // it as an explicit test dep so the workspace JSON parser
+    // tests can run on the JVM (the production parser does not
+    // need it because Android bundles the class).
+    testImplementation("org.json:json:20231013")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

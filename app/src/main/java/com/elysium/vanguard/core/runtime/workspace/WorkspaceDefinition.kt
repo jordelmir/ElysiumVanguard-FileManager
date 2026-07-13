@@ -43,7 +43,13 @@ data class WorkspaceDefinition(
             append("{\"name\":\"").append(esc(svc.name)).append("\",")
             append("\"command\":[").append(svc.command.joinToString(",") { "\"${esc(it)}\"" }).append("],")
             append("\"dependsOn\":[").append(svc.dependsOn.joinToString(",") { "\"${esc(it)}\"" }).append("],")
-            append("\"autoStart\":").append(svc.autoStart).append("}")
+            append("\"autoStart\":").append(svc.autoStart).append(",")
+            append("\"restartOnFailure\":").append(svc.restartOnFailure).append(",")
+            append("\"maxRestarts\":").append(svc.maxRestarts).append(",")
+            append("\"startupTimeoutMs\":").append(svc.startupTimeoutMs).append(",")
+            append("\"environment\":{")
+            append(svc.environment.entries.joinToString(",") { "\"${esc(it.key)}\":\"${esc(it.value)}\"" })
+            append("}}")
         }
         append("],")
         append("\"environment\":{")
@@ -56,14 +62,37 @@ data class WorkspaceDefinition(
             append(",\"protocol\":\"${p.protocol}\"}")
         }
         append("],")
+        append("\"storageMounts\":[")
+        storageMounts.forEachIndexed { i, m ->
+            if (i > 0) append(",")
+            append("{\"hostPath\":\"").append(esc(m.hostPath)).append("\",")
+            append("\"guestPath\":\"").append(esc(m.guestPath)).append("\",")
+            append("\"readOnly\":").append(m.readOnly).append("}")
+        }
+        append("],")
         append("\"healthChecks\":[")
         healthChecks.forEachIndexed { i, hc ->
             if (i > 0) append(",")
             append("{\"name\":\"").append(esc(hc.name)).append("\",")
             append("\"command\":[").append(hc.command.joinToString(",") { "\"${esc(it)}\"" }).append("],")
             append("\"intervalMs\":").append(hc.intervalMs).append(",")
-            append("\"timeoutMs\":").append(hc.timeoutMs).append("}")
+            append("\"timeoutMs\":").append(hc.timeoutMs).append(",")
+            append("\"failureThreshold\":").append(hc.failureThreshold).append("}")
         }
+        append("],")
+        append("\"tools\":[")
+        tools.forEachIndexed { i, t ->
+            if (i > 0) append(",")
+            append("{\"name\":\"").append(esc(t.name)).append("\",")
+            append("\"command\":[").append(t.command.joinToString(",") { "\"${esc(it)}\"" }).append("],")
+            append("\"description\":\"").append(esc(t.description)).append("\"}")
+        }
+        append("],")
+        append("\"startupOrder\":[")
+        append(startupOrder.joinToString(",") { "\"${esc(it)}\"" })
+        append("],")
+        append("\"shutdownOrder\":[")
+        append(shutdownOrder.joinToString(",") { "\"${esc(it)}\"" })
         append("]}")
     }
 
