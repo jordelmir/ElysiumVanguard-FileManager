@@ -127,6 +127,7 @@ class MusicHubViewModel @Inject constructor(
             .build()
 
         mediaSession = MediaSession.Builder(context, exoPlayer)
+            .setId(MediaSessionIdentity.newId())
             .setCallback(object : MediaSession.Callback {
                 override fun onCustomCommand(
                     session: MediaSession,
