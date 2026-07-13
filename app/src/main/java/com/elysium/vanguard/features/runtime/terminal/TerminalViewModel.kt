@@ -49,6 +49,12 @@ class TerminalViewModel @Inject constructor(
      */
     private val distroId: String? = savedStateHandle.get<String>(DISTRO_ID_ARG)?.takeIf { it.isNotEmpty() }
 
+    /** Command selected by an explicit tap on a Linux desktop entry, if any. */
+    private val initialCommand: String? = TerminalLaunchRequest.decode(
+        savedStateHandle.get<String>(TerminalLaunchRequest.ARGUMENT)
+    )
+    private var initialCommandAllowed = false
+
     /**
      * Description of which launcher was picked for this session, if any.
      * Surface for the UI badge.
@@ -83,6 +89,7 @@ class TerminalViewModel @Inject constructor(
         viewModelScope.launch {
             session.state.collectLatest { state ->
                 _lifecycle.value = state
+                if (state is TerminalSession.State.Running) sendInitialCommandIfNeeded()
                 if (state is TerminalSession.State.Exited) {
                     _exitCode.value = state.exitCode
                 }
@@ -145,6 +152,7 @@ class TerminalViewModel @Inject constructor(
             )
         }
         _launcherPick.value = pick
+        initialCommandAllowed = true
         return TerminalSession.forDistro(
             rootfsDir = install.rootfsDir,
             pick = pick
@@ -159,6 +167,16 @@ class TerminalViewModel @Inject constructor(
 
     fun sendText(s: String) {
         send(s.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun sendInitialCommandIfNeeded() {
+        val command = initialCommand ?: return
+        if (!initialCommandAllowed) return
+        if (savedStateHandle.get<Boolean>(INITIAL_COMMAND_SENT_ARG) == true) return
+        // Mark before writing so an immediate configuration change cannot send
+        // the same desktop command twice. The PTY is live in Running state.
+        savedStateHandle[INITIAL_COMMAND_SENT_ARG] = true
+        sendText(TerminalLaunchRequest.asTerminalInput(command))
     }
 
     fun sendInterrupt() {
@@ -192,5 +210,6 @@ class TerminalViewModel @Inject constructor(
          */
         const val DISTRO_ID_ARG = "distroId"
         const val SESSION_ID_ARG = "terminalSessionId"
+        private const val INITIAL_COMMAND_SENT_ARG = "terminalInitialCommandSent"
     }
 }

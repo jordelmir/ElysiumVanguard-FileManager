@@ -17,6 +17,7 @@ import androidx.navigation.compose.rememberNavController
 import com.elysium.vanguard.features.filemanager.FileManagerViewModel
 import com.elysium.vanguard.features.filemanager.FileManagerEvent
 import com.elysium.vanguard.features.player.NativeMediaPlayer
+import com.elysium.vanguard.features.runtime.terminal.TerminalLaunchRequest
 import com.elysium.vanguard.features.viewer.HighFidelityImageViewer
 import com.elysium.vanguard.features.viewer.IntegratedDocumentViewer
 import com.elysium.vanguard.ui.theme.ElysiumTheme
@@ -153,9 +154,14 @@ class MainActivity : ComponentActivity() {
                     // it. The plain `terminal` route stays for the
                     // 9.6.1 local-shell fallback.
                     composable(
-                        route = "terminal_distro/{distroId}",
+                        route = "terminal_distro/{distroId}?${TerminalLaunchRequest.ARGUMENT}={${TerminalLaunchRequest.ARGUMENT}}",
                         arguments = listOf(
-                            navArgument("distroId") { type = NavType.StringType }
+                            navArgument("distroId") { type = NavType.StringType },
+                            navArgument(TerminalLaunchRequest.ARGUMENT) {
+                                type = NavType.StringType
+                                nullable = true
+                                defaultValue = null
+                            }
                         )
                     ) { backStackEntry ->
                         @Suppress("UNUSED_VARIABLE")
@@ -216,9 +222,12 @@ class MainActivity : ComponentActivity() {
                         val distroId = backStackEntry.arguments?.getString("distroId").orEmpty()
                         com.elysium.vanguard.features.runtime.desktop.LinuxDesktopScreen(
                             onBack = { navController.popBackStack() },
-                            onOpenTerminal = {
+                            onOpenTerminal = { command ->
                                 val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
-                                navController.navigate("terminal_distro/$encoded")
+                                val commandRoute = command?.let {
+                                    "?${TerminalLaunchRequest.ARGUMENT}=${TerminalLaunchRequest.encode(it)}"
+                                }.orEmpty()
+                                navController.navigate("terminal_distro/$encoded$commandRoute")
                             }
                         )
                     }

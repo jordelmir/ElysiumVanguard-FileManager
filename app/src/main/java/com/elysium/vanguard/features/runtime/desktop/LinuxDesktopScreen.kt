@@ -1,6 +1,7 @@
 package com.elysium.vanguard.features.runtime.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +50,7 @@ import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppEntry
 @Composable
 fun LinuxDesktopScreen(
     onBack: () -> Unit,
-    onOpenTerminal: () -> Unit,
+    onOpenTerminal: (String?) -> Unit,
     viewModel: LinuxDesktopViewModel = hiltViewModel()
 ) {
     val apps by viewModel.apps.collectAsState()
@@ -99,7 +100,7 @@ fun LinuxDesktopScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            WorkspaceCapabilityCard(capability = capability, onOpenTerminal = onOpenTerminal)
+            WorkspaceCapabilityCard(capability = capability, onOpenTerminal = { onOpenTerminal(null) })
             if (apps.isEmpty()) {
                 Text(
                     text = "no desktop entries discovered in this rootfs",
@@ -115,7 +116,7 @@ fun LinuxDesktopScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(apps, key = { it.id }) { app ->
-                        AppRow(app = app)
+                        AppRow(app = app, onOpenTerminal = { onOpenTerminal(app.exec) })
                     }
                 }
             }
@@ -194,12 +195,16 @@ private fun WorkspaceCapabilityCard(
 }
 
 @Composable
-private fun AppRow(app: LinuxAppEntry) {
+private fun AppRow(app: LinuxAppEntry, onOpenTerminal: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.Black)
+        colors = CardDefaults.cardColors(containerColor = Color.Black),
+        border = BorderStroke(1.dp, Color(0xFF12343B))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             Text(
                 text = app.name,
                 fontFamily = FontFamily.Monospace,
@@ -208,11 +213,10 @@ private fun AppRow(app: LinuxAppEntry) {
                 color = Color(0xFFE4E7EB)
             )
             Text(
-                text = "terminal command: ${app.exec}",
+                text = "EXEC · ${app.exec}",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
-                color = Color(0xFF61AFEF),
-                modifier = Modifier.padding(top = 4.dp)
+                color = Color(0xFF00E5FF)
             )
             if (!app.comment.isNullOrBlank()) {
                 Text(
@@ -220,7 +224,23 @@ private fun AppRow(app: LinuxAppEntry) {
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     color = Color(0xFF8B949E),
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            Button(
+                onClick = onOpenTerminal,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF00E5FF),
+                    contentColor = Color.Black
+                )
+            ) {
+                Icon(Icons.Default.Terminal, contentDescription = null)
+                Text(
+                    text = "RUN IN REAL TERMINAL",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 8.dp)
                 )
             }
         }
