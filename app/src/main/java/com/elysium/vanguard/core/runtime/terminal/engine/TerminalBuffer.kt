@@ -291,7 +291,9 @@ internal class TerminalBuffer(
         val visible = (0 until rows).map { row ->
             (0 until cols).joinToString(separator = "") { col -> activeScreen.cells[row * cols + col].text }.trimEnd()
         }
-        return (historic + visible).takeLast(maxLines)
+        // A terminal usually leaves one or more blank rows after a command
+        // scrolls. They are rendering space, not useful transcript lines.
+        return (historic + visible).dropLastWhile { it.isBlank() }.takeLast(maxLines)
     }
 
     private fun writeGlyph(glyph: String, requestedWidth: Int) {
