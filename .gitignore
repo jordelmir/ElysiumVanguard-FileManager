@@ -40,6 +40,11 @@ captures/
 *.apks
 *.aab
 
+# Elysium AI Gateway: credentials stay in the process environment, never in Git.
+/services/elysium-ai-gateway/.env
+/services/elysium-ai-gateway/.env.*
+!/services/elysium-ai-gateway/.env.example
+
 # OS
 .DS_Store
 Thumbs.db

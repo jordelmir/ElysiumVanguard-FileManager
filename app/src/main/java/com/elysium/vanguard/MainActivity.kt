@@ -96,7 +96,13 @@ class MainActivity : ComponentActivity() {
                             onNavigateToTerminal = { navController.navigate("terminal") },
                             onNavigateToWord = { navController.navigate("editor_word_new") },
                             onNavigateToSheet = { navController.navigate("editor_sheet_new") },
-                            onNavigateToColors = { navController.navigate("color_customization") }
+                            onNavigateToColors = { navController.navigate("color_customization") },
+                            onNavigateToCommandCore = { navController.navigate("command_core") }
+                        )
+                    }
+                    composable("command_core") {
+                        com.elysium.vanguard.features.commandcore.AgentCommandScreen(
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable("file_manager") {

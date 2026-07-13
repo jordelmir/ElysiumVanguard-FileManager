@@ -71,7 +71,8 @@ fun DashboardScreen(
     onNavigateToTerminal: (() -> Unit)? = null,
     onNavigateToWord: (() -> Unit)? = null,
     onNavigateToSheet: (() -> Unit)? = null,
-    onNavigateToColors: (() -> Unit)? = null
+    onNavigateToColors: (() -> Unit)? = null,
+    onNavigateToCommandCore: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -147,6 +148,14 @@ fun DashboardScreen(
             neonColor = gTertiary,
             onClick = onNavigateToColors ?: {},
             gradientBg = moduleSurface(gTertiary)
+        ),
+        PortalItem(
+            title = "COMMAND CORE",
+            subtitle = "PLAN · REVIEW · APPROVE",
+            icon = Icons.Default.AutoAwesome,
+            neonColor = TitanColors.NeonCyan,
+            onClick = onNavigateToCommandCore ?: {},
+            gradientBg = moduleSurface(TitanColors.NeonCyan)
         )
     )
 
