@@ -144,6 +144,17 @@ class DistroManager(
     fun removeSnapshot(snapshotId: String): Boolean =
         RootfsSnapshot(baseDir).remove(snapshotId)
 
+    /** Restore a captured rootfs snapshot after the caller's explicit approval. */
+    fun restoreSnapshot(snapshotId: String): DistroSnapshot? {
+        val sourceId = snapshotId.substringBefore('@')
+        findInstalled(sourceId) ?: return null
+        return try {
+            RootfsSnapshot(baseDir).restore(snapshotId)
+        } catch (_: IOException) {
+            null
+        }
+    }
+
     /**
      * PHASE 9.6.3.2 — Introspect a single distro's installed rootfs.
      * The [block] runs on the calling thread; the manager doesn't

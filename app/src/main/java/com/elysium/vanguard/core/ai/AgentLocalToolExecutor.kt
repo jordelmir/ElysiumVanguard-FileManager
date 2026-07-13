@@ -3,6 +3,9 @@ package com.elysium.vanguard.core.ai
 import android.app.ActivityManager
 import android.content.Context
 import com.elysium.vanguard.core.runtime.distros.DistroManager
+import com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind
+import com.elysium.vanguard.core.runtime.terminal.service.TerminalService
+import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSessionManager
 import com.elysium.vanguard.core.server.LocalFileServer
 import com.elysium.vanguard.core.server.LocalServerOrchestrator
@@ -12,6 +15,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -35,12 +39,15 @@ class AgentLocalToolExecutor @Inject constructor(
             when (action.name) {
                 "inspect_processes" -> inspectProcesses()
                 "read_terminal" -> readTerminal(arguments)
+                "install_package" -> installPackage(arguments)
+                "apply_patch" -> applyPatch(arguments)
                 "create_snapshot" -> createSnapshot(arguments)
+                "rollback_snapshot" -> rollbackSnapshot(arguments)
                 "start_service" -> startService(arguments)
                 "stop_service" -> stopService(arguments)
                 "publish_port" -> publishPort(arguments)
                 "verify_artifact" -> verifyArtifact(arguments)
-                "create_build", "install_package", "apply_patch", "rollback_snapshot", "mount_workspace" -> unavailable(
+                "create_build", "mount_workspace" -> unavailable(
                     action.name,
                     "This local executor does not expose a safe implementation for this action yet. No change was made."
                 )
@@ -96,6 +103,94 @@ class AgentLocalToolExecutor @Inject constructor(
             "sourceId" to snapshot.sourceId,
             "bytesCopied" to snapshot.bytesCopied,
             "complete" to snapshot.isComplete
+        )
+    }
+
+    private fun rollbackSnapshot(arguments: JsonObject): Map<String, Any?> {
+        val snapshotId = arguments.requiredString("snapshot_id")
+        val restored = distros.restoreSnapshot(snapshotId)
+            ?: return mapOf("status" to "error", "message" to "Unable to restore snapshot '$snapshotId'")
+        return mapOf(
+            "status" to "ok",
+            "snapshotId" to restored.id,
+            "workspaceId" to restored.sourceId,
+            "bytesRestored" to restored.bytesCopied,
+            "note" to "The rootfs was restored by a staged directory swap. Existing terminal sessions should be restarted."
+        )
+    }
+
+    private fun installPackage(arguments: JsonObject): Map<String, Any?> {
+        val distroId = arguments.requiredString("workspace_id")
+        val manager = arguments.requiredString("manager")
+        val packageName = arguments.requiredString("package_name")
+        val script = AgentToolArgumentPolicy.installScript(manager, packageName)
+        return startDistroCommand(
+            distroId = distroId,
+            script = script,
+            action = "install_package",
+            details = mapOf("manager" to manager, "package" to packageName)
+        )
+    }
+
+    private fun applyPatch(arguments: JsonObject): Map<String, Any?> {
+        val distroId = arguments.requiredString("workspace_id")
+        val patch = AgentToolArgumentPolicy.validateUnifiedPatch(arguments.requiredString("patch"))
+        val installation = distros.findInstalled(distroId)
+            ?: return mapOf("status" to "not_found", "message" to "Distro '$distroId' is not installed")
+        val patchDirectory = File(installation.rootfsDir, "tmp/elysium-agent-patches")
+        if (!patchDirectory.isDirectory && !patchDirectory.mkdirs()) {
+            return mapOf("status" to "error", "message" to "Unable to prepare patch staging directory")
+        }
+        val patchFile = File(patchDirectory, "${UUID.randomUUID()}.diff")
+        patchFile.writeText(patch, Charsets.UTF_8)
+        // Direct-Exec sees host paths, whereas PRoot sees the rootfs under
+        // `/`. Select the same staged file through the launcher's namespace.
+        val patchPathForLauncher = if (distros.launcherFor(distroId)?.launcher?.kind == LauncherKind.NATIVE_PROOT) {
+            "/tmp/elysium-agent-patches/${patchFile.name}"
+        } else {
+            patchFile.absolutePath
+        }
+        return startDistroCommand(
+            distroId = distroId,
+            script = "patch --batch --forward --reject-file=- -p1 -i ${AgentToolArgumentPolicy.shellQuote(patchPathForLauncher)}",
+            action = "apply_patch",
+            details = mapOf("patchBytes" to patchFile.length())
+        )
+    }
+
+    private fun startDistroCommand(
+        distroId: String,
+        script: String,
+        action: String,
+        details: Map<String, Any?>
+    ): Map<String, Any?> {
+        val installation = distros.findInstalled(distroId)
+            ?: return mapOf("status" to "not_found", "message" to "Distro '$distroId' is not installed")
+        if (!installation.isHealthy) {
+            return mapOf("status" to "error", "message" to "Distro '$distroId' is not healthy")
+        }
+        val pick = distros.launcherFor(distroId)
+            ?: return mapOf("status" to "error", "message" to "No executable launcher is available for '$distroId'")
+        val session = terminalSessions.create(
+            TerminalSession.Config(
+                command = pick.launcher.buildShellCommand(installation.rootfsDir, script),
+                workingDirectory = installation.rootfsDir,
+                environmentVariables = pick.launcher.environmentVariables(installation.rootfsDir),
+                cols = 120,
+                rows = 40
+            )
+        )
+        // Package installs and patching can take longer than an Activity. The
+        // existing unexported foreground service owns the same session safely.
+        TerminalService.promote(context, session.id)
+        return mapOf(
+            "status" to "started",
+            "action" to action,
+            "workspaceId" to distroId,
+            "terminalSessionId" to session.id,
+            "launcher" to pick.launcher.kind.name.lowercase(),
+            "details" to details,
+            "nextStep" to "Use read_terminal with terminalSessionId to inspect the bounded transcript."
         )
     }
 

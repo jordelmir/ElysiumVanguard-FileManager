@@ -113,6 +113,45 @@ class RootfsSnapshot(
     }
 
     /**
+     * Restore a complete snapshot into its original distro rootfs using a
+     * staged copy and directory swap. If staging fails, the live rootfs is
+     * untouched; if the swap fails, the previous rootfs is restored.
+     */
+    @Throws(java.io.IOException::class)
+    fun restore(snapshotId: String): DistroSnapshot {
+        require(SNAPSHOT_ID.matches(snapshotId)) { "invalid snapshot id" }
+        val sourceId = snapshotId.substringBefore('@')
+        val snapshotRoot = File(File(baseDir, snapshotId), "rootfs")
+        require(snapshotRoot.isDirectory) { "snapshot rootfs not found: $snapshotId" }
+        val liveParent = File(baseDir, sourceId)
+        val liveRoot = File(liveParent, "rootfs")
+        require(liveRoot.isDirectory) { "live rootfs not found: $sourceId" }
+
+        val stage = File(liveParent, ".restore-${java.util.UUID.randomUUID()}")
+        val backup = File(liveParent, ".rootfs-before-restore-${java.util.UUID.randomUUID()}")
+        try {
+            val bytes = copyTree(snapshotRoot, stage, onProgress = null)
+            if (!liveRoot.renameTo(backup)) throw java.io.IOException("could not stage the current rootfs")
+            if (!stage.renameTo(liveRoot)) {
+                backup.renameTo(liveRoot)
+                throw java.io.IOException("could not activate restored rootfs")
+            }
+            backup.deleteRecursively()
+            return DistroSnapshot(
+                sourceId = sourceId,
+                id = snapshotId,
+                rootfsDir = liveRoot,
+                bytesCopied = bytes
+            )
+        } catch (error: Exception) {
+            stage.deleteRecursively()
+            if (!liveRoot.exists() && backup.exists()) backup.renameTo(liveRoot)
+            if (error is java.io.IOException) throw error
+            throw java.io.IOException("snapshot restore failed", error)
+        }
+    }
+
+    /**
      * Enumerate all snapshots under [baseDir]. A "snapshot" is any
      * directory whose name matches the [SnapshotIds.next] pattern and
      * which is not in the live catalog (`DistroCatalog.ALL` ids).
@@ -186,5 +225,6 @@ class RootfsSnapshot(
         // Reserved for future caches; the symbols shadow global NIO so
         // we don't accidentally call them as if they were instance
         // methods.
+        val SNAPSHOT_ID = Regex("[A-Za-z0-9._-]+@[A-Za-z0-9._:-]+")
     }
 }

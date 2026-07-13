@@ -96,6 +96,25 @@ class RootfsSnapshotTest {
     }
 
     @Test
+    fun `restore stages a snapshot then replaces the live rootfs`() {
+        val (base, source) = buildFakeRootfs()
+        try {
+            val snapshots = RootfsSnapshot(base)
+            val captured = snapshots.capture("fake-distro")
+            File(source, "etc/os-release").writeText("NAME=changed")
+            File(source, "new-file").writeText("must disappear")
+
+            val restored = snapshots.restore(captured.id)
+
+            assertEquals(captured.id, restored.id)
+            assertEquals("NAME=fake", File(restored.rootfsDir, "etc/os-release").readText())
+            assertFalse(File(restored.rootfsDir, "new-file").exists())
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `list returns snapshots sorted newest first`() {
         val (base, _) = buildFakeRootfs()
         try {
