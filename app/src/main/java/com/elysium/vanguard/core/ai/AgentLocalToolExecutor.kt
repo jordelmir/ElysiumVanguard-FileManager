@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind
+import com.elysium.vanguard.core.runtime.bridge.RuntimeWorkspaceMountRegistry
 import com.elysium.vanguard.core.runtime.terminal.service.TerminalService
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSessionManager
@@ -31,6 +32,7 @@ class AgentLocalToolExecutor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val terminalSessions: TerminalSessionManager,
     private val distros: DistroManager,
+    private val workspaceMounts: RuntimeWorkspaceMountRegistry,
     private val localServer: LocalServerOrchestrator
 ) {
     suspend fun execute(action: AgentToolCall): AgentFunctionOutput = withContext(Dispatchers.IO) {
@@ -39,6 +41,7 @@ class AgentLocalToolExecutor @Inject constructor(
             when (action.name) {
                 "inspect_processes" -> inspectProcesses()
                 "read_terminal" -> readTerminal(arguments)
+                "create_build" -> createBuild(arguments)
                 "install_package" -> installPackage(arguments)
                 "apply_patch" -> applyPatch(arguments)
                 "create_snapshot" -> createSnapshot(arguments)
@@ -46,11 +49,8 @@ class AgentLocalToolExecutor @Inject constructor(
                 "start_service" -> startService(arguments)
                 "stop_service" -> stopService(arguments)
                 "publish_port" -> publishPort(arguments)
+                "mount_workspace" -> mountWorkspace(arguments)
                 "verify_artifact" -> verifyArtifact(arguments)
-                "create_build", "mount_workspace" -> unavailable(
-                    action.name,
-                    "This local executor does not expose a safe implementation for this action yet. No change was made."
-                )
                 else -> unavailable(action.name, "Unknown Command Core tool")
             }
         } catch (error: Exception) {
@@ -132,6 +132,24 @@ class AgentLocalToolExecutor @Inject constructor(
         )
     }
 
+    private fun createBuild(arguments: JsonObject): Map<String, Any?> {
+        val distroId = arguments.requiredString("workspace_id")
+        val target = arguments.requiredString("target")
+        val variant = arguments.optionalString("variant")
+        val buildScript = AgentBuildPolicy.script(target, variant)
+        val workspace = workspaceMounts.primaryForDistro(distroId)
+            ?: return mapOf("status" to "not_found", "message" to "Mount a workspace for '$distroId' before creating a build")
+        return startDistroCommand(
+            distroId = distroId,
+            action = "create_build",
+            details = mapOf("target" to target, "variant" to variant, "workspace" to workspace.guestPath),
+            scriptForLauncher = { kind ->
+                val workspacePath = if (kind == LauncherKind.NATIVE_PROOT) workspace.guestPath else workspace.hostPath
+                "cd ${AgentToolArgumentPolicy.shellQuote(workspacePath)} && $buildScript"
+            }
+        )
+    }
+
     private fun applyPatch(arguments: JsonObject): Map<String, Any?> {
         val distroId = arguments.requiredString("workspace_id")
         val patch = AgentToolArgumentPolicy.validateUnifiedPatch(arguments.requiredString("patch"))
@@ -143,26 +161,43 @@ class AgentLocalToolExecutor @Inject constructor(
         }
         val patchFile = File(patchDirectory, "${UUID.randomUUID()}.diff")
         patchFile.writeText(patch, Charsets.UTF_8)
-        // Direct-Exec sees host paths, whereas PRoot sees the rootfs under
-        // `/`. Select the same staged file through the launcher's namespace.
-        val patchPathForLauncher = if (distros.launcherFor(distroId)?.launcher?.kind == LauncherKind.NATIVE_PROOT) {
-            "/tmp/elysium-agent-patches/${patchFile.name}"
-        } else {
-            patchFile.absolutePath
-        }
         return startDistroCommand(
             distroId = distroId,
-            script = "patch --batch --forward --reject-file=- -p1 -i ${AgentToolArgumentPolicy.shellQuote(patchPathForLauncher)}",
             action = "apply_patch",
-            details = mapOf("patchBytes" to patchFile.length())
+            details = mapOf("patchBytes" to patchFile.length()),
+            scriptForLauncher = { kind ->
+                // Direct-Exec sees host paths, whereas PRoot sees the rootfs
+                // under `/`. Both resolve the same staged diff accurately.
+                val patchPath = if (kind == LauncherKind.NATIVE_PROOT) {
+                    "/tmp/elysium-agent-patches/${patchFile.name}"
+                } else {
+                    patchFile.absolutePath
+                }
+                "patch --batch --forward --reject-file=- -p1 -i ${AgentToolArgumentPolicy.shellQuote(patchPath)}"
+            }
+        )
+    }
+
+    private fun mountWorkspace(arguments: JsonObject): Map<String, Any?> {
+        val distroId = arguments.requiredString("workspace_id")
+        val mountPath = arguments.requiredString("mount_path")
+        val readOnly = arguments.optionalBoolean("read_only", true)
+        val mount = workspaceMounts.register(distroId, mountPath, readOnly)
+        return mapOf(
+            "status" to "ok",
+            "workspaceId" to mount.distroId,
+            "hostPath" to mount.hostPath,
+            "guestPath" to mount.guestPath,
+            "readOnly" to mount.readOnly,
+            "note" to "The mount applies to newly created Linux sessions; active sessions are unchanged."
         )
     }
 
     private fun startDistroCommand(
         distroId: String,
-        script: String,
         action: String,
-        details: Map<String, Any?>
+        details: Map<String, Any?>,
+        scriptForLauncher: (LauncherKind) -> String
     ): Map<String, Any?> {
         val installation = distros.findInstalled(distroId)
             ?: return mapOf("status" to "not_found", "message" to "Distro '$distroId' is not installed")
@@ -171,6 +206,7 @@ class AgentLocalToolExecutor @Inject constructor(
         }
         val pick = distros.launcherFor(distroId)
             ?: return mapOf("status" to "error", "message" to "No executable launcher is available for '$distroId'")
+        val script = scriptForLauncher(pick.launcher.kind)
         val session = terminalSessions.create(
             TerminalSession.Config(
                 command = pick.launcher.buildShellCommand(installation.rootfsDir, script),
@@ -193,6 +229,13 @@ class AgentLocalToolExecutor @Inject constructor(
             "nextStep" to "Use read_terminal with terminalSessionId to inspect the bounded transcript."
         )
     }
+
+    private fun startDistroCommand(
+        distroId: String,
+        script: String,
+        action: String,
+        details: Map<String, Any?>
+    ): Map<String, Any?> = startDistroCommand(distroId, action, details) { script }
 
     private fun startService(arguments: JsonObject): Map<String, Any?> {
         val service = arguments.requiredString("service")
@@ -282,6 +325,12 @@ class AgentLocalToolExecutor @Inject constructor(
 
     private fun JsonObject.optionalInt(name: String, default: Int): Int =
         get(name)?.takeIf { it.isJsonPrimitive }?.asInt ?: default
+
+    private fun JsonObject.optionalString(name: String): String? =
+        get(name)?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
+
+    private fun JsonObject.optionalBoolean(name: String, default: Boolean): Boolean =
+        get(name)?.takeIf { it.isJsonPrimitive }?.asBoolean ?: default
 
     private companion object {
         const val FILE_SHARE_SERVICE = "file_share"

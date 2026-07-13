@@ -14,7 +14,7 @@ const catalog = [
   ["read_terminal", "Read a bounded tail from an approved Elysium terminal session.", false,
     strictObject({ session_id: session, max_lines: { type: "integer", minimum: 1, maximum: 500 } }, ["session_id"])],
   ["create_build", "Create a build for an approved workspace target.", true,
-    strictObject({ workspace_id: workspace, target: { type: "string", maxLength: 160 }, variant: { type: "string", maxLength: 80 } }, ["workspace_id", "target"])],
+    strictObject({ workspace_id: workspace, target: { type: "string", enum: ["android", "make", "cmake"] }, variant: { type: "string", enum: ["debug", "release", "default"] } }, ["workspace_id", "target"])],
   ["install_package", "Install a named package into an approved Linux workspace.", true,
     strictObject({ workspace_id: workspace, package_name: { type: "string", maxLength: 160 }, manager: { type: "string", enum: ["apt", "apk", "pacman"] } }, ["workspace_id", "package_name", "manager"])],
   ["apply_patch", "Apply a unified patch inside an approved workspace after a diff preview.", true,
@@ -29,7 +29,7 @@ const catalog = [
     strictObject({ workspace_id: workspace, snapshot_id: { type: "string", maxLength: 160 } }, ["workspace_id", "snapshot_id"])],
   ["publish_port", "Publish an allow-listed local service port with an expiry.", true,
     strictObject({ workspace_id: workspace, port: { type: "integer", minimum: 1, maximum: 65535 }, ttl_minutes: { type: "integer", minimum: 1, maximum: 120 } }, ["workspace_id", "port", "ttl_minutes"])],
-  ["mount_workspace", "Mount a user-approved workspace into a selected runtime.", true,
+  ["mount_workspace", "Register an existing user-storage workspace for newly created Linux runtime sessions.", true,
     strictObject({ workspace_id: workspace, mount_path: { type: "string", maxLength: 240 }, read_only: { type: "boolean" } }, ["workspace_id", "mount_path"])],
   ["verify_artifact", "Verify an artifact by checksum, signature metadata, and bounded diagnostics.", false,
     strictObject({ workspace_id: workspace, artifact_path: { type: "string", maxLength: 512 } }, ["workspace_id", "artifact_path"])]

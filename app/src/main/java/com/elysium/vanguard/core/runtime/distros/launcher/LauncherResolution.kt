@@ -94,15 +94,15 @@ class DistroLauncherRegistry(
             nativeLibrary = nativeLibrary,
             prootTmpDir = prootTmpDir,
             mounts = mounts,
-            guestDnsConfigProvider = GuestDnsConfigProvider.NONE
+                guestDnsConfigProvider = GuestDnsConfigProvider.NONE
         )
 
-        /** Explicit five-argument overload for runtime-only services such as guest DNS. */
+        /** Production registry with workspace mounts resolved per rootfs at launch time. */
         fun production(
             supportedAbis: Set<String>,
             nativeLibrary: ProotNativeLibrary?,
             prootTmpDir: File?,
-            mounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
+            mountsProvider: (File) -> List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
             guestDnsConfigProvider: GuestDnsConfigProvider
         ): DistroLauncherRegistry =
             DistroLauncherRegistry(
@@ -111,12 +111,27 @@ class DistroLauncherRegistry(
                         bundledAbis = supportedAbis,
                         nativeLibrary = nativeLibrary,
                         runtimeTmpDir = prootTmpDir,
-                        additionalMounts = mounts,
+                        additionalMountsProvider = mountsProvider,
                         guestDnsConfigProvider = guestDnsConfigProvider
                     ),
                     DirectExecDistroLauncher(),
                     JailedDistroLauncher()
                 )
             )
+
+        /** Explicit five-argument overload for runtime-only services such as guest DNS. */
+        fun production(
+            supportedAbis: Set<String>,
+            nativeLibrary: ProotNativeLibrary?,
+            prootTmpDir: File?,
+            mounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
+            guestDnsConfigProvider: GuestDnsConfigProvider
+        ): DistroLauncherRegistry = production(
+            supportedAbis = supportedAbis,
+            nativeLibrary = nativeLibrary,
+            prootTmpDir = prootTmpDir,
+            mountsProvider = { mounts },
+            guestDnsConfigProvider = guestDnsConfigProvider
+        )
     }
 }

@@ -2,6 +2,7 @@ package com.elysium.vanguard.core.runtime.distros.launcher
 
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfig
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
+import com.elysium.vanguard.core.runtime.bridge.MountEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -201,6 +202,37 @@ class NativeProotLauncherTest {
         } finally {
             rootfs.deleteRecursively()
             runtimeDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `proot resolves workspace mounts dynamically for each rootfs launch`() {
+        val rootfs = Files.createTempDirectory("elysium-proot-test").toFile()
+        val runtimeDir = Files.createTempDirectory("elysium-proot-runtime").toFile()
+        val workspace = Files.createTempDirectory("elysium-workspace").toFile()
+        try {
+            File(runtimeDir, "libproot.so").writeText("proot")
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp"),
+                additionalMountsProvider = {
+                    listOf(MountEntry(workspace.absolutePath, "/workspace/project", readOnly = false))
+                }
+            )
+
+            assertTrue(launcher.buildShellCommand(rootfs, "pwd").contains("${workspace.absolutePath}:/workspace/project"))
+        } finally {
+            rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
+            workspace.deleteRecursively()
         }
     }
 

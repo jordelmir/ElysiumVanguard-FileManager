@@ -49,6 +49,9 @@ open class NativeProotLauncher(
     /** Host paths explicitly exposed inside the guest namespace. */
     private val additionalMounts: List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = emptyList(),
 
+    /** Dynamic, persisted workspace mounts evaluated for each new process. */
+    private val additionalMountsProvider: (File) -> List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = { additionalMounts },
+
     /** Android-network DNS rendered into a transient PRoot bind mount. */
     private val guestDnsConfigProvider: GuestDnsConfigProvider = GuestDnsConfigProvider.NONE
 ) : DistroLauncher {
@@ -86,7 +89,7 @@ open class NativeProotLauncher(
                 args += hostPath
             }
         }
-        for (mount in additionalMounts) {
+        for (mount in additionalMountsProvider(rootfsDir)) {
             if (!File(mount.hostPath).exists()) continue
             // PRoot's basic bind option does not provide a trustworthy
             // read-only guarantee. Fail closed until the filesystem broker
