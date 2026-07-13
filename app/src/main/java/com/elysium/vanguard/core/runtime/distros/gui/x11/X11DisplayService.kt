@@ -29,7 +29,7 @@ import java.io.Closeable
  *  - Handles input events (pointer, keyboard) from the Android side
  *  - Supports geometry changes (resize, rotation)
  */
-internal class X11DisplayService : Closeable {
+class X11DisplayService : Closeable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow<DisplayState>(DisplayState.Idle)
