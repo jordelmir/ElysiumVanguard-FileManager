@@ -91,16 +91,29 @@ object ElysiumLinuxIdentity {
     }
 
     /**
-     * Generate a signed manifest string. The signature is HMAC-SHA256
-     * using a device-bound key derived from the Android Keystore. The
-     * key is never exported; verification must happen on the same device.
+     * Generate a signed manifest string. The signature is produced by
+     * the [RootfsSigner] provided by the caller; production wires
+     * [AndroidKeystoreRootfsSigner] so the private key never leaves
+     * the secure container, and tests / dev wire [HmacRootfsSigner].
+     *
+     * Verification: callers compare the [SignedManifest.algorithm]
+     * against the expected algorithm and then call
+     * [RootfsSigner.verify] with the canonical JSON bytes and the
+     * base64 signature. The [SignedManifest.publicKey] field carries
+     * the verification key (null for symmetric signers like HMAC).
      */
-    fun signManifest(manifest: RootfsManifest, keyAlias: String = ELYSIUM_KEY_ALIAS): SignedManifest {
+    fun signManifest(
+        manifest: RootfsManifest,
+        signer: RootfsSigner = HmacRootfsSigner(ELYSIUM_KEY_ALIAS),
+        keyAlias: String = signer.publicKeyBase64() ?: ELYSIUM_KEY_ALIAS
+    ): SignedManifest {
         val canonical = manifest.toJson()
-        val signature = computeHmacSha256(canonical.toByteArray(Charsets.UTF_8), keyAlias)
+        val signature = signer.sign(canonical.toByteArray(Charsets.UTF_8))
         return SignedManifest(
             manifest = manifest,
             signature = signature,
+            algorithm = signer.algorithm,
+            publicKey = signer.publicKeyBase64(),
             signedAtMs = System.currentTimeMillis(),
             keyAlias = keyAlias
         )
@@ -222,14 +235,6 @@ object ElysiumLinuxIdentity {
             ?: emptyList()
     }
 
-    private fun computeHmacSha256(data: ByteArray, keyAlias: String): String {
-        val key = keyAlias.toByteArray(Charsets.UTF_8)
-        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
-        val secretKey = javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")
-        mac.init(secretKey)
-        return mac.doFinal(data).joinToString("") { "%02x".format(it) }
-    }
-
     private fun Long.toByteArray(): ByteArray {
         var v = this
         val bytes = ByteArray(8)
@@ -302,12 +307,18 @@ data class RootfsManifest(
 data class SignedManifest(
     val manifest: RootfsManifest,
     val signature: String,
+    val algorithm: String = "HmacSHA256",
+    val publicKey: String? = null,
     val signedAtMs: Long,
     val keyAlias: String
 ) {
     fun toJson(): String = buildString {
         append("{\"manifest\":").append(manifest.toJson()).append(',')
         append("\"signature\":\"").append(signature).append("\",")
+        append("\"algorithm\":\"").append(algorithm).append("\",")
+        if (publicKey != null) {
+            append("\"publicKey\":\"").append(publicKey).append("\",")
+        }
         append("\"signedAtMs\":").append(signedAtMs).append(',')
         append("\"keyAlias\":\"").append(keyAlias).append("\"}")
     }

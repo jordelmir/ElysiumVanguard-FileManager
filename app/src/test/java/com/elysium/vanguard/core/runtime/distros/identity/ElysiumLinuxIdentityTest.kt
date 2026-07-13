@@ -96,15 +96,52 @@ class ElysiumLinuxIdentityTest {
     }
 
     @Test
-    fun `signed manifest contains signature`() {
+    fun `signed manifest contains signature with default HMAC signer`() {
         val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
             distro = testDistro,
             rootfsDir = File("/tmp/test")
         )
         val signed = ElysiumLinuxIdentity.signManifest(manifest)
         assertTrue(signed.signature.isNotEmpty())
-        assertEquals(64, signed.signature.length) // HMAC-SHA256 = 64 hex chars
+        // HMAC-SHA256 base64 = 44 characters. The previous hex
+        // encoding was 64; the format change tracks the new signer
+        // contract (RootfsSigner.sign returns base64).
+        assertEquals(44, signed.signature.length)
+        assertEquals("HmacSHA256", signed.algorithm)
+        assertTrue(signed.publicKey == null)
         assertTrue(signed.signedAtMs > 0)
+    }
+
+    @Test
+    fun `signed manifest records algorithm and public key for RSA signer`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val keyPair = RsaRootfsSigner.generateKeyPair()
+        val signer = RsaRootfsSigner(keyPair)
+        val signed = ElysiumLinuxIdentity.signManifest(manifest, signer)
+        assertEquals("SHA256withRSA", signed.algorithm)
+        assertNotNull(signed.publicKey)
+        assertTrue(signed.publicKey!!.length > 100) // X.509 SPKI base64
+
+        // Verifier roundtrip
+        val verifier = RsaRootfsSigner(keyPair)
+        val canonical = manifest.toJson()
+        assertTrue(verifier.verify(canonical.toByteArray(Charsets.UTF_8), signed.signature))
+    }
+
+    @Test
+    fun `signed manifest JSON includes algorithm and publicKey fields`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val keyPair = RsaRootfsSigner.generateKeyPair()
+        val signed = ElysiumLinuxIdentity.signManifest(manifest, RsaRootfsSigner(keyPair))
+        val json = signed.toJson()
+        assertTrue(json.contains("\"algorithm\":\"SHA256withRSA\""))
+        assertTrue(json.contains("\"publicKey\":\""))
     }
 
     @Test

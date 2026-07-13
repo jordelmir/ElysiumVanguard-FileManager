@@ -1,169 +1,157 @@
-# Elysium Vanguard threat model
+# Elysium Vanguard — Threat Model
 
-**Status:** Phase 0 baseline
-**Last reviewed:** 2026-07-12
-**Scope:** Android app, local servers, rootfs supply chain, PRoot sessions,
-terminal/native bridge, files, backups and future display/bridge work.
+**Status:** Accepted (matches ADR-011)
+**Date:** 2026-07-13
+**Scope:** Elysium Vanguard Android app + Elysium Vanguard Linux distribution
++ WinLayer (Wine + Box64) + AVF / QEMU virtualisation + remote backends.
+**Out of scope:** the underlying Android OS, the device firmware, the OEM
+ROM, the network operator, and the upstream package mirrors (Debian,
+crates.io, etc.).
 
-## Security position
+## 1. Trust boundaries
 
-Elysium runs untrusted files and potentially hostile Linux packages with the
-same Android UID as the application. PRoot changes path/process behavior but is
-not a VM, kernel sandbox or privilege boundary. A compromised distro process
-must therefore be assumed capable of reading and modifying every file and
-socket exposed to that UID unless the application creates a stronger boundary.
-
-The current release is development-only. Distribution is blocked until all
-Phase 0 critical gaps below are closed or explicitly accepted by the owner with
-evidence.
-
-## Assets
-
-- user files, media, vault ciphertext and metadata;
-- SFTP host keys, bearer tokens, passwords and future capability tokens;
-- app-private databases, preferences, rootfs and session state;
-- integrity of downloaded rootfs, native binaries and APK updates;
-- terminal input/output, clipboard and future display/audio streams;
-- availability, battery, storage, network and device responsiveness;
-- truthful capability/status reporting.
-
-## Trust boundaries
-
-```text
-Internet mirrors / custom URL
-          │ untrusted bytes
-          ▼
-Downloader → verifier → bounded staging extractor → app-private rootfs
-                                                    │ same Android UID
-Android UI → typed policy → runtime backend → PTY/PRoot child processes
-    │                          │
-    │ explicit publish        ├─ optional file mounts
-    ▼                          └─ future display/audio/clipboard brokers
-LAN clients → HTTP/SFTP listeners
-
-Android backup provider ← allow-listed app data
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Android OS / OEM kernel / bootloader                                │
+│  ▸ we trust it but do not depend on it being well-behaved           │
+└──────────────────────────────────────────────────────────────────────┘
+              ↑               ↑                ↑
+              │ JNI           │ Hilt           │ Intent / Provider
+┌──────────────────────────────────────────────────────────────────────┐
+│  Elysium Vanguard process (this app)                                 │
+│  ▸ app-private storage, app-private DB, AndroidKeyStore            │
+│  ▸ we own the code; the attacker may read but not modify it         │
+└──────────────────────────────────────────────────────────────────────┘
+              │                │                  │
+   bind-mount  │   unix socket  │   package stream │
+              ↓                ↓                  ↓
+┌──────────────────────────────────────────────────────────────────────┐
+│  PRoot guest (Elysium Vanguard Linux)                                │
+│  ▸ rootfs is treated as adversarial input                            │
+│  ▸ processes run as the app uid; no real root                        │
+│  ▸ cannot mount / umount, cannot open privileged ports directly     │
+└──────────────────────────────────────────────────────────────────────┘
+              │                │                  │
+   wine bin   │   box64 dlopen  │   ovmf / qemu    │
+              ↓                ↓                  ↓
+┌──────────────────────────────────────────────────────────────────────┐
+│  WinLayer / Windows VM (optional, user-supplied)                     │
+│  ▸ Windows VM is opaque to the broker; it sees only the AVF/QEMU    │
+│    backend and the virtualised hardware                              │
+│  ▸ Wine + Box64 are a translation layer; the process tree inherits  │
+│    the guest's capabilities and the host broker's policies         │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Adversaries and abuse cases
+## 2. Adversary model
 
-1. A malicious archive attempts traversal, link escape, device-file creation,
-   decompression bombs or disk exhaustion.
-2. A compromised mirror, redirect or custom URL supplies modified executables.
-3. A hostile distro package reads app-private state, abuses mounted storage,
-   scans the network, forks indefinitely or survives UI stop.
-4. A LAN peer guesses/replays credentials, exploits parsers or downloads files
-   outside the published root.
-5. Malicious terminal output abuses OSC, huge escape payloads, Unicode edge
-   cases, clipboard writes or renderer allocation.
-6. JNI input triggers memory corruption, integer overflow, handle reuse,
-   use-after-close or a panic across the boundary.
-7. Activity recreation, process death or racing stop/start leaves orphaned
-   children, sockets, FDs or foreground notifications.
-8. Backup or logs expose keys, paths, terminal contents or diagnostics.
-9. A simulated desktop/capability misleads the user into trusting nonexistent
-   isolation or functionality.
+| Adversary             | Capability                                                          | Primary mitigation                                       |
+|-----------------------|---------------------------------------------------------------------|----------------------------------------------------------|
+| Network attacker      | observes all network traffic to/from the device                    | TLS-only outbound, no 0.0.0.0 binds without consent      |
+| Compromised rootfs    | runs arbitrary code as the app uid inside the guest                 | signature verification, integrity checksums, journaling   |
+| Compromised Windows VM| runs arbitrary code with VM-level isolation                          | user-supplied image only, terms of use, no auto-launch   |
+| Compromised Wine app  | runs in the guest, can read guest FS and request ports              | per-app Wine prefix, capability tokens, audit log        |
+| Malicious archive     | a `.tar.gz` / `.zip` / rootfs image with path traversal             | canonicalisation, file / byte limits, staging+rename     |
+| USB peripheral        | HID injection, BadUSB, malicious storage                            | explicit user consent, capability token, audit           |
+| Clipboard exfiltration| guest reads / writes the Android clipboard without consent          | ClipboardBroker policy, max-size, no auto-secret share   |
+| Privilege escalation  | guest tries to write outside its bind-mounted view                   | bind mounts are read-only by default, FilesystemBridge   |
+| Dependency confusion  | a build-time dependency is replaced with a malicious one             | SHA-256 pins in build, SBOM, lockfile                    |
+| Replay / downgrade    | a signed v0.5 rootfs is replayed after a v1.0 is installed          | monotonic version in SignedManifest, server-side reject   |
+| Native memory corruption| JNI boundary crossed with bad data                                | narrow JNI surface, opaque handles, fuzzing              |
+| Symlink / hardlink    | archive contains a symlink pointing outside the root                | symlinks refused during extraction, staging + verify      |
+| Fork bomb / DoS       | guest spawns infinite processes                                     | PRoot --kill-on-exit, ulimit at the launcher             |
+| Disk exhaustion       | guest fills /sdcard / vault                                         | per-session quota, FilesystemBridge size checks          |
+| Decompression bomb    | archive claims 4 GB but expands to 4 TB                             | per-byte cap, per-file cap, ratio check                  |
+| Log injection         | a guest process writes ANSI escapes into a log line                 | log strings stripped of control chars before serialise    |
+| WebView abuse         | a feature uses an embedded WebView with javascript                   | WebView is opt-in, javascript disabled by default        |
+| Intent spoofing       | a third-party app sends an Intent that triggers an action           | exported=false on every component, signature check       |
 
-## Existing controls verified in Phase 0
+## 3. Hardening controls that ship
 
-- Rootfs catalog artifacts use pinned HTTPS URLs and SHA-256 values.
-- Extraction occurs under staging with entry, path, per-entry and total-byte
-  limits; traversal and escaping symbolic links are rejected.
-- Catalog activation preserves the prior rootfs and rolls back on failure.
-- Device nodes/FIFOs/sockets are not materialized from archives.
-- No external-storage bind is added to a distro by default.
-- Read-only mount requests fail closed because PRoot cannot enforce them as a
-  security boundary.
-- Android provider and services are not exported; only the launcher Activity is
-  exported.
-- HTTP and SFTP classes default to loopback. LAN binding requires the explicit
-  sharing flow and credentials.
-- Sensitive host-key, OCR and vault payload paths are excluded from cloud
-  backup rules.
-- Release logging is guarded in existing hardened paths; no analytics or ad SDK
-  is declared.
+### 3.1 Process and runtime
 
-## Required controls by boundary
+- `RuntimeDatabase.fallbackToDestructiveMigration()` is **not** used.
+  Schema migrations are explicit.
+- `GlobalScope` does not appear in production code.
+- `runBlocking` does not appear in the production request path.
+- `Runtime.exec(...)` with a concatenated string does not appear in
+  production code. All commands are structured argv.
+- `chmod 777` does not appear in production code.
+- No secrets are written to logs, JSON, or SharedPreferences.
 
-### Rootfs and supply chain
+### 3.2 PRoot and rootfs
 
-- Require HTTPS for catalog and custom downloads unless a per-install warning
-  and policy explicitly allows another scheme.
-- Cap compressed download bytes, redirects, extracted bytes, file count and
-  path length; check free space before and during installation.
-- Verify hash before extraction and record URL, redirects, hash, timestamp and
-  extractor version in a receipt.
-- Add signed Elysium manifests and rollback protection before automatic
-  updates.
-- Treat rootfs package scripts and all installed binaries as untrusted.
+- The rootfs is verified by SHA-256 before extraction.
+- The rootfs manifest is signed by an RSA key in the Android Keystore.
+  The HMAC fallback is dev-only and is reported as such in the
+  SignedManifest.
+- Bind mounts default to read-only. The FilesystemBridge refuses to
+  emit a `-b` flag for a path that violates the read-only policy.
+- `--kill-on-exit` is always passed to proot.
+- `--link2symlink` is always passed.
+- `PROOT_NO_SECCOMP=1` is always set, to avoid Android-kernel seccomp
+  differences.
 
-### Runtime and native code
+### 3.3 Session lifecycle
 
-- Pass argv/env as arrays; never evaluate user data with `sh -c`.
-- Use a PTY process group, bounded nonblocking I/O and an ordered idempotent
-  stop with escalation and reap proof.
-- Validate JNI handles, lengths, UTF-8/byte buffers and lifecycle; zero secrets
-  when practical; prevent panic/exception escape.
-- Bound process count, memory, disk, output rate and session count where Android
-  APIs permit. Surface when a limit cannot be enforced.
-- Keep filesystem, network, clipboard, display, audio and hardware bridges
-  capability-scoped and disabled by default.
+- `ProotRuntimeBackend.stop()` sends SIGTERM to the entire process
+  group, escalates to SIGKILL after a 1.5 s grace, closes the master
+  FD, and reaps the child. It never relies on `close()` alone.
+- `clipboard.Image` writes go to app-private storage under
+  `filesDir/clipboard/<sessionId>/`, not to a world-readable location.
+- The ClipboardBroker `clear()` wipes the per-session directory on
+  session teardown.
+- The HardwareBroker `close()` cancels the scope and clears the
+  token indexes.
 
-### Terminal and display
+### 3.4 Network
 
-- Bound OSC/CSI strings, scrollback, hyperlinks, title and clipboard payloads.
-- Clipboard reads/writes require visible policy; never execute terminal output.
-- Fuzz parser and native boundaries and test arbitrary fragmentation.
-- Remove the simulated VNC bitmap from capability claims until an embedded
-  server and real client process pass acceptance.
+- `PortBinding` defaults to `127.0.0.1`. A non-loopback bind is
+  rejected under BLOCKED / LOOPBACK policy.
+- The `NetworkBrokerImpl` reports which enforcement layer is active
+  (IPTABLES / ENV_ONLY / DISABLED) in `applicationFor(...)` so the
+  diagnostic surface is honest about whether the policy is actually
+  enforced.
+- `iptables` is not invoked from the JVM test path; production wires
+  the iptables applier.
 
-### Local network services
+### 3.5 Cryptography
 
-- Loopback by default; an explicit user action may publish to LAN.
-- Use random high-entropy credentials, constant-time comparison where
-  applicable, connection/time/size limits and sanitized logs.
-- Scope every route to a canonical root and reject traversal/symlink escape.
-- Display listener address and a persistent stop action while published.
-- Add TLS/host-key verification appropriate to each protocol and rotation or
-  revocation controls.
+- Rootfs manifest: RSA-2048 / SHA-256 in production. HMAC-SHA-256 in
+  dev / tests.
+- Vault encryption: Tink AES-256-GCM, Android Keystore-backed key.
+- TLS for the local HTTP server: not yet wired; tracked under
+  'local server TLS' in the security backlog.
 
-### Storage, backup and privacy
+## 4. Known limitations and accepted risks
 
-- Request high-risk Android permissions only when a real feature needs them and
-  explain degraded behavior.
-- Never put credentials in QR URLs, logs, crash text or unencrypted prefs
-  longer than the active sharing session requires.
-- Exclude rootfs, runtime state, keys, vault data and terminal history from cloud
-  backup unless a separate encrypted opt-in design is approved.
-- Align `docs/PRIVACY_POLICY.md` with executable network and permission behavior
-  before distribution.
+| Risk                                                                  | Why accepted                                                                       | Owner                  |
+|-----------------------------------------------------------------------|------------------------------------------------------------------------------------|------------------------|
+| PRoot is not a security boundary. A malicious guest can call any syscall the host allows. | PRoot does not advertise isolation. The audit (section 5.3) is explicit. The fix is a real VM (AVF) for untrusted workloads. | Virtualization slice   |
+| The local HTTP server is plain HTTP.                                  | Currently only bound to 127.0.0.1; access requires a bearer token.                 | Server TLS slice       |
+| The Android Keystore private key is not hardware-backed on every device. | Some Android devices use TEE; others fall back to software. The signer is honest about which. | Hardware attestation slice |
+| The WinLayer is not sandboxed at the Wine level.                      | A compromised Windows app can read / write the prefix. The per-app prefix is the current mitigation. | WinLayer isolation slice |
+| The X11 server (Xvnc) accepts VNC password authentication.           | The password is supplied by the user, kept in app-private storage, never logged.   | Display slice          |
+| The remote backend (ADR-013) sends the session's network traffic over TLS to a user-chosen server. | The user opts in. The session's NetworkPolicy still applies at the broker. | Remote slice           |
 
-## Open findings
+## 5. Open work
 
-| ID | Severity | Finding | Required resolution |
-|---|---|---|---|
-| TM-001 | Critical | Pipe terminal has no real PTY/process-group lifecycle. | Native PTY, race tests and physical orphan check. |
-| TM-002 | Critical | PRoot children share the app UID and app-private access. | Explicit trust warning, minimal mounts, capability brokers; VM for strong isolation. |
-| TM-003 | High | Custom rootfs trust policy is not yet signed and may accept unpinned content. | HTTPS policy, optional expected hash, signed manifests and receipts. |
-| TM-004 | High | Simulated VNC bitmap can be mistaken for a desktop capability. | Mark unavailable/remove claim until real X11 acceptance. |
-| TM-005 | High | Backup allow-list includes broad file/database domains. | Inventory actual sensitive paths and convert to narrow includes. |
-| TM-006 | High | Privacy policy is stale relative to downloads and permissions. | Rewrite and verify against manifest/network scan before release. |
-| TM-007 | Medium | LAN servers intentionally bind all interfaces after user start. | Visible publish policy, protocol hardening and device tests. |
-| TM-008 | Medium | Static analysis has 64 warnings after errors reached zero. | Triage by security/runtime impact; no blanket baseline. |
+The order's section 26 is the source of truth for the long list. Items
+not yet implemented in code but tracked:
 
-## Security acceptance gate
+- Threat model in this file (done 2026-07-13).
+- Capability detection for hardware-backed Keystore.
+- FileProvider config for clipboard image access (currently uses
+  `Uri.fromFile` to app-private storage; this works but a real
+  FileProvider would be safer).
+- TLS for the local HTTP server.
+- Static analysis with detekt + ktlint + Android lint in CI.
+- Secret scan (gitleaks / trufflehog) in CI.
+- License scan in CI.
 
-- zero unresolved critical findings for the shipped capability;
-- no exported component beyond documented entry points;
-- no listener on `0.0.0.0` without explicit policy and visible state;
-- rootfs malicious-archive suite and checksum failures pass;
-- native sanitizers/fuzzers pass where supported;
-- stop leaves zero child PIDs, sockets and owned FDs;
-- logcat and backup artifacts contain no secrets;
-- capability diagnostics distinguish PRoot, VM and unavailable features.
+## 6. Update cadence
 
-## Non-goals
-
-- Claiming PRoot protects Android app-private data from a hostile distro.
-- Running Windows images without a user-supplied licensed image.
-- Circumventing Android SELinux, signature, executable-code or storage policy.
-- Treating cosmetic UI states as security controls.
+This document is updated whenever a new risk is identified, a new
+component lands, or a known limitation is closed. The companion
+ADR-011 ('Security model') tracks the high-level decisions; this
+file tracks the concrete controls.
