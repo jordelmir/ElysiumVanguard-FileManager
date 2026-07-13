@@ -23,13 +23,13 @@ internal class RfbClient private constructor(
     private val socket: Socket,
     private val input: DataInputStream,
     private val output: DataOutputStream,
-    val server: RfbServerInfo
-) : Closeable {
+    override val server: RfbServerInfo
+) : RfbConnection {
     private var framebuffer = IntArray(server.width * server.height)
     private val writeLock = Any()
 
     /** Asks the VNC server for a full or incremental frame. */
-    fun requestFramebufferUpdate(incremental: Boolean) = synchronized(writeLock) {
+    override fun requestFramebufferUpdate(incremental: Boolean) = synchronized(writeLock) {
         output.writeByte(CLIENT_FRAMEBUFFER_UPDATE_REQUEST)
         output.writeByte(if (incremental) 1 else 0)
         output.writeShort(0)
@@ -40,7 +40,7 @@ internal class RfbClient private constructor(
     }
 
     /** Reads one server message; returns a frame only when pixels changed. */
-    fun readFrame(): RfbFrame? {
+    override fun readFrame(): RfbFrame? {
         return when (input.readUnsignedByte()) {
             SERVER_FRAMEBUFFER_UPDATE -> readFramebufferUpdate()
             SERVER_BELL -> null
@@ -54,7 +54,7 @@ internal class RfbClient private constructor(
     }
 
     /** Sends pointer movement/button state in framebuffer coordinates. */
-    fun sendPointer(x: Int, y: Int, buttonMask: Int) = synchronized(writeLock) {
+    override fun sendPointer(x: Int, y: Int, buttonMask: Int) = synchronized(writeLock) {
         require(buttonMask in 0..0xFF) { "invalid RFB button mask" }
         output.writeByte(CLIENT_POINTER_EVENT)
         output.writeByte(buttonMask)
@@ -64,7 +64,7 @@ internal class RfbClient private constructor(
     }
 
     /** Sends a keysym, e.g. Unicode or XK_* constants selected by the UI layer. */
-    fun sendKey(keysym: Int, down: Boolean) = synchronized(writeLock) {
+    override fun sendKey(keysym: Int, down: Boolean) = synchronized(writeLock) {
         require(keysym >= 0) { "invalid RFB keysym" }
         output.writeByte(CLIENT_KEY_EVENT)
         output.writeByte(if (down) 1 else 0)

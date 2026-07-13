@@ -28,6 +28,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,6 +42,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapability
 import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppEntry
+import com.elysium.vanguard.core.runtime.distros.gui.rfb.RfbHost
+import com.elysium.vanguard.core.runtime.distros.gui.rfb.RfbSession
 
 /**
  * PHASE 9.6.5 — Linux desktop screen.
@@ -56,6 +62,11 @@ fun LinuxDesktopScreen(
     val apps by viewModel.apps.collectAsState()
     val snapshot by viewModel.snapshot.collectAsState()
     val capability by viewModel.capability.collectAsState()
+    val rfbSession by viewModel.rfbSession.collectAsState()
+    var rfbState by remember(rfbSession) { mutableStateOf(rfbSession?.state?.value ?: RfbSession.State.Stopped) }
+    LaunchedEffect(rfbSession) {
+        rfbSession?.state?.collect { rfbState = it }
+    }
 
     Scaffold(
         containerColor = Color(0xFF0B0D10),
@@ -100,7 +111,23 @@ fun LinuxDesktopScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            WorkspaceCapabilityCard(capability = capability, onOpenTerminal = { onOpenTerminal(null) })
+            WorkspaceCapabilityCard(
+                capability = capability,
+                rfbState = rfbState,
+                onOpenTerminal = { onOpenTerminal(null) },
+                onConnectLocalVnc = viewModel::connectLocalVnc,
+                onDisconnectLocalVnc = viewModel::disconnectLocalVnc
+            )
+            if (rfbState is RfbSession.State.Streaming) {
+                rfbSession?.let { session ->
+                    RfbHost(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        session = session
+                    )
+                }
+            }
             if (apps.isEmpty()) {
                 Text(
                     text = "no desktop entries discovered in this rootfs",
@@ -127,7 +154,10 @@ fun LinuxDesktopScreen(
 @Composable
 private fun WorkspaceCapabilityCard(
     capability: GraphicalDesktopCapability,
-    onOpenTerminal: () -> Unit
+    rfbState: RfbSession.State,
+    onOpenTerminal: () -> Unit,
+    onConnectLocalVnc: () -> Unit,
+    onDisconnectLocalVnc: () -> Unit
 ) {
     val accent = when (capability.state) {
         GraphicalDesktopCapability.State.ROOTFS_UNAVAILABLE -> Color(0xFFFF3D71)
@@ -174,6 +204,12 @@ private fun WorkspaceCapabilityCard(
                         color = accent
                     )
                 }
+                LocalVncStatus(
+                    capability = capability,
+                    state = rfbState,
+                    onConnect = onConnectLocalVnc,
+                    onDisconnect = onDisconnectLocalVnc
+                )
                 Button(
                     onClick = onOpenTerminal,
                     colors = ButtonDefaults.buttonColors(
@@ -193,6 +229,66 @@ private fun WorkspaceCapabilityCard(
         }
     }
 }
+
+@Composable
+private fun LocalVncStatus(
+    capability: GraphicalDesktopCapability,
+    state: RfbSession.State,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit
+) {
+    when (state) {
+        RfbSession.State.Idle -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) {
+            Button(
+                onClick = onConnect,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFE600), contentColor = Color.Black)
+            ) {
+                Text("CONNECT LOCAL VNC :5901", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+        RfbSession.State.Connecting -> Text(
+            text = "connecting to 127.0.0.1:5901…",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = Color(0xFFFFE600)
+        )
+        is RfbSession.State.Connected -> Text(
+            text = "negotiated ${state.server.desktopName}; waiting for framebuffer…",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = Color(0xFF00E5FF)
+        )
+        is RfbSession.State.Streaming -> {
+            Text(
+                text = "LIVE · ${state.server.width}×${state.server.height} · ${state.frameCount} frames",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                color = Color(0xFF39FF14)
+            )
+            Button(
+                onClick = onDisconnect,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3D71), contentColor = Color.Black)
+            ) {
+                Text("DISCONNECT VNC", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+        is RfbSession.State.Failed -> Text(
+            text = "local VNC unavailable: ${state.detail}",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = Color(0xFFFF6E6E)
+        )
+        RfbSession.State.Stopped -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) {
+            Button(
+                onClick = onConnect,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFE600), contentColor = Color.Black)
+            ) {
+                Text("RECONNECT LOCAL VNC", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun AppRow(app: LinuxAppEntry, onOpenTerminal: () -> Unit) {

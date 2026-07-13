@@ -10,6 +10,7 @@ import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppCatalog
 import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppEntry
 import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapability
 import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapabilityDetector
+import com.elysium.vanguard.core.runtime.distros.gui.rfb.RfbSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,9 @@ class LinuxDesktopViewModel @Inject constructor(
     )
     val capability: StateFlow<GraphicalDesktopCapability> = _capability.asStateFlow()
 
+    private val _rfbSession = MutableStateFlow<RfbSession?>(null)
+    internal val rfbSession: StateFlow<RfbSession?> = _rfbSession.asStateFlow()
+
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { loadAll() }
@@ -70,6 +74,27 @@ class LinuxDesktopViewModel @Inject constructor(
             rootfsDir = install.rootfsDir,
             launcherKind = manager.launcherFor(distroId)?.launcher?.kind
         )
+    }
+
+    /** Connect only to an already-running loopback VNC server inside this app sandbox. */
+    fun connectLocalVnc() {
+        if (_capability.value.state != GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) return
+        val existing = _rfbSession.value
+        if (existing != null && existing.state.value !is RfbSession.State.Failed &&
+            existing.state.value !is RfbSession.State.Stopped
+        ) return
+        existing?.stop()
+        _rfbSession.value = RfbSession().also(RfbSession::start)
+    }
+
+    fun disconnectLocalVnc() {
+        _rfbSession.value?.stop()
+        _rfbSession.value = null
+    }
+
+    override fun onCleared() {
+        disconnectLocalVnc()
+        super.onCleared()
     }
 
     companion object {
