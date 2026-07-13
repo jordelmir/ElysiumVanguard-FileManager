@@ -196,6 +196,26 @@ class TerminalBufferTest {
     }
 
     @Test
+    fun `saved cursor keeps position and rendition across a resize`() {
+        val b = TerminalBuffer(cols = 6, rows = 3)
+        val savedAttributes = TerminalAttributes.DEFAULT
+            .withForeground(TerminalAttributes.Color.BrightMagenta)
+            .withFlag(TerminalAttributes.Flag.BOLD, true)
+        b.setCursorPosition(2, 5)
+        b.currentAttributes = savedAttributes
+        b.saveCursor()
+
+        b.setCursorPosition(1, 1)
+        b.currentAttributes = TerminalAttributes.DEFAULT
+        b.resize(newCols = 10, newRows = 4)
+        b.restoreCursor()
+
+        assertEquals(1, b.cursorRow)
+        assertEquals(4, b.cursorCol)
+        assertEquals(savedAttributes, b.currentAttributes)
+    }
+
+    @Test
     fun `scroll region preserves rows outside the margin`() {
         val b = TerminalBuffer(cols = 3, rows = 4)
         writeRow(b, 1, "AA")
@@ -470,6 +490,63 @@ class TerminalParserTest {
         assertFalse(b.isUsingAlternateScreen())
         assertEquals('m', b.cellAt(0, 0).char)
         assertEquals('n', b.cellAt(0, 3).char)
+    }
+
+    @Test
+    fun `DECSC and DECRC restore cursor and rendition`() {
+        val b = TerminalBuffer(cols = 8, rows = 3)
+        val parser = TerminalParser(b)
+        parser.feed("\u001b[31m\u001b[2;")
+        parser.feed("4H\u001b7\u001b[34m\u001b[1;1H\u001b")
+        parser.feed("8X")
+
+        assertEquals('X', b.cellAt(1, 3).char)
+        assertEquals(1, b.cursorRow)
+        assertEquals(4, b.cursorCol)
+        assertEquals(TerminalAttributes.Color.Red, b.cellAt(1, 3).attributes.foregroundColor)
+        assertEquals(TerminalAttributes.Color.Red, b.currentAttributes.foregroundColor)
+    }
+
+    @Test
+    fun `DA and DSR queries receive conservative terminal responses`() {
+        val b = TerminalBuffer(cols = 8, rows = 3)
+        val responses = mutableListOf<String>()
+        val parser = TerminalParser(
+            buffer = b,
+            onDeviceResponse = { bytes -> responses += String(bytes, Charsets.US_ASCII) }
+        )
+        parser.feed("\u001b[c\u001b[>c\u001b[2;5H\u001b[5n\u001b[")
+        parser.feed("6n\u001b[?6n")
+
+        assertEquals(
+            listOf("\u001b[?1;0c", "\u001b[>0;0;0c", "\u001b[0n", "\u001b[2;5R", "\u001b[?2;5R"),
+            responses
+        )
+        assertEquals(' ', b.cellAt(1, 4).char)
+    }
+
+    @Test
+    fun `DEC 1048 and 1049 restore primary cursor state`() {
+        val b = TerminalBuffer(cols = 8, rows = 3)
+        val parser = TerminalParser(b)
+        parser.feed("\u001b[32m\u001b[3;2H\u001b[?1048h\u001b[1;1H\u001b[?1048lY")
+        assertEquals('Y', b.cellAt(2, 1).char)
+        assertEquals(TerminalAttributes.Color.Green, b.cellAt(2, 1).attributes.foregroundColor)
+
+        parser.feed("\u001b[2;5H\u001b[?1049hvim\u001b[?1049lZ")
+        assertFalse(b.isUsingAlternateScreen())
+        assertEquals('Z', b.cellAt(1, 4).char)
+        assertEquals(TerminalAttributes.Color.Green, b.cellAt(1, 4).attributes.foregroundColor)
+    }
+
+    @Test
+    fun `DEC 47 preserves alternate contents between buffer switches`() {
+        val b = TerminalBuffer(cols = 8, rows = 2)
+        val parser = TerminalParser(b)
+        parser.feed("\u001b[?47hvim\u001b[?47l\u001b[?47h")
+
+        assertTrue(b.isUsingAlternateScreen())
+        assertEquals('v', b.cellAt(0, 0).char)
     }
 
     @Test

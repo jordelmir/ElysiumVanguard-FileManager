@@ -153,9 +153,33 @@ internal class TerminalBuffer(
     @Synchronized fun scrollUp(count: Int) = scrollUpRegion(activeScreen.scrollTop, activeScreen.scrollBottom, count)
     @Synchronized fun scrollDown(count: Int) = scrollDownRegion(activeScreen.scrollTop, activeScreen.scrollBottom, count)
 
+    /**
+     * Saves the cursor and the active SGR state for DECSC / DECRC and DEC
+     * private modes 1048/1049. The saved state is owned by each screen: a
+     * full-screen program must never overwrite the caller's saved main-screen
+     * cursor while it is using the alternate buffer.
+     */
+    @Synchronized
+    fun saveCursor() {
+        val screen = activeScreen
+        screen.savedCursorRow = screen.cursorRow
+        screen.savedCursorCol = screen.cursorCol
+        screen.savedAttributes = screen.attributes
+    }
+
+    /** Restores the cursor and SGR state previously captured by [saveCursor]. */
+    @Synchronized
+    fun restoreCursor() {
+        val screen = activeScreen
+        setCursor(screen.savedCursorRow.coerceIn(0, rows - 1), screen.savedCursorCol.coerceIn(0, cols - 1))
+        screen.attributes = screen.savedAttributes
+    }
+
     /** Enters DEC alternate screen; primary cells and scrollback remain intact. */
     @Synchronized
-    fun enterAlternateScreen(clear: Boolean = true) {
+    fun enterAlternateScreen(clear: Boolean = true, saveCursor: Boolean = false) {
+        if (activeScreen !== primaryScreen) return
+        if (saveCursor) saveCursor()
         val alternate = if (clear || alternateScreen == null) {
             ScreenState(blankGrid(cols, rows), scrollBottom = rows - 1)
         } else {
@@ -166,12 +190,13 @@ internal class TerminalBuffer(
         markAllDirty()
     }
 
-    /** Restores the primary screen and discards the transient alternate grid. */
+    /** Restores the primary screen and optionally discards the alternate grid. */
     @Synchronized
-    fun exitAlternateScreen() {
+    fun exitAlternateScreen(restoreCursor: Boolean = false, discard: Boolean = true) {
         if (activeScreen === primaryScreen) return
         activeScreen = primaryScreen
-        alternateScreen = null
+        if (restoreCursor) restoreCursor()
+        if (discard) alternateScreen = null
         markAllDirty()
     }
 
@@ -340,16 +365,23 @@ internal class TerminalBuffer(
         retained.forEachIndexed { index, row ->
             System.arraycopy(row.cells, 0, cells, index * targetCols, targetCols)
         }
-        val rowsBeforeCursor = reflowRows(visibleRows.take(screen.cursorRow), targetCols).size
-        val cursorRow = (rowsBeforeCursor + screen.cursorCol / targetCols - skipped)
-            .coerceIn(0, targetRows - 1)
+        fun reflowCursor(row: Int, col: Int): Pair<Int, Int> {
+            val rowsBeforeCursor = reflowRows(visibleRows.take(row), targetCols).size
+            return (rowsBeforeCursor + col / targetCols - skipped)
+                .coerceIn(0, targetRows - 1) to (col % targetCols).coerceIn(0, targetCols - 1)
+        }
+        val (cursorRow, cursorCol) = reflowCursor(screen.cursorRow, screen.cursorCol)
+        val (savedCursorRow, savedCursorCol) = reflowCursor(screen.savedCursorRow, screen.savedCursorCol)
         return ScreenState(
             cells = cells,
             cursorRow = cursorRow,
-            cursorCol = (screen.cursorCol % targetCols).coerceIn(0, targetCols - 1),
+            cursorCol = cursorCol,
             attributes = screen.attributes,
             scrollTop = 0,
-            scrollBottom = targetRows - 1
+            scrollBottom = targetRows - 1,
+            savedCursorRow = savedCursorRow,
+            savedCursorCol = savedCursorCol,
+            savedAttributes = screen.savedAttributes
         )
     }
 
@@ -392,7 +424,10 @@ internal class TerminalBuffer(
         var cursorCol: Int = 0,
         var attributes: TerminalAttributes = TerminalAttributes.DEFAULT,
         var scrollTop: Int = 0,
-        var scrollBottom: Int = 0
+        var scrollBottom: Int = 0,
+        var savedCursorRow: Int = 0,
+        var savedCursorCol: Int = 0,
+        var savedAttributes: TerminalAttributes = TerminalAttributes.DEFAULT
     )
 
     companion object {

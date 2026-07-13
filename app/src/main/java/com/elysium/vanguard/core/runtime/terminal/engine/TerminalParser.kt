@@ -19,23 +19,24 @@ import java.nio.charset.StandardCharsets
  *
  *   - C0 controls: NUL, BEL, BS, HT, LF, VT, FF, CR, SO, SI.
  *   - CSI: cursor moves, SGR (colors + attrs), erase ops.
- *   - OSC: ignored (we don't implement window titles for 9.6.1).
- *   - DCS, ESC + single-char sequences: ignored.
+ *   - Primary/secondary DA plus DSR/DECXCPR replies for interactive TUIs.
+ *   - OSC 0/1/2 process-title updates; other OSC payloads are ignored.
+ *   - DECSC/DECRC and DEC 1048/1049 cursor preservation.
+ *   - DCS and unsupported ESC + single-char sequences are ignored.
  *   - 8-bit C1 controls: recognized but emitted as their 7-bit
  *     equivalent (CSI = ESC '[', OSC = ESC ']').
  *
  * Not in scope (deferred):
  *
- *   - DEC cursor-key and bracketed-paste modes, alternate buffers and
- *     scroll-region / line-edit operations used by full-screen programs.
+ *   - Mouse reporting (CSI ?...h / CSI ?...l) and graphics protocols.
  *   - SGR 38;5;n (256-color) and SGR 38;2;r;g;b (truecolor).
- *   - Mouse reporting (CSI ?...h / CSI ?...l).
  *   - Sixel graphics.
  *
  * Phase 9.6.1 — first build; intentionally minimal.
  */
 internal class TerminalParser(
     private val buffer: TerminalBuffer,
+    private val onDeviceResponse: (ByteArray) -> Unit = {},
     private val onTitleChanged: (String) -> Unit = {}
 ) {
     /** Per VT100 §5.4: ground, escape, csi-entry, osc-string, etc. */
@@ -150,11 +151,14 @@ internal class TerminalParser(
                 state = State.OSC_STRING
                 oscBuffer.setLength(0)
             }
-            '7', '8' -> {
-                // DECSC / DECRC — save/restore cursor. Phase 9.6.1
-                // saves nothing; we accept the sequence harmlessly so
-                // vim-style apps that emit DECSC on mode change don't
-                // fall over. Future version should implement this fully.
+            '7' -> {
+                // DECSC — save cursor plus the active SGR rendition.
+                buffer.saveCursor()
+                state = State.GROUND
+            }
+            '8' -> {
+                // DECRC — restore the state saved by DECSC.
+                buffer.restoreCursor()
                 state = State.GROUND
             }
             'D' -> { // IND
@@ -237,6 +241,8 @@ internal class TerminalParser(
             'T' -> buffer.scrollDown(p.getOrElse(0) { 1 })
             'X' -> buffer.eraseChars(p.getOrElse(0) { 1 })
             'm' -> applySgr(p)
+            'c' -> reportDeviceAttributes(p)
+            'n' -> reportDeviceStatus(p)
             'h' -> setMode(p, enabled = true)
             'l' -> setMode(p, enabled = false)
             'r' -> if (privateMarker == null) {
@@ -252,17 +258,54 @@ internal class TerminalParser(
         if (i != ' ') intermediate = ' '
     }
 
+    /**
+     * Answers only generic terminal identity requests. We intentionally do
+     * not advertise graphics, mouse, clipboard, or other extensions until
+     * the corresponding end-to-end feature exists in Elysium.
+     */
+    private fun reportDeviceAttributes(parameters: IntArray) {
+        val requested = parameters.firstOrNull() ?: 0
+        if (requested != 0) return
+        when (privateMarker) {
+            null -> respond(PRIMARY_DEVICE_ATTRIBUTES)
+            '>' -> respond(SECONDARY_DEVICE_ATTRIBUTES)
+        }
+    }
+
+    /** DSR / DECXCPR responses are returned to the process through the PTY. */
+    private fun reportDeviceStatus(parameters: IntArray) {
+        when (privateMarker) {
+            null -> when (parameters.firstOrNull()) {
+                5 -> respond("\u001b[0n")
+                6 -> respond("\u001b[${buffer.cursorRow + 1};${buffer.cursorCol + 1}R")
+            }
+            '?' -> if (parameters.firstOrNull() == 6) {
+                respond("\u001b[?${buffer.cursorRow + 1};${buffer.cursorCol + 1}R")
+            }
+        }
+    }
+
+    private fun respond(sequence: String) {
+        onDeviceResponse(sequence.toByteArray(Charsets.US_ASCII))
+    }
+
     private fun setMode(parameters: IntArray, enabled: Boolean) {
         if (privateMarker != '?') return
         var modes = negotiatedInputModes
         parameters.forEach { mode ->
             when (mode) {
                 1 -> modes = modes.copy(applicationCursorKeys = enabled)
+                // 1048 saves/restores the cursor without changing buffers.
+                1048 -> if (enabled) buffer.saveCursor() else buffer.restoreCursor()
                 // xterm's alternate-screen variants. 1049 is the modern
-                // save/restore form used by vim and less; 47/1047 remain for
-                // tmux and older programs.
-                47, 1047, 1049 -> if (enabled) buffer.enterAlternateScreen(clear = true)
+                // save/restore form used by vim and less; 47 retains its
+                // alternate contents for tmux and older programs.
+                47 -> if (enabled) buffer.enterAlternateScreen(clear = false)
+                else buffer.exitAlternateScreen(discard = false)
+                1047 -> if (enabled) buffer.enterAlternateScreen(clear = true)
                 else buffer.exitAlternateScreen()
+                1049 -> if (enabled) buffer.enterAlternateScreen(clear = true, saveCursor = true)
+                else buffer.exitAlternateScreen(restoreCursor = true)
                 2004 -> modes = modes.copy(bracketedPaste = enabled)
             }
         }
@@ -434,5 +477,12 @@ internal class TerminalParser(
     companion object {
         private const val MAX_OSC_CHARS = 8 * 1024
         private const val MAX_TITLE_CHARS = 256
+        // A deliberately conservative VT100 identity. The zero option field
+        // avoids claiming optional hardware or graphics capabilities that the
+        // terminal has not implemented.
+        private const val PRIMARY_DEVICE_ATTRIBUTES = "\u001b[?1;0c"
+        // Generic VT100 secondary identity with no fabricated firmware or
+        // cartridge code. See xterm ctlseqs: CSI > Pp ; Pv ; Pc c.
+        private const val SECONDARY_DEVICE_ATTRIBUTES = "\u001b[>0;0;0c"
     }
 }

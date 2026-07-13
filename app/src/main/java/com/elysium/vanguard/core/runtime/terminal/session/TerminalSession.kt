@@ -83,7 +83,11 @@ class TerminalSession(
     private var pumpOut: Job? = null
     private var waitJob: Job? = null
 
-    private val parser = TerminalParser(buffer) { title -> _events.tryEmit(Event.TitleChanged(title)) }
+    private val parser = TerminalParser(
+        buffer = buffer,
+        onDeviceResponse = ::write,
+        onTitleChanged = { title -> _events.tryEmit(Event.TitleChanged(title)) }
+    )
 
     /**
      * Start the process. This must be called exactly once per session;
