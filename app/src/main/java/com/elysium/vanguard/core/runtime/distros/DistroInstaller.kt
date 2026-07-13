@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.distros
 
+import com.elysium.vanguard.core.runtime.distros.identity.ElysiumLinuxIdentity
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -11,6 +12,11 @@ import java.security.MessageDigest
  * can show a real progress bar during the extract pass. The callback
  * fires once per [java.io.FilterInputStream] `read` call, not once
  * per entry.
+ *
+ * Phase 3 — After extraction, generates Elysium identity artifacts:
+ *   - /etc/os-release with Elysium branding
+ *   - Rootfs manifest with SBOM (Software Bill of Materials)
+ *   - HMAC-SHA256 signed manifest for integrity verification
  *
  * Phase 9.6.2 — first build; intentionally minimal.
  */
@@ -105,6 +111,10 @@ class DistroInstaller(
                 if (!health.isHealthy) {
                     throw IOException(health.reason ?: "rootfs validation failed")
                 }
+            }
+
+            runStage(DistroInstallStage.ACTIVATING) {
+                generateElysiumIdentity(stagingDir, distro)
             }
 
             runStage(DistroInstallStage.ACTIVATING) {
@@ -270,6 +280,47 @@ class DistroInstaller(
     private fun writeError(rootDir: File, message: String) {
         rootDir.mkdirs()
         File(rootDir, "install.error").writeText(message + "\n")
+    }
+
+    /**
+     * Phase 3 — Generate Elysium Vanguard identity artifacts inside the rootfs.
+     *
+     * This runs after extraction and validation, before atomic activation.
+     * It writes:
+     *   - /etc/os-release with Elysium branding
+     *   - /etc/elysium-manifest.json with SBOM and install metadata
+     *   - /etc/elysium-manifest.signed.json with HMAC-SHA256 signature
+     *
+     * If identity generation fails, the install proceeds (identity is
+     * non-critical for basic operation) but the error is logged.
+     */
+    private fun generateElysiumIdentity(rootfsDir: File, distro: Distro) {
+        try {
+            val osRelease = ElysiumLinuxIdentity.generateOsRelease(distro)
+            val osReleaseFile = File(rootfsDir, "etc/os-release")
+            osReleaseFile.parentFile?.mkdirs()
+            val staging = File(rootfsDir, "etc/os-release.staging")
+            staging.writeText(osRelease)
+            if (!staging.renameTo(osReleaseFile)) {
+                staging.copyTo(osReleaseFile, overwrite = true)
+                staging.delete()
+            }
+
+            val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+                distro = distro,
+                rootfsDir = rootfsDir,
+                installedAtMs = System.currentTimeMillis()
+            )
+            val manifestFile = File(rootfsDir, "etc/elysium-manifest.json")
+            manifestFile.writeText(manifest.toJson())
+
+            val signed = ElysiumLinuxIdentity.signManifest(manifest)
+            val signedFile = File(rootfsDir, "etc/elysium-manifest.signed.json")
+            signedFile.writeText(signed.toJson())
+        } catch (_: Exception) {
+            // Identity generation is best-effort. A missing os-release
+            // or unsigned manifest degrades diagnostics, not functionality.
+        }
     }
 
     companion object {
