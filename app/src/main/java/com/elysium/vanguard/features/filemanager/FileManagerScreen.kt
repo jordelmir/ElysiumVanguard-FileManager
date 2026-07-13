@@ -206,7 +206,8 @@ fun FileManagerScreen(
                     val pendingOp by viewModel.pendingOperation.collectAsState()
                     TitanHeader(
                         title = if (pendingOp != null) {
-                            if (pendingOp!!.type == FileOperationType.COPY) "SELECT DESTINATION TO COPY"
+                            val op = pendingOp
+                            if (op != null && op.type == FileOperationType.COPY) "SELECT DESTINATION TO COPY"
                             else "SELECT DESTINATION TO MOVE"
                         } else {
                             val lastPart = currentPath.split("/").last()
@@ -405,7 +406,8 @@ fun FileManagerScreen(
                 ) {
                     // FLOATING PENDING OPERATION BAR
                     val pendingOp by viewModel.pendingOperation.collectAsState()
-                    if (pendingOp != null) {
+                    val currentPendingOp = pendingOp
+                    if (currentPendingOp != null) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -417,8 +419,8 @@ fun FileManagerScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    if (pendingOp!!.type == FileOperationType.COPY) "COPYING ${pendingOp!!.sourcePaths.size} ITEMS" 
-                                    else "MOVING ${pendingOp!!.sourcePaths.size} ITEMS",
+                                    if (currentPendingOp.type == FileOperationType.COPY) "COPYING ${currentPendingOp.sourcePaths.size} ITEMS"
+                                    else "MOVING ${currentPendingOp.sourcePaths.size} ITEMS",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -633,30 +635,32 @@ fun FileManagerScreen(
             }
 
             // DIALOGS
-            if (fileToRename != null) {
+            val fileToRenameValue = fileToRename
+            if (fileToRenameValue != null) {
                 RenameDialog(
-                    file = fileToRename!!,
+                    file = fileToRenameValue,
                     onDismiss = { fileToRename = null },
                     onConfirm = { newName ->
-                        viewModel.renameFile(fileToRename!!.path, newName)
+                        viewModel.renameFile(fileToRenameValue.path, newName)
                         fileToRename = null
                     }
                 )
             }
 
-            if (fileForDetails != null) {
+            val fileForDetailsValue = fileForDetails
+            if (fileForDetailsValue != null) {
                 FileDetailsDialog(
-                    file = fileForDetails!!,
+                    file = fileForDetailsValue,
                     onDismiss = { fileForDetails = null }
                 )
             }
 
             val compressionState by viewModel.compressionProgress.collectAsState()
             val keepScreenOn by viewModel.keepScreenOn.collectAsState()
-
-            if (compressionState != null) {
+            val compressionStateValue = compressionState
+            if (compressionStateValue != null) {
                 AdvancedProgressDialog(
-                    state = compressionState!!,
+                    state = compressionStateValue,
                     keepScreenOn = keepScreenOn,
                     onKeepScreenOnChange = { viewModel.setKeepScreenOn(it) },
                     onCancel = { viewModel.cancelCompression() },

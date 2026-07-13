@@ -120,7 +120,8 @@ class AudioBridgeImpl(
     }
 
     override suspend fun requestFocus(): Result<AudioFocusResult> = withContext(Dispatchers.IO) {
-        if (audioManager == null) {
+        val manager = audioManager
+        if (manager == null) {
             return@withContext Result.failure(
                 IllegalStateException("AudioBridge has not been initialized")
             )
@@ -132,7 +133,7 @@ class AudioBridgeImpl(
             .setOnAudioFocusChangeListener(audioFocusChangeListener)
             .build()
         audioFocusRequest = request
-        val result = audioManager!!.requestAudioFocus(request)
+        val result = manager.requestAudioFocus(request)
         val granted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Result.success(
             AudioFocusResult(

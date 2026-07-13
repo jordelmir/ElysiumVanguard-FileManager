@@ -210,10 +210,20 @@ class OperationQueue(private val scope: CoroutineScope) {
         op: Operation,
         onSourceProgress: (sourceBytes: Long, sourceTotal: Long) -> Unit
     ): Long = when (op.type) {
-        OpType.COPY -> op.sources.sumOf { copyWithProgress(it, op.destination!!, onSourceProgress) }
-        OpType.MOVE -> op.sources.sumOf { src ->
-            val moved = copyWithProgress(src, op.destination!!, onSourceProgress)
-            if (src.delete()) moved else moved // best-effort cleanup
+        OpType.COPY -> {
+            val destination = requireNotNull(op.destination) {
+                "COPY operation requires a destination"
+            }
+            op.sources.sumOf { copyWithProgress(it, destination, onSourceProgress) }
+        }
+        OpType.MOVE -> {
+            val destination = requireNotNull(op.destination) {
+                "MOVE operation requires a destination"
+            }
+            op.sources.sumOf { src ->
+                val moved = copyWithProgress(src, destination, onSourceProgress)
+                if (src.delete()) moved else moved // best-effort cleanup
+            }
         }
         OpType.DELETE -> {
             var bytes = 0L

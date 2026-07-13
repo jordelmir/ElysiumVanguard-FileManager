@@ -389,7 +389,7 @@ object CompressionEngine {
             var written = 0L
             var entry: ZipArchiveEntry? = stream.nextZipEntry
             while (entry != null) {
-                val current = entry!!
+                val current = entry ?: break
                 // ZIP bomb defense: reject clearly broken sizes.
                 val size = current.size
                 if (size > MAX_ENTRY_BYTES) {
@@ -433,7 +433,7 @@ object CompressionEngine {
             var entry = szf.nextEntry
             var totalBytes = 0L
             while (entry != null) {
-                val current = entry!!
+                val current = entry ?: break
                 if (current.isDirectory) {
                     val dir = safeTarget(outputDir, current.name)
                     dir.mkdirs()
@@ -511,7 +511,7 @@ object CompressionEngine {
             var entry: TarArchiveEntry? = tais.nextTarEntry
             var totalBytes = 0L
             while (entry != null) {
-                val current = entry!!
+                val current = entry ?: break
                 val target = safeTarget(outputDir, current.name)
                 if (current.isDirectory) {
                     target.mkdirs()

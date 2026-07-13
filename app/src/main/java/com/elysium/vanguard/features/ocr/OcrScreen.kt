@@ -153,7 +153,7 @@ fun OcrScreen(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        text = state.error!!,
+                        text = state.error ?: "",
                         color = TitanColors.QuantumPink,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(12.dp)

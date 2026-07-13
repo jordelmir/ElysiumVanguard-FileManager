@@ -83,7 +83,7 @@ fun MusicHubScreen(
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
-            val currentTitle = if (selectedPlaylist != null) selectedPlaylist!!.name else tabs[pagerState.currentPage]
+            val currentTitle = if (selectedPlaylist != null) (selectedPlaylist?.name ?: tabs[pagerState.currentPage]) else tabs[pagerState.currentPage]
             TitanHeader(
                 title = currentTitle,
                 onBack = handleBack,
@@ -194,11 +194,12 @@ fun MusicHubScreen(
             )
         }
 
-        if (trackToAddByPlaylist != null) {
+        val trackToAddValue = trackToAddByPlaylist
+        if (trackToAddValue != null) {
             AddToPlaylistDialog(
                 viewModel = viewModel,
                 onDismiss = { trackToAddByPlaylist = null },
-                onSelect = { id -> viewModel.addTrackToPlaylist(id, trackToAddByPlaylist!!); trackToAddByPlaylist = null }
+                onSelect = { id -> viewModel.addTrackToPlaylist(id, trackToAddValue); trackToAddByPlaylist = null }
             )
         }
     }

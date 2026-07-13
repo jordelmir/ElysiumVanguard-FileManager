@@ -139,12 +139,15 @@ class LinuxDesktopViewModel @Inject constructor(
             val startError = launchedProcess.state.value as? TerminalSession.State.Error
             check(startError == null) { startError?.message ?: "could not start the Linux desktop" }
 
+            val materialValue = requireNotNull(material) {
+                "VNC session material was not produced by the desktop installer"
+            }
             val session = RfbSession(
-                config = RfbSession.Config(passwordProvider = material!!.passwordProvider)
+                config = RfbSession.Config(passwordProvider = materialValue.passwordProvider)
             )
             synchronized(desktopLock) {
                 desktopProcess = process
-                desktopMaterial = material
+                desktopMaterial = materialValue
                 desktopOutputCollector = outputCollector
                 desktopLog = outputLog
                 _rfbSession.value = session

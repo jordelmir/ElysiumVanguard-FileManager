@@ -176,8 +176,10 @@ object ServiceDagResolver {
             result.add(group)
             group.forEach { node ->
                 adjacency[node]?.forEach { neighbor ->
-                    inDegree[neighbor] = (inDegree[neighbor] ?: 1) - 1
-                    if (inDegree[neighbor]!! == 0) queue.add(neighbor)
+                    val current = inDegree[neighbor] ?: 1
+                    val next = current - 1
+                    inDegree[neighbor] = next
+                    if (next == 0) queue.add(neighbor)
                 }
             }
         }
