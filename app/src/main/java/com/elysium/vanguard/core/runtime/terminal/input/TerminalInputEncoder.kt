@@ -49,7 +49,7 @@ internal object TerminalInputEncoder {
         alt: Boolean = false,
         ctrl: Boolean = false
     ): ByteArray? {
-        if (key == TerminalKey.TAB && shift && !alt && !ctrl) return bytes("${ESC}[Z")
+        if (key == TerminalKey.TAB) return if (shift && !alt && !ctrl) bytes("${ESC}[Z") else byteArrayOf(0x09)
         if (key == TerminalKey.ENTER) return bytes("\r")
         if (key == TerminalKey.BACKSPACE) return byteArrayOf(0x7f)
         if (key == TerminalKey.ESCAPE) return bytes("$ESC")

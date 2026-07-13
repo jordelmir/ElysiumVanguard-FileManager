@@ -92,10 +92,21 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
     }
 
     private fun recomputeMetrics(width: Int, height: Int) {
-        // Derive rows/columns from the actual window so phones,
-        // foldables and tablets use the available terminal canvas.
-        cellHeightPx = 16f * resources.displayMetrics.density * resources.configuration.fontScale
-        cellWidthPx = cellHeightPx * 0.6f  // monospace aspect ≈ 0.6
+        // Measure actual monospace glyph width instead of assuming a 0.6
+        // aspect ratio. This eliminates wrapping bugs where words are cut
+        // mid-character because the cell was too narrow for the font.
+        val density = resources.displayMetrics.density
+        val fontScale = resources.configuration.fontScale
+        cellHeightPx = 16f * density * fontScale
+        // Measure the actual width of a monospace glyph using Paint.
+        val paint = android.graphics.Paint().apply {
+            typeface = android.graphics.Typeface.create(
+                android.graphics.Typeface.MONOSPACE,
+                android.graphics.Typeface.NORMAL
+            )
+            textSize = cellHeightPx * 0.78f
+        }
+        cellWidthPx = paint.measureText("M")
         cols = (width / cellWidthPx).toInt().coerceIn(20, 220)
         rows = (height / cellHeightPx).toInt().coerceIn(6, 120)
         session?.resize(cols, rows)
@@ -112,13 +123,14 @@ internal class TerminalSurfaceView @JvmOverloads constructor(
      */
     fun drawOnce() {
         val activeSession = session
-        if (activeSession == null || renderer == null) return
+        val activeRenderer = renderer
+        if (activeSession == null || activeRenderer == null) return
         val buffer: TerminalBuffer = activeSession.buffer
         val surfaceHolder = holder
         val canvas: Canvas? = surfaceHolder.lockCanvas()
         if (canvas == null) return
         try {
-            renderer!!.draw(canvas, buffer)
+            activeRenderer.draw(canvas, buffer)
         } finally {
             surfaceHolder.unlockCanvasAndPost(canvas)
         }
