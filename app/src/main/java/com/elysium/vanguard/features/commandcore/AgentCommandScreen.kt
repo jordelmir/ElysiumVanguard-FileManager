@@ -176,7 +176,14 @@ fun AgentCommandScreen(
         )
     }
     selectedAction?.let { action ->
-        ActionReviewDialog(action = action, onDismiss = { selectedAction = null })
+        ActionReviewDialog(
+            action = action,
+            onExecute = {
+                viewModel.executeApproved(action)
+                selectedAction = null
+            },
+            onDismiss = { selectedAction = null }
+        )
     }
 }
 
@@ -295,18 +302,31 @@ private fun ProposedActionCard(action: AgentToolCall, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ActionReviewDialog(action: AgentToolCall, onDismiss: () -> Unit) {
+private fun ActionReviewDialog(
+    action: AgentToolCall,
+    onExecute: () -> Unit,
+    onDismiss: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(action.name.replace('_', ' ').uppercase()) },
         text = {
             Column {
-                Text(if (action.requiresApproval) "No mutation has run. This request requires explicit approval before the local execution layer may act." else "This is a read-only inspection request.")
+                Text(if (action.requiresApproval) "No mutation has run. Execute only if you approve this exact scoped operation." else "This is a read-only inspection request. Run it to return a bounded local result.")
                 Spacer(Modifier.height(10.dp))
                 Text(action.argumentsJson, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("CLOSE REVIEW") } },
+        confirmButton = {
+            Button(
+                onClick = onExecute,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (action.requiresApproval) TitanColors.NeonYellow else TitanColors.RadioactiveGreen,
+                    contentColor = Color.Black
+                )
+            ) { Text(if (action.requiresApproval) "APPROVE & EXECUTE" else "RUN INSPECTION") }
+        },
+        dismissButton = { Button(onClick = onDismiss) { Text("CANCEL") } },
         containerColor = Color(0xFF080F13),
         titleContentColor = Color.White,
         textContentColor = Color.White.copy(alpha = 0.84f)

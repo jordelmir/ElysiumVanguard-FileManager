@@ -197,6 +197,9 @@ class TerminalSession(
     /** Send Ctrl+C (ASCII 0x03) without flushing — same as a real ctrl-c. */
     fun sendInterrupt() = write(byteArrayOf(0x03))
 
+    /** A bounded terminal transcript for an explicitly approved inspection. */
+    fun readTail(maxLines: Int): List<String> = buffer.textTail(maxLines)
+
     /** Resize both the kernel PTY and the terminal model. */
     fun resize(cols: Int, rows: Int) {
         val nativePty = pty ?: return

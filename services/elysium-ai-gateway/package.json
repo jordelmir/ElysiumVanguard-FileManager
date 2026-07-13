@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --watch src/server.mjs",
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "mock": "node scripts/mock-agent-gateway.mjs"
   }
 }

@@ -43,6 +43,28 @@ class TerminalSessionManager @Inject constructor() {
     /** Returns an in-memory session for UI reattachment; never reconstructs one silently. */
     fun find(id: String): TerminalSession? = sessions[id]
 
+    /** Bounded, read-only terminal transcript for the Command Core. */
+    fun readTail(id: String, maxLines: Int): List<String>? = sessions[id]?.readTail(maxLines)
+
+    /** Safe session metadata: IDs and lifecycle only, never command lines or input bytes. */
+    fun summaries(): List<SessionSummary> = sessions.values
+        .sortedBy { it.id }
+        .map { session ->
+            val state = session.state.value
+            SessionSummary(
+                id = session.id,
+                state = when (state) {
+                    is TerminalSession.State.NotStarted -> "not_started"
+                    is TerminalSession.State.Starting -> "starting"
+                    is TerminalSession.State.Running -> "running"
+                    is TerminalSession.State.Exited -> "exited"
+                    is TerminalSession.State.Error -> "error"
+                    is TerminalSession.State.Stopped -> "stopped"
+                },
+                pid = (state as? TerminalSession.State.Running)?.pid
+            )
+        }
+
     /** Starts an already registered session. Safe if it is running or has exited. */
     fun start(id: String): TerminalSession? = sessions[id]?.also { it.start() }
 
@@ -74,3 +96,9 @@ class TerminalSessionManager @Inject constructor() {
     private fun TerminalSession.State.isForegroundActive(): Boolean =
         this is TerminalSession.State.Starting || this is TerminalSession.State.Running
 }
+
+data class SessionSummary(
+    val id: String,
+    val state: String,
+    val pid: Long?
+)

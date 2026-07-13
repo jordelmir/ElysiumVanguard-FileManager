@@ -28,9 +28,20 @@ data class AgentTurnResponse(
     val toolCalls: List<AgentToolCall> = emptyList()
 )
 
+data class AgentFunctionOutput(
+    val callId: String,
+    val output: Map<String, Any?>
+)
+
 private data class AgentTurnRequest(
     val message: String,
     val context: List<String>,
+    val safetyIdentifier: String
+)
+
+private data class AgentContinueRequest(
+    val previousResponseId: String,
+    val toolOutputs: List<AgentFunctionOutput>,
     val safetyIdentifier: String
 )
 
@@ -62,6 +73,22 @@ class AgentGatewayHttpClient @Inject constructor() {
             method = "POST",
             gatewayToken = connection.gatewayToken,
             requestBody = gson.toJson(AgentTurnRequest(message, context, safetyIdentifier)),
+            responseType = AgentTurnResponse::class.java
+        )
+    }
+
+    suspend fun continueTurn(
+        connection: AgentGatewayConnection,
+        previousResponseId: String,
+        toolOutputs: List<AgentFunctionOutput>,
+        safetyIdentifier: String
+    ): AgentTurnResponse = withContext(Dispatchers.IO) {
+        execute(
+            endpoint = connection.endpoint,
+            path = "/v1/agent/continue",
+            method = "POST",
+            gatewayToken = connection.gatewayToken,
+            requestBody = gson.toJson(AgentContinueRequest(previousResponseId, toolOutputs, safetyIdentifier)),
             responseType = AgentTurnResponse::class.java
         )
     }

@@ -279,6 +279,21 @@ internal class TerminalBuffer(
     @Synchronized fun requestFullRedraw() = markAllDirty()
     @Synchronized fun scrollbackSnapshot(): Array<TerminalCellArray> = scrollback.toTypedArray()
 
+    /**
+     * Bounded textual view for approved automation and accessibility. Unlike
+     * [snapshot], this never consumes dirty-row state, so the renderer keeps
+     * its normal redraw contract after a Command Core inspection.
+     */
+    @Synchronized
+    fun textTail(maxLines: Int): List<String> {
+        require(maxLines in 1..500) { "maxLines must be in 1..500" }
+        val historic = scrollback.map { row -> row.cells.joinToString(separator = "") { it.text }.trimEnd() }
+        val visible = (0 until rows).map { row ->
+            (0 until cols).joinToString(separator = "") { col -> activeScreen.cells[row * cols + col].text }.trimEnd()
+        }
+        return (historic + visible).takeLast(maxLines)
+    }
+
     private fun writeGlyph(glyph: String, requestedWidth: Int) {
         val width = if (requestedWidth == TerminalCharacterWidth.DOUBLE && cols > 1) {
             TerminalCharacterWidth.DOUBLE

@@ -684,4 +684,24 @@ class TerminalParserTest {
         assertEquals('B', b.cellAt(2, 0).char)
         assertEquals('D', b.cellAt(3, 0).char)
     }
+
+    @Test
+    fun `text tail is bounded and trims terminal cell padding`() {
+        val b = TerminalBuffer(cols = 5, rows = 2)
+        "hello".forEach(b::putChar)
+        "world".forEach(b::putChar)
+
+        assertEquals(listOf("world"), b.textTail(maxLines = 1))
+    }
+
+    @Test
+    fun `text tail does not consume renderer dirty rows`() {
+        val b = TerminalBuffer(cols = 4, rows = 1)
+        b.putChar('a')
+        b.snapshot() // consume the initial full redraw
+        b.putChar('b')
+
+        assertEquals(listOf("ab"), b.textTail(maxLines = 1))
+        assertTrue(b.snapshot().dirtyRows.contains(0))
+    }
 }
