@@ -6,10 +6,14 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.inputmethod.BaseInputConnection
@@ -17,24 +21,83 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 
-/**
- * Real SurfaceView renderer for frames received from a local RFB session.
- * It paints only server-supplied ARGB pixels, letterboxes the rest in pure
- * black, and maps Android input back into framebuffer coordinates.
- */
 internal class RfbSurfaceView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
 ) : SurfaceView(context, attrs, defStyleAttr), SurfaceHolder.Callback {
+
     private val drawLock = Any()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var bitmap: Bitmap? = null
     private var latestFrame: RfbFrame? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var longPressPending = false
+    private val longPressRunnable = Runnable { handleLongPress() }
+    private val LONG_PRESS_MS = 500L
+
     private var pointerDown = false
-    private var lastPointer: RfbPointer? = null
+    private var pointerPos = RfbPointer(0, 0)
+    private var scrollAccumX = 0f
+    private var scrollAccumY = 0f
+    private val SCROLL_THRESHOLD = 40f
 
     var session: RfbSession? = null
+
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onLongPress(e: MotionEvent) {
+            if (longPressPending) {
+                longPressPending = false
+                mapPointer(e.x, e.y)?.let {
+                    session?.sendPointer(it.x, it.y, RIGHT_BUTTON_MASK)
+                    session?.sendPointer(it.x, it.y, 0)
+                }
+            }
+        }
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            mapPointer(e.x, e.y)?.let {
+                session?.sendPointer(it.x, it.y, MIDDLE_BUTTON_MASK)
+                session?.sendPointer(it.x, it.y, 0)
+            }
+            return true
+        }
+
+        override fun onScroll(
+            e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float
+        ): Boolean {
+            if (e2.pointerCount >= 2) {
+                scrollAccumY += distanceY
+                scrollAccumX += distanceX
+                while (scrollAccumY >= SCROLL_THRESHOLD) {
+                    mapPointer(e2.x, e2.y)?.let { session?.sendPointer(it.x, it.y, WHEEL_DOWN_MASK) }
+                    scrollAccumY -= SCROLL_THRESHOLD
+                }
+                while (scrollAccumY <= -SCROLL_THRESHOLD) {
+                    mapPointer(e2.x, e2.y)?.let { session?.sendPointer(it.x, it.y, WHEEL_UP_MASK) }
+                    scrollAccumY += SCROLL_THRESHOLD
+                }
+                while (scrollAccumX >= SCROLL_THRESHOLD) {
+                    mapPointer(e2.x, e2.y)?.let { session?.sendPointer(it.x, it.y, WHEEL_RIGHT_MASK) }
+                    scrollAccumX -= SCROLL_THRESHOLD
+                }
+                while (scrollAccumX <= -SCROLL_THRESHOLD) {
+                    mapPointer(e2.x, e2.y)?.let { session?.sendPointer(it.x, it.y, WHEEL_LEFT_MASK) }
+                    scrollAccumX += SCROLL_THRESHOLD
+                }
+                return true
+            }
+            if (pointerDown) {
+                mapPointer(e2.x, e2.y)?.let { p ->
+                    pointerPos = p
+                    session?.sendPointer(p.x, p.y, PRIMARY_BUTTON_MASK)
+                }
+                return true
+            }
+            return false
+        }
+    })
 
     init {
         holder.addCallback(this)
@@ -42,7 +105,6 @@ internal class RfbSurfaceView @JvmOverloads constructor(
         isFocusableInTouchMode = true
     }
 
-    /** Called off the UI thread by [RfbHost]'s frame collector. */
     fun present(frame: RfbFrame) {
         synchronized(drawLock) {
             latestFrame = frame
@@ -55,31 +117,72 @@ internal class RfbSurfaceView @JvmOverloads constructor(
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) =
         synchronized(drawLock) { drawLatestLocked() }
 
-    override fun surfaceDestroyed(holder: SurfaceHolder) = Unit
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        mainHandler.removeCallbacks(longPressRunnable)
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(event)
         val frame = latestFrame ?: return false
-        val pointer = RfbViewport(frame.width, frame.height, width, height).map(event.x, event.y)
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestFocus()
                 showKeyboard()
-                pointer?.let {
+                longPressPending = true
+                mainHandler.postDelayed(longPressRunnable, LONG_PRESS_MS)
+                mapPointer(event.x, event.y)?.let {
                     pointerDown = true
-                    lastPointer = it
+                    pointerPos = it
                     session?.sendPointer(it.x, it.y, PRIMARY_BUTTON_MASK)
                 }
             }
-            MotionEvent.ACTION_MOVE -> pointer?.let {
-                lastPointer = it
-                session?.sendPointer(it.x, it.y, if (pointerDown) PRIMARY_BUTTON_MASK else 0)
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount >= 2) {
+                    mainHandler.removeCallbacks(longPressRunnable)
+                    longPressPending = false
+                    if (pointerDown) {
+                        session?.sendPointer(pointerPos.x, pointerPos.y, 0)
+                        pointerDown = false
+                    }
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount >= 2) return true
+                if (longPressPending) {
+                    mapPointer(event.x, event.y)?.let {
+                        pointerPos = it
+                        session?.sendPointer(it.x, it.y, PRIMARY_BUTTON_MASK)
+                    }
+                }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                (pointer ?: lastPointer)?.let { session?.sendPointer(it.x, it.y, 0) }
-                pointerDown = false
+                mainHandler.removeCallbacks(longPressRunnable)
+                if (longPressPending) {
+                    longPressPending = false
+                }
+                if (pointerDown) {
+                    session?.sendPointer(pointerPos.x, pointerPos.y, 0)
+                    pointerDown = false
+                }
             }
         }
         return true
+    }
+
+    private fun handleLongPress() {
+        longPressPending = false
+        if (pointerDown) {
+            session?.sendPointer(pointerPos.x, pointerPos.y, 0)
+            pointerDown = false
+        }
+        session?.sendPointer(pointerPos.x, pointerPos.y, RIGHT_BUTTON_MASK)
+        session?.sendPointer(pointerPos.x, pointerPos.y, 0)
+    }
+
+    private fun mapPointer(x: Float, y: Float): RfbPointer? {
+        val frame = latestFrame ?: return null
+        return RfbViewport(frame.width, frame.height, width, height).map(x, y)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -113,8 +216,7 @@ internal class RfbSurfaceView @JvmOverloads constructor(
         try {
             canvas.drawColor(Color.BLACK)
             canvas.drawBitmap(
-                target,
-                null,
+                target, null,
                 RectF(viewport.offsetX, viewport.offsetY, viewport.offsetX + viewport.drawWidth, viewport.offsetY + viewport.drawHeight),
                 bitmapPaint
             )
@@ -186,6 +288,12 @@ internal class RfbSurfaceView @JvmOverloads constructor(
 
     private companion object {
         const val PRIMARY_BUTTON_MASK = 1
+        const val MIDDLE_BUTTON_MASK = 2
+        const val RIGHT_BUTTON_MASK = 4
+        const val WHEEL_UP_MASK = 8
+        const val WHEEL_DOWN_MASK = 16
+        const val WHEEL_LEFT_MASK = 32
+        const val WHEEL_RIGHT_MASK = 64
         const val XK_BACKSPACE = 0xFF08
         const val XK_TAB = 0xFF09
         const val XK_RETURN = 0xFF0D
