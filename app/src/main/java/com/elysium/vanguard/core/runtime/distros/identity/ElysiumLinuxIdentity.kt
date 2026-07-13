@@ -169,8 +169,10 @@ object ElysiumLinuxIdentity {
         statusFile.readLines().forEach { line ->
             when {
                 line.startsWith("Package: ") -> {
-                    if (name != null && version != null) {
-                        packages += PackageEntry(name = name!!, version = version!!)
+                    val finishedName = name
+                    val finishedVersion = version
+                    if (finishedName != null && finishedVersion != null) {
+                        packages += PackageEntry(name = finishedName, version = finishedVersion)
                     }
                     name = line.removePrefix("Package: ").trim()
                     version = null
@@ -179,16 +181,20 @@ object ElysiumLinuxIdentity {
                     version = line.removePrefix("Version: ").trim()
                 }
                 line.isBlank() -> {
-                    if (name != null && version != null) {
-                        packages += PackageEntry(name = name!!, version = version!!)
+                    val finishedName = name
+                    val finishedVersion = version
+                    if (finishedName != null && finishedVersion != null) {
+                        packages += PackageEntry(name = finishedName, version = finishedVersion)
                     }
                     name = null
                     version = null
                 }
             }
         }
-        if (name != null && version != null) {
-            packages += PackageEntry(name = name!!, version = version!!)
+        val finalName = name
+        val finalVersion = version
+        if (finalName != null && finalVersion != null) {
+            packages += PackageEntry(name = finalName, version = finalVersion)
         }
         return packages
     }
@@ -228,8 +234,10 @@ object ElysiumLinuxIdentity {
                         inVersion -> version = line.trim()
                     }
                 }
-                if (name != null && version != null) {
-                    PackageEntry(name = name!!, version = version!!)
+                val finishedName = name
+                val finishedVersion = version
+                if (finishedName != null && finishedVersion != null) {
+                    PackageEntry(name = finishedName, version = finishedVersion)
                 } else null
             }
             ?: emptyList()
