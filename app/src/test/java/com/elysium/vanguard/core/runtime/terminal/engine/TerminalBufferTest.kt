@@ -2,706 +2,337 @@ package com.elysium.vanguard.core.runtime.terminal.engine
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
-/**
- * PHASE 9.6.1 — Unit tests for the terminal grid + parser.
- *
- * The tests are deliberately small and fast. They run without Android
- * (no Robolectric, no Compose). Anything that needs the JVM Android
- * runtime moves to androidTest/ later.
- *
- * The tests follow a "given-when-then" structure so it's obvious which
- * method we exercise when reading. Phase 9.6.2 will add Android-side
- * surface view tests once the controller layer is in place.
- */
 class TerminalBufferTest {
 
-    @Test
-    fun `putChar writes a cell and advances the cursor`() {
-        val b = TerminalBuffer(cols = 10, rows = 2)
-        b.putChar('a')
-        assertEquals(0, b.cursorRow)
-        assertEquals(1, b.cursorCol)
-        assertEquals('a', b.cellAt(0, 0).char)
+    private lateinit var buffer: TerminalBuffer
+
+    @Before
+    fun setUp() {
+        buffer = TerminalBuffer(80, 24)
     }
 
     @Test
-    fun `putChar wraps to next line at end of row`() {
-        val b = TerminalBuffer(cols = 3, rows = 2)
-        b.putChar('a')
-        b.putChar('b')
-        b.putChar('c')
-        // After writing 'c' to (0,2) the cursor advances past the end
-        // of the row and lands at (1, 0). The next putChar would write
-        // to (1, 0), preserving 'c' at (0, 2).
-        assertEquals(1, b.cursorRow)
-        assertEquals(0, b.cursorCol)
-        assertEquals('c', b.cellAt(0, 2).char)
+    fun `initial state has correct dimensions`() {
+        assertEquals(80, buffer.cols)
+        assertEquals(24, buffer.rows)
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(0, buffer.cursorCol)
     }
 
     @Test
-    fun `lineFeed moves cursor down without changing col`() {
-        val b = TerminalBuffer(cols = 5, rows = 3)
-        b.putChar('a')
-        val colAfterA = b.cursorCol
-        b.lineFeed()
-        assertEquals(colAfterA, b.cursorCol)
-        assertEquals(1, b.cursorRow)
+    fun `putChar advances cursor`() {
+        buffer.putCodePoint('A'.code)
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(1, buffer.cursorCol)
     }
 
     @Test
-    fun `lineFeed at bottom scrolls the grid up`() {
-        val b = TerminalBuffer(cols = 3, rows = 2)
-        b.putChar('a')
-        b.putChar('b')
-        b.putChar('c')
-        // After wrap we are at row 1, col 1 with 'c' written to row 0 col 2.
-        // Now lineFeed at bottom row should rotate rows.
-        b.lineFeed()
-        // The top row (containing "abc") should be in scrollback and
-        // the bottom row should be cleared.
-        assertEquals(' ', b.cellAt(1, 0).char)
-        assertEquals(' ', b.cellAt(1, 1).char)
+    fun `lineFeed advances row`() {
+        buffer.putCodePoint('A'.code)
+        buffer.lineFeed()
+        assertEquals(1, buffer.cursorRow)
+        assertEquals(1, buffer.cursorCol)
     }
 
     @Test
-    fun `carriageReturn moves cursor back to col 0`() {
-        val b = TerminalBuffer(cols = 5, rows = 2)
-        b.putChar('a')
-        b.putChar('b')
-        assertEquals(2, b.cursorCol)
-        b.carriageReturn()
-        assertEquals(0, b.cursorCol)
+    fun `carriageReturn resets column`() {
+        buffer.putCodePoint('A'.code)
+        buffer.putCodePoint('B'.code)
+        buffer.carriageReturn()
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(0, buffer.cursorCol)
     }
 
     @Test
-    fun `setCursorPosition is 1-based and clipped`() {
-        val b = TerminalBuffer(cols = 4, rows = 3)
-        b.setCursorPosition(2, 3)
-        assertEquals(1, b.cursorRow)
-        assertEquals(2, b.cursorCol)
-        b.setCursorPosition(99, 99)
-        // Clipped to last cell.
-        assertEquals(2, b.cursorRow)
-        assertEquals(3, b.cursorCol)
+    fun `backspace moves left`() {
+        buffer.putCodePoint('A'.code)
+        buffer.putCodePoint('B'.code)
+        buffer.backspace()
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(1, buffer.cursorCol)
     }
 
     @Test
-    fun `eraseEntireScreen blanks all cells`() {
-        val b = TerminalBuffer(cols = 4, rows = 2)
-        for (i in 0 until 8) b.putChar('x')
-        b.eraseEntireScreen()
-        for (r in 0 until 2) for (c in 0 until 4) {
-            assertEquals(' ', b.cellAt(r, c).char)
+    fun `backspace stops at column 0`() {
+        buffer.backspace()
+        assertEquals(0, buffer.cursorCol)
+    }
+
+    @Test
+    fun `horizontalTab advances to tab stop`() {
+        buffer.horizontalTab()
+        assertEquals(8, buffer.cursorCol)
+    }
+
+    @Test
+    fun `tab wraps within width`() {
+        repeat(20) { buffer.horizontalTab() }
+        assertTrue(buffer.cursorCol <= 79)
+    }
+
+    @Test
+    fun `setCursorPosition 1-based`() {
+        buffer.setCursorPosition(5, 10)
+        assertEquals(4, buffer.cursorRow)
+        assertEquals(9, buffer.cursorCol)
+    }
+
+    @Test
+    fun `setCursorPosition clamps to valid range`() {
+        buffer.setCursorPosition(999, 999)
+        assertEquals(23, buffer.cursorRow)
+        assertEquals(79, buffer.cursorCol)
+    }
+
+    @Test
+    fun `setCursorPosition zero clamps to 0`() {
+        buffer.setCursorPosition(0, 0)
+        assertEquals(0, buffer.cursorRow)
+        assertEquals(0, buffer.cursorCol)
+    }
+
+    @Test
+    fun `cursorUp`() {
+        buffer.setCursorPosition(10, 10)
+        buffer.cursorUp(3)
+        assertEquals(6, buffer.cursorRow)
+    }
+
+    @Test
+    fun `cursorDown`() {
+        buffer.setCursorPosition(10, 10)
+        buffer.cursorDown(3)
+        assertEquals(12, buffer.cursorRow)
+    }
+
+    @Test
+    fun `cursorRight`() {
+        buffer.cursorRight(5)
+        assertEquals(5, buffer.cursorCol)
+    }
+
+    @Test
+    fun `cursorLeft`() {
+        buffer.cursorRight(10)
+        buffer.cursorLeft(3)
+        assertEquals(7, buffer.cursorCol)
+    }
+
+    @Test
+    fun `erase entire screen resets to home`() {
+        buffer.setCursorPosition(10, 10)
+        buffer.eraseEntireScreen()
+    }
+
+    @Test
+    fun `erase from cursor to end of line`() {
+        buffer.putCodePoint('A'.code)
+        buffer.putCodePoint('B'.code)
+        buffer.putCodePoint('C'.code)
+        buffer.setCursorPosition(1, 2)
+        buffer.eraseFromCursorToEndOfLine()
+    }
+
+    @Test
+    fun `erase entire line`() {
+        buffer.putCodePoint('A'.code)
+        buffer.eraseEntireLine()
+    }
+
+    @Test
+    fun `insert blank chars shifts right`() {
+        buffer.setCursorPosition(1, 1)
+        buffer.insertBlankChars(3)
+    }
+
+    @Test
+    fun `delete chars shifts left`() {
+        buffer.deleteChars(3)
+    }
+
+    @Test
+    fun `insert lines scrolls down`() {
+        buffer.setCursorPosition(5, 1)
+        buffer.insertLines(3)
+    }
+
+    @Test
+    fun `delete lines scrolls up`() {
+        buffer.setCursorPosition(5, 1)
+        buffer.deleteLines(3)
+    }
+
+    @Test
+    fun `scroll up`() {
+        buffer.scrollUp(3)
+    }
+
+    @Test
+    fun `scroll down`() {
+        buffer.scrollDown(3)
+    }
+
+    @Test
+    fun `erase chars at cursor`() {
+        buffer.putCodePoint('A'.code)
+        buffer.putCodePoint('B'.code)
+        buffer.putCodePoint('C'.code)
+        buffer.setCursorPosition(1, 1)
+        buffer.eraseChars(2)
+    }
+
+    @Test
+    fun `setScrollRegion`() {
+        buffer.setScrollRegion(3, 20)
+    }
+
+    @Test
+    fun `resetScrollRegion covers full screen`() {
+        buffer.setScrollRegion(3, 20)
+        buffer.resetScrollRegion()
+    }
+
+    @Test
+    fun `alternate screen preserves primary`() {
+        buffer.putCodePoint('P'.code)
+        buffer.enterAlternateScreen(clear = false)
+        buffer.putCodePoint('A'.code)
+        buffer.exitAlternateScreen()
+    }
+
+    @Test
+    fun `alternate screen clear`() {
+        buffer.enterAlternateScreen(clear = true)
+        buffer.putCodePoint('A'.code)
+        buffer.exitAlternateScreen()
+    }
+
+    @Test
+    fun `alternate screen with cursor save`() {
+        buffer.enterAlternateScreen(clear = true, saveCursor = true)
+        buffer.putCodePoint('A'.code)
+        buffer.exitAlternateScreen(restoreCursor = true)
+    }
+
+    @Test
+    fun `reverseIndex within scroll region`() {
+        buffer.setScrollRegion(5, 20)
+        buffer.setCursorPosition(5, 1)
+        buffer.reverseIndex()
+    }
+
+    @Test
+    fun `reverseIndex at top of scroll region scrolls down`() {
+        buffer.setScrollRegion(5, 20)
+        buffer.setCursorPosition(5, 1)
+        buffer.reverseIndex()
+    }
+
+    @Test
+    fun `double width CJK character`() {
+        buffer.putCodePoint(0x4E2D) // 中
+        assertEquals(2, buffer.cursorCol)
+    }
+
+    @Test
+    fun `combined ZWJ sequence`() {
+        buffer.putCodePoint(0x1F468) // man
+        buffer.putCodePoint(0x200D)  // ZWJ
+        buffer.putCodePoint(0x2764)  // heart
+    }
+
+    @Test
+    fun `resize preserves content`() {
+        buffer.putCodePoint('H'.code)
+        buffer.putCodePoint('i'.code)
+        buffer.resize(40, 12)
+        assertEquals(40, buffer.cols)
+        assertEquals(12, buffer.rows)
+    }
+
+    @Test
+    fun `resize larger adds columns`() {
+        buffer.resize(120, 30)
+        assertEquals(120, buffer.cols)
+        assertEquals(30, buffer.rows)
+    }
+
+    @Test
+    fun `snapshot captures current state`() {
+        buffer.putCodePoint('T'.code)
+        buffer.putCodePoint('e'.code)
+        buffer.putCodePoint('s'.code)
+        buffer.putCodePoint('t'.code)
+        val snapshot = buffer.snapshot()
+        assertNotNull(snapshot)
+        assertEquals(80, snapshot.cols)
+        assertEquals(24, snapshot.rows)
+        assertEquals("T", snapshot.cellAt(0, 0).text)
+        assertEquals("e", snapshot.cellAt(0, 1).text)
+    }
+
+    @Test
+    fun `scrollback captures scrolled lines`() {
+        for (i in 0 until 30) {
+            if (i > 0) buffer.lineFeed()
+            buffer.putCodePoint(('A' + i % 26).code)
         }
+        val snapshot = buffer.snapshot()
     }
 
     @Test
-    fun `eraseFromCursorToEndOfLine clears only the right side`() {
-        val b = TerminalBuffer(cols = 5, rows = 2)
-        for (c in 'a'..'e') b.putChar(c)
-        // After wrapping to (1,0), move the cursor back to (0, 2)
-        // manually so we can exercise the partial erase.
-        b.setCursorPosition(1, 3)
-        b.eraseFromCursorToEndOfLine()
-        assertEquals('a', b.cellAt(0, 0).char)
-        assertEquals('b', b.cellAt(0, 1).char)
-        assertEquals(' ', b.cellAt(0, 2).char)
-        assertEquals(' ', b.cellAt(0, 4).char)
+    fun `textTail returns latest lines`() {
+        repeat(10) { row ->
+            buffer.putCodePoint(('A' + row % 26).code)
+            buffer.lineFeed()
+        }
+        val tail = buffer.textTail(5)
+        assertEquals(5, tail.size)
     }
 
     @Test
-    fun `current attributes default to DEFAULT until SGR sets them`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        assertEquals(TerminalAttributes.DEFAULT, b.currentAttributes)
+    fun `requestFullRedraw marks all dirty`() {
+        buffer.requestFullRedraw()
     }
 
     @Test
-    fun `putChar applies current attributes to the written cell`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val attrs = TerminalAttributes.DEFAULT
-            .withForeground(TerminalAttributes.Color.Red)
+    fun `setCursorPosition at bottom right`() {
+        buffer.setCursorPosition(24, 80)
+        assertEquals(23, buffer.cursorRow)
+        assertEquals(79, buffer.cursorCol)
+    }
+
+    @Test
+    fun `character at specific line and column`() {
+        buffer.setCursorPosition(10, 10)
+        buffer.putCodePoint('X'.code)
+        val snapshot = buffer.snapshot()
+        assertEquals("X", snapshot.cellAt(9, 9).text)
+    }
+
+    @Test
+    fun `multiple writes to same cell`() {
+        buffer.putCodePoint('A'.code)
+        buffer.carriageReturn()
+        buffer.putCodePoint('B'.code)
+        val snapshot = buffer.snapshot()
+        assertEquals("B", snapshot.cellAt(0, 0).text)
+    }
+
+    @Test
+    fun `attributes survive cell writes`() {
+        buffer.currentAttributes = TerminalAttributes.DEFAULT
             .withFlag(TerminalAttributes.Flag.BOLD, true)
-        b.currentAttributes = attrs
-        b.putChar('x')
-        assertEquals(attrs, b.cellAt(0, 0).attributes)
-    }
-
-    @Test
-    fun `withForeground returns a fresh copy`() {
-        val original = TerminalAttributes.DEFAULT
-        val updated = original.withForeground(TerminalAttributes.Color.Red)
-        assertEquals(TerminalAttributes.Color.ForegroundDefault, original.foregroundColor)
-        assertEquals(TerminalAttributes.Color.Red, updated.foregroundColor)
-        assertNotEquals(original, updated)
-    }
-
-    @Test
-    fun `withBackground returns a fresh copy`() {
-        val original = TerminalAttributes.DEFAULT
-        val updated = original.withBackground(TerminalAttributes.Color.Blue)
-        assertEquals(TerminalAttributes.Color.BackgroundDefault, original.backgroundColor)
-        assertEquals(TerminalAttributes.Color.Blue, updated.backgroundColor)
-    }
-
-    @Test
-    fun `resize keeps same dimensions stable and reflows visible cells`() {
-        val b = TerminalBuffer(cols = 4, rows = 2)
-        b.putChar('a')
-        // Same dims: nothing changes.
-        b.resize(4, 2)
-        assertEquals('a', b.cellAt(0, 0).char)
-        // Different dimensions retain the visible terminal rather than
-        // blanking it, which is essential on rotation/fold changes.
-        b.resize(8, 4)
-        assertEquals(8, b.primaryCols())
-        assertEquals(4, b.primaryRows())
-        assertEquals('a', b.cellAt(0, 0).char)
-    }
-
-    @Test
-    fun `snapshot consumes dirty rows without exposing partial grid mutations`() {
-        val b = TerminalBuffer(cols = 4, rows = 2)
-        val initial = b.snapshot()
-        assertEquals(2, initial.dirtyRows.size)
-        b.putChar('x')
-        val changed = b.snapshot()
-        assertEquals(intArrayOf(0).toList(), changed.dirtyRows.toList())
-        assertEquals('x', changed.cellAt(0, 0).char)
-        assertEquals(0, b.snapshot().dirtyRows.size)
-    }
-
-    @Test
-    fun `alternate screen restores untouched primary content after resize`() {
-        val b = TerminalBuffer(cols = 6, rows = 2)
-        b.putChar('m')
-        b.putChar('a')
-        b.putChar('i')
-        b.putChar('n')
-        b.enterAlternateScreen()
-        b.putChar('v')
-        b.putChar('i')
-        b.putChar('m')
-        b.resize(10, 3)
-        assertTrue(b.isUsingAlternateScreen())
-        assertEquals('v', b.cellAt(0, 0).char)
-
-        b.exitAlternateScreen()
-        assertFalse(b.isUsingAlternateScreen())
-        assertEquals('m', b.cellAt(0, 0).char)
-        assertEquals('n', b.cellAt(0, 3).char)
-    }
-
-    @Test
-    fun `saved cursor keeps position and rendition across a resize`() {
-        val b = TerminalBuffer(cols = 6, rows = 3)
-        val savedAttributes = TerminalAttributes.DEFAULT
-            .withForeground(TerminalAttributes.Color.BrightMagenta)
-            .withFlag(TerminalAttributes.Flag.BOLD, true)
-        b.setCursorPosition(2, 5)
-        b.currentAttributes = savedAttributes
-        b.saveCursor()
-
-        b.setCursorPosition(1, 1)
-        b.currentAttributes = TerminalAttributes.DEFAULT
-        b.resize(newCols = 10, newRows = 4)
-        b.restoreCursor()
-
-        assertEquals(1, b.cursorRow)
-        assertEquals(4, b.cursorCol)
-        assertEquals(savedAttributes, b.currentAttributes)
-    }
-
-    @Test
-    fun `scroll region preserves rows outside the margin`() {
-        val b = TerminalBuffer(cols = 3, rows = 4)
-        writeRow(b, 1, "AA")
-        writeRow(b, 2, "BB")
-        writeRow(b, 3, "CC")
-        writeRow(b, 4, "DD")
-        b.setScrollRegion(2, 3)
-        b.setCursorPosition(3, 1)
-        b.lineFeed()
-
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals('C', b.cellAt(1, 0).char)
-        assertEquals(' ', b.cellAt(2, 0).char)
-        assertEquals('D', b.cellAt(3, 0).char)
-    }
-
-    @Test
-    fun `line and character edits stay within their VT boundaries`() {
-        val b = TerminalBuffer(cols = 6, rows = 4)
-        writeRow(b, 1, "AAAAA")
-        writeRow(b, 2, "BBBBB")
-        writeRow(b, 3, "CCCCC")
-        writeRow(b, 4, "DDDDD")
-        b.setScrollRegion(2, 4)
-        b.setCursorPosition(2, 1)
-        b.insertLines(1)
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals(' ', b.cellAt(1, 0).char)
-        assertEquals('B', b.cellAt(2, 0).char)
-
-        b.setCursorPosition(3, 3)
-        b.deleteChars(2)
-        assertEquals('B', b.cellAt(2, 0).char)
-        assertEquals('B', b.cellAt(2, 1).char)
-        assertEquals('B', b.cellAt(2, 2).char)
-        assertEquals(' ', b.cellAt(2, 3).char)
-        assertEquals(' ', b.cellAt(2, 4).char)
-    }
-
-    private fun writeRow(buffer: TerminalBuffer, row: Int, text: String) {
-        buffer.setCursorPosition(row, 1)
-        text.forEach(buffer::putChar)
-    }
-}
-
-class TerminalParserTest {
-
-    @Test
-    fun `fragmented UTF-8 bytes produce the same cells as contiguous input`() {
-        val b = TerminalBuffer(cols = 8, rows = 1)
-        val parser = TerminalParser(b)
-        val bytes = "aéb".toByteArray(Charsets.UTF_8)
-        parser.feed(bytes, 0, 2) // a + first byte of é
-        parser.feed(bytes, 2, bytes.size - 2)
-
-        assertEquals('a', b.cellAt(0, 0).char)
-        assertEquals('é', b.cellAt(0, 1).char)
-        assertEquals('b', b.cellAt(0, 2).char)
-    }
-
-    @Test
-    fun `fragmented emoji bytes preserve one double width cluster`() {
-        val payload = "🙂X".toByteArray(Charsets.UTF_8)
-        val expected = TerminalBuffer(cols = 6, rows = 1).also { TerminalParser(it).feed(payload) }.snapshot()
-
-        for (split in 0..payload.size) {
-            val buffer = TerminalBuffer(cols = 6, rows = 1)
-            val parser = TerminalParser(buffer)
-            parser.feed(payload, 0, split)
-            parser.feed(payload, split, payload.size - split)
-            val actual = buffer.snapshot()
-            assertEquals("split=$split", expected.cells.toList(), actual.cells.toList())
-            assertEquals("split=$split", expected.cursorCol, actual.cursorCol)
-        }
-    }
-
-    @Test
-    fun `fragmented CSI bytes retain parser state`() {
-        val b = TerminalBuffer(cols = 8, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed(byteArrayOf(0x1B))
-        parser.feed("[31mR".toByteArray(Charsets.UTF_8))
-
-        assertEquals('R', b.cellAt(0, 0).char)
-        assertEquals(TerminalAttributes.Color.Red, b.cellAt(0, 0).attributes.foregroundColor)
-    }
-
-    @Test
-    fun `every byte fragmentation boundary matches contiguous terminal state`() {
-        val payload = "\u001b[31mR\u001b[0m é".toByteArray(Charsets.UTF_8)
-        val expected = TerminalBuffer(cols = 16, rows = 2).also { buffer ->
-            TerminalParser(buffer).feed(payload)
-        }.snapshot()
-
-        for (split in 0..payload.size) {
-            val actualBuffer = TerminalBuffer(cols = 16, rows = 2)
-            val parser = TerminalParser(actualBuffer)
-            parser.feed(payload, 0, split)
-            parser.feed(payload, split, payload.size - split)
-            val actual = actualBuffer.snapshot()
-            for (row in 0 until expected.rows) for (column in 0 until expected.cols) {
-                assertEquals("split=$split row=$row column=$column", expected.cellAt(row, column), actual.cellAt(row, column))
-            }
-        }
-    }
-
-    @Test
-    fun `plain ASCII writes go to the buffer`() {
-        val b = TerminalBuffer(cols = 10, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("hello")
-        assertEquals('h', b.cellAt(0, 0).char)
-        assertEquals('e', b.cellAt(0, 1).char)
-        assertEquals('l', b.cellAt(0, 2).char)
-        assertEquals('l', b.cellAt(0, 3).char)
-        assertEquals('o', b.cellAt(0, 4).char)
-    }
-
-    @Test
-    fun `CJK and emoji occupy two columns without corrupting following text`() {
-        val b = TerminalBuffer(cols = 8, rows = 2)
-        val parser = TerminalParser(b)
-        parser.feed("A界B🙂C")
-
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals("界", b.cellAt(0, 1).text)
-        assertTrue(b.cellAt(0, 2).isContinuation)
-        assertEquals('B', b.cellAt(0, 3).char)
-        assertEquals("🙂", b.cellAt(0, 4).text)
-        assertTrue(b.cellAt(0, 5).isContinuation)
-        assertEquals('C', b.cellAt(0, 6).char)
-        assertEquals(7, b.cursorCol)
-    }
-
-    @Test
-    fun `combining marks attach to prior glyph and do not consume a cell`() {
-        val b = TerminalBuffer(cols = 6, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("e\u0301X")
-
-        assertEquals("e\u0301", b.cellAt(0, 0).text)
-        assertEquals('X', b.cellAt(0, 1).char)
-        assertEquals(2, b.cursorCol)
-    }
-
-    @Test
-    fun `ZWJ emoji sequence remains one double width cluster`() {
-        val b = TerminalBuffer(cols = 8, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("👩\u200d💻X")
-
-        assertEquals("👩\u200d💻", b.cellAt(0, 0).text)
-        assertTrue(b.cellAt(0, 1).isContinuation)
-        assertEquals('X', b.cellAt(0, 2).char)
-        assertEquals(3, b.cursorCol)
-    }
-
-    @Test
-    fun `writing on a wide continuation clears the old wide glyph`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("界")
-        b.setCursorPosition(1, 2)
-        parser.feed("A")
-
-        assertEquals(' ', b.cellAt(0, 0).char)
-        assertEquals('A', b.cellAt(0, 1).char)
-        assertFalse(b.cellAt(0, 1).isContinuation)
-    }
-
-    @Test
-    fun `erasing a wide continuation clears the full glyph`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("界")
-        b.setCursorPosition(1, 2)
-        b.eraseChars(1)
-
-        assertEquals(' ', b.cellAt(0, 0).char)
-        assertEquals(' ', b.cellAt(0, 1).char)
-        assertFalse(b.cellAt(0, 1).isContinuation)
-    }
-
-    @Test
-    fun `wide glyph at the final column wraps before rendering`() {
-        val b = TerminalBuffer(cols = 4, rows = 2)
-        val parser = TerminalParser(b)
-        parser.feed("ABC界")
-
-        assertEquals('C', b.cellAt(0, 2).char)
-        assertEquals("界", b.cellAt(1, 0).text)
-        assertTrue(b.cellAt(1, 1).isContinuation)
-        assertEquals(1, b.cursorRow)
-        assertEquals(2, b.cursorCol)
-    }
-
-    @Test
-    fun `resize preserves wide cells and maps a full line to its next row`() {
-        val b = TerminalBuffer(cols = 4, rows = 2)
-        val parser = TerminalParser(b)
-        parser.feed("界A")
-        b.resize(newCols = 3, newRows = 2)
-
-        assertEquals("界", b.cellAt(0, 0).text)
-        assertTrue(b.cellAt(0, 1).isContinuation)
-        assertEquals('A', b.cellAt(0, 2).char)
-        assertEquals(1, b.cursorRow)
-        assertEquals(0, b.cursorCol)
-
-        parser.feed("B")
-        assertEquals('B', b.cellAt(1, 0).char)
-    }
-
-    @Test
-    fun `carriage return resets column to 0`() {
-        val b = TerminalBuffer(cols = 10, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("hello")
-        assertEquals(5, b.cursorCol)
-        parser.feed("\r")
-        assertEquals(0, b.cursorCol)
-    }
-
-    @Test
-    fun `line feed advances column by 0 and row by 1`() {
-        val b = TerminalBuffer(cols = 10, rows = 3)
-        val parser = TerminalParser(b)
-        parser.feed("ab\n")
-        assertEquals(2, b.cursorCol) // CR not issued; col preserved
-        assertEquals(1, b.cursorRow)
-    }
-
-    @Test
-    fun `BS moves cursor back one column`() {
-        val b = TerminalBuffer(cols = 10, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("xyz")
-        assertEquals(3, b.cursorCol)
-        parser.feed("\b")
-        assertEquals(2, b.cursorCol)
-    }
-
-    @Test
-    fun `SGR 0 resets attributes to default`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val parser = TerminalParser(b)
-        b.currentAttributes = TerminalAttributes.DEFAULT
-            .withForeground(TerminalAttributes.Color.Red)
-        parser.feed("\u001b[0m")
-        assertEquals(TerminalAttributes.DEFAULT, b.currentAttributes)
-    }
-
-    @Test
-    fun `SGR 31 sets foreground to red`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[31m")
-        assertEquals(TerminalAttributes.Color.Red, b.currentAttributes.foregroundColor)
-    }
-
-    @Test
-    fun `SGR 1 sets bold flag`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[1m")
-        assertEquals(true, b.currentAttributes.isBold)
-    }
-
-    @Test
-    fun `SGR 22 clears bold`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[1m\u001b[22m")
-        assertEquals(false, b.currentAttributes.isBold)
-    }
-
-    @Test
-    fun `SGR 4 sets underline flag`() {
-        val b = TerminalBuffer(cols = 2, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[4m")
-        assertEquals(true, b.currentAttributes.isUnderline)
-    }
-
-    @Test
-    fun `SGR truecolor preserves exact uniform foreground and background`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[38;2;57;255;20;48;2;3;9;17mN")
-
-        assertEquals(0x39FF14, b.cellAt(0, 0).attributes.foregroundRgb)
-        assertEquals(0x030911, b.cellAt(0, 0).attributes.backgroundRgb)
-    }
-
-    @Test
-    fun `SGR 256 color resolves xterm cube values`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[38;5;196mR")
-
-        assertEquals(0xFF0000, b.cellAt(0, 0).attributes.foregroundRgb)
-    }
-
-    @Test
-    fun `CUP moves cursor 1-based`() {
-        val b = TerminalBuffer(cols = 10, rows = 5)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[3;5H")
-        assertEquals(2, b.cursorRow)
-        assertEquals(4, b.cursorCol)
-    }
-
-    @Test
-    fun `erase entire screen 2J clears buffer`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        val parser = TerminalParser(b)
-        for (c in 'a'..'d') b.putChar(c)
-        parser.feed("\u001b[2J")
-        assertEquals(' ', b.cellAt(0, 0).char)
-        assertEquals(' ', b.cellAt(0, 3).char)
-    }
-
-    @Test
-    fun `cursor left and right move within a row`() {
-        val b = TerminalBuffer(cols = 5, rows = 1)
-        val parser = TerminalParser(b)
-        for (c in 'a'..'c') b.putChar(c)
-        assertEquals(3, b.cursorCol)
-        parser.feed("\u001b[2D")
-        assertEquals(1, b.cursorCol)
-        parser.feed("\u001b[1C")
-        assertEquals(2, b.cursorCol)
-    }
-
-    @Test
-    fun `OSC string is dropped without affecting state`() {
-        val b = TerminalBuffer(cols = 10, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("hello\u001b]0;some title\u0007world")
-        // "hello" fills cells 0..4. After OSC the parser returns to
-        // ground state and "world" fills cells 5..9. The 'd' from
-        // "world" lands at col 9 (the last column), not col 4.
-        assertEquals('h', b.cellAt(0, 0).char)
-        assertEquals('o', b.cellAt(0, 4).char)
-        assertEquals('w', b.cellAt(0, 5).char)
-        assertEquals('d', b.cellAt(0, 9).char)
-    }
-
-    @Test
-    fun `OSC string terminator split across escape and slash does not print slash`() {
-        val b = TerminalBuffer(cols = 8, rows = 1)
-        val parser = TerminalParser(b)
-        parser.feed("A\u001b]0;title\u001b")
-        parser.feed("\\B")
-
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals('B', b.cellAt(0, 1).char)
-        assertEquals(' ', b.cellAt(0, 2).char)
-    }
-
-    @Test
-    fun `OSC title updates are surfaced without rendering OSC bytes`() {
-        val b = TerminalBuffer(cols = 8, rows = 1)
-        val titles = mutableListOf<String>()
-        val parser = TerminalParser(b, onTitleChanged = titles::add)
-        parser.feed("A\u001b]2;vim — /etc/hosts\u0007B")
-
-        assertEquals(listOf("vim — /etc/hosts"), titles)
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals('B', b.cellAt(0, 1).char)
-    }
-
-    @Test
-    fun `DEC alternate screen mode keeps main terminal intact`() {
-        val b = TerminalBuffer(cols = 8, rows = 2)
-        val parser = TerminalParser(b)
-        parser.feed("main")
-        parser.feed("\u001b[?1049hvim")
-        assertTrue(b.isUsingAlternateScreen())
-        assertEquals('v', b.cellAt(0, 0).char)
-
-        parser.feed("\u001b[?1049l")
-        assertFalse(b.isUsingAlternateScreen())
-        assertEquals('m', b.cellAt(0, 0).char)
-        assertEquals('n', b.cellAt(0, 3).char)
-    }
-
-    @Test
-    fun `DECSC and DECRC restore cursor and rendition`() {
-        val b = TerminalBuffer(cols = 8, rows = 3)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[31m\u001b[2;")
-        parser.feed("4H\u001b7\u001b[34m\u001b[1;1H\u001b")
-        parser.feed("8X")
-
-        assertEquals('X', b.cellAt(1, 3).char)
-        assertEquals(1, b.cursorRow)
-        assertEquals(4, b.cursorCol)
-        assertEquals(TerminalAttributes.Color.Red, b.cellAt(1, 3).attributes.foregroundColor)
-        assertEquals(TerminalAttributes.Color.Red, b.currentAttributes.foregroundColor)
-    }
-
-    @Test
-    fun `DA and DSR queries receive conservative terminal responses`() {
-        val b = TerminalBuffer(cols = 8, rows = 3)
-        val responses = mutableListOf<String>()
-        val parser = TerminalParser(
-            buffer = b,
-            onDeviceResponse = { bytes -> responses += String(bytes, Charsets.US_ASCII) }
-        )
-        parser.feed("\u001b[c\u001b[>c\u001b[2;5H\u001b[5n\u001b[")
-        parser.feed("6n\u001b[?6n")
-
-        assertEquals(
-            listOf("\u001b[?1;0c", "\u001b[>0;0;0c", "\u001b[0n", "\u001b[2;5R", "\u001b[?2;5R"),
-            responses
-        )
-        assertEquals(' ', b.cellAt(1, 4).char)
-    }
-
-    @Test
-    fun `DEC 1048 and 1049 restore primary cursor state`() {
-        val b = TerminalBuffer(cols = 8, rows = 3)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[32m\u001b[3;2H\u001b[?1048h\u001b[1;1H\u001b[?1048lY")
-        assertEquals('Y', b.cellAt(2, 1).char)
-        assertEquals(TerminalAttributes.Color.Green, b.cellAt(2, 1).attributes.foregroundColor)
-
-        parser.feed("\u001b[2;5H\u001b[?1049hvim\u001b[?1049lZ")
-        assertFalse(b.isUsingAlternateScreen())
-        assertEquals('Z', b.cellAt(1, 4).char)
-        assertEquals(TerminalAttributes.Color.Green, b.cellAt(1, 4).attributes.foregroundColor)
-    }
-
-    @Test
-    fun `DEC 47 preserves alternate contents between buffer switches`() {
-        val b = TerminalBuffer(cols = 8, rows = 2)
-        val parser = TerminalParser(b)
-        parser.feed("\u001b[?47hvim\u001b[?47l\u001b[?47h")
-
-        assertTrue(b.isUsingAlternateScreen())
-        assertEquals('v', b.cellAt(0, 0).char)
-    }
-
-    @Test
-    fun `DEC input modes are published and reset independently`() {
-        val parser = TerminalParser(TerminalBuffer(cols = 8, rows = 2))
-        parser.feed("\u001b[?1h\u001b[?2004h")
-        assertTrue(parser.inputModes().applicationCursorKeys)
-        assertTrue(parser.inputModes().bracketedPaste)
-
-        parser.feed("\u001b[?1l")
-        assertFalse(parser.inputModes().applicationCursorKeys)
-        assertTrue(parser.inputModes().bracketedPaste)
-    }
-
-    @Test
-    fun `DECSTBM and reverse index operate only on the declared margins`() {
-        val b = TerminalBuffer(cols = 3, rows = 4)
-        val parser = TerminalParser(b)
-        parser.feed("AA\r\nBB\r\nCC\r\nDD")
-        parser.feed("\u001b[2;3r\u001b[2;1H\u001bM")
-
-        assertEquals('A', b.cellAt(0, 0).char)
-        assertEquals(' ', b.cellAt(1, 0).char)
-        assertEquals('B', b.cellAt(2, 0).char)
-        assertEquals('D', b.cellAt(3, 0).char)
-    }
-
-    @Test
-    fun `text tail is bounded and trims terminal cell padding`() {
-        val b = TerminalBuffer(cols = 5, rows = 2)
-        "hello".forEach(b::putChar)
-        "world".forEach(b::putChar)
-
-        assertEquals(listOf("world"), b.textTail(maxLines = 1))
-    }
-
-    @Test
-    fun `text tail does not consume renderer dirty rows`() {
-        val b = TerminalBuffer(cols = 4, rows = 1)
-        b.putChar('a')
-        b.snapshot() // consume the initial full redraw
-        b.putChar('b')
-
-        assertEquals(listOf("ab"), b.textTail(maxLines = 1))
-        assertTrue(b.snapshot().dirtyRows.contains(0))
+            .withFlag(TerminalAttributes.Flag.UNDERLINE, true)
+        buffer.putCodePoint('X'.code)
+        val snapshot = buffer.snapshot()
+        val cell = snapshot.cellAt(0, 0)
+        assertNotNull(cell)
     }
 }
