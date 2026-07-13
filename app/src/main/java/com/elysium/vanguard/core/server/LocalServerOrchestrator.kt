@@ -243,7 +243,7 @@ class LocalServerOrchestrator(
                     "Content-Disposition" to "attachment; filename=\"${entry.name.replace('"', '_')}\""
                 ),
                 streamBody = { out ->
-                    kotlinx.coroutines.runBlocking { transferService.streamDownload(path, out) }
+                    transferService.streamDownload(path, out)
                 }
             )
         }

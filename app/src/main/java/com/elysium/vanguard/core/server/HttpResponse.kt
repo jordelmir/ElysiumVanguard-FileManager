@@ -25,7 +25,7 @@ sealed class HttpResponse {
     /** Streaming response (large file downloads). */
     class Stream(
         override val status: Int,
-        val streamBody: (java.io.OutputStream) -> Unit,
+        val streamBody: suspend (java.io.OutputStream) -> Unit,
         override val headers: Map<String, String> = emptyMap()
     ) : HttpResponse()
 
