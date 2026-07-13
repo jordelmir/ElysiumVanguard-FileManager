@@ -85,17 +85,25 @@ internal class TerminalRenderer(
         // invert by drawing a foreground-tinted rect and then re-drawing
         // the character under it in background color — visually correct
         // even with empty cells.
-        val cell = snapshot.cellAt(snapshot.cursorRow, snapshot.cursorCol)
+        var cursorCol = snapshot.cursorCol
+        var cell = snapshot.cellAt(snapshot.cursorRow, cursorCol)
+        if (cell.isContinuation && cursorCol > 0) {
+            cursorCol -= 1
+            cell = snapshot.cellAt(snapshot.cursorRow, cursorCol)
+        }
         val attributes = cell.attributes
         cursorPaint.color = resolveFgColor(attributes)
-        val cx = offsetX + snapshot.cursorCol * cellWidthPx
+        val cx = offsetX + cursorCol * cellWidthPx
         val cy = offsetY + snapshot.cursorRow * cellHeightPx
-        canvas.drawRect(cx, cy, cx + cellWidthPx, cy + cellHeightPx, cursorPaint)
+        val cursorWidth = if (cell.isWide) cellWidthPx * 2 else cellWidthPx
+        canvas.drawRect(cx, cy, cx + cursorWidth, cy + cellHeightPx, cursorPaint)
         // Re-paint the (sometimes hidden) glyph in background color so
         // it stays readable when sitting on a same-color cell.
-        glyphPaint.color = themeBackground
+        glyphPaint.color = resolveBgColor(attributes)
         val baseline = cy + cellHeightPx * 0.78f
-        canvas.drawText(cell.char.toString(), cx, baseline, glyphPaint)
+        if (!cell.isContinuation && !attributes.isHidden) {
+            canvas.drawText(cell.text, cx, baseline, glyphPaint)
+        }
     }
 
     private fun drawRow(
@@ -108,47 +116,82 @@ internal class TerminalRenderer(
         val cols = snapshot.cols
         bgPaint.color = themeBackground
         canvas.drawRect(offsetX, rowY, offsetX + cols * cellWidthPx, rowY + cellHeightPx, bgPaint)
-        var c = 0
-        while (c < cols) {
-            val cell = snapshot.cellAt(rowIndex, c)
+        var col = 0
+        while (col < cols) {
+            val cell = snapshot.cellAt(rowIndex, col)
+            if (cell.isContinuation) {
+                col += 1
+                continue
+            }
             val attributes = cell.attributes
-            val start = c
-            // Find the longest run of cells that shares the same
-            // attributes — we batch the drawText call across the run.
-            while (c < cols && sameAttributes(snapshot.cellAt(rowIndex, c), attributes)) {
-                c += 1
+            if (cell.isWide) {
+                drawGlyphCluster(canvas, cell, attributes, offsetX + col * cellWidthPx, rowY, cellWidthPx * 2)
+                col += 2
+                continue
             }
-            // Background of the whole run if it asks for a non-default bg.
-            if (attributes.backgroundColor != TerminalAttributes.Color.BackgroundDefault) {
-                bgPaint.color = resolveBgColor(attributes)
-                canvas.drawRect(
-                    offsetX + start * cellWidthPx,
-                    rowY,
-                    offsetX + c * cellWidthPx,
-                    rowY + cellHeightPx,
-                    bgPaint
-                )
+
+            val start = col
+            while (col < cols) {
+                val candidate = snapshot.cellAt(rowIndex, col)
+                if (candidate.isContinuation || candidate.isWide || !sameAttributes(candidate, attributes)) break
+                col += 1
             }
-            if (!attributes.isHidden) {
-                glyphPaint.color = resolveFgColor(attributes)
-                if (attributes.isBold) {
-                    glyphPaint.typeface = android.graphics.Typeface.create(
-                        android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD
-                    )
-                } else {
-                    glyphPaint.typeface = android.graphics.Typeface.create(
-                        android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.NORMAL
-                    )
-                }
-                val baseline = rowY + cellHeightPx * 0.78f
-                // Build the run string once per cell batch. For a 200-col
-                // grid this allocates <2 KB per repaint and is dominated
-                // by the actual drawText cost.
-                val sb = StringBuilder(c - start)
-                for (k in start until c) sb.append(snapshot.cellAt(rowIndex, k).char)
-                canvas.drawText(sb.toString(), offsetX + start * cellWidthPx, baseline, glyphPaint)
-            }
+            drawSingleWidthRun(canvas, snapshot, rowIndex, start, col, attributes, offsetX, rowY)
         }
+    }
+
+    private fun drawSingleWidthRun(
+        canvas: Canvas,
+        snapshot: TerminalSnapshot,
+        rowIndex: Int,
+        start: Int,
+        endExclusive: Int,
+        attributes: TerminalAttributes,
+        offsetX: Float,
+        rowY: Float
+    ) {
+        val x = offsetX + start * cellWidthPx
+        val width = (endExclusive - start) * cellWidthPx
+        drawBackground(canvas, attributes, x, rowY, width)
+        if (attributes.isHidden) return
+        configureGlyphPaint(attributes)
+        val glyphs = StringBuilder(endExclusive - start)
+        for (col in start until endExclusive) glyphs.append(snapshot.cellAt(rowIndex, col).text)
+        canvas.drawText(glyphs.toString(), x, rowY + cellHeightPx * 0.78f, glyphPaint)
+    }
+
+    private fun drawGlyphCluster(
+        canvas: Canvas,
+        cell: TerminalCell,
+        attributes: TerminalAttributes,
+        x: Float,
+        rowY: Float,
+        width: Float
+    ) {
+        drawBackground(canvas, attributes, x, rowY, width)
+        if (attributes.isHidden) return
+        configureGlyphPaint(attributes)
+        canvas.drawText(cell.text, x, rowY + cellHeightPx * 0.78f, glyphPaint)
+    }
+
+    private fun drawBackground(
+        canvas: Canvas,
+        attributes: TerminalAttributes,
+        x: Float,
+        rowY: Float,
+        width: Float
+    ) {
+        if (attributes.backgroundColor == TerminalAttributes.Color.BackgroundDefault && attributes.backgroundRgb == null) return
+        bgPaint.color = resolveBgColor(attributes)
+        canvas.drawRect(x, rowY, x + width, rowY + cellHeightPx, bgPaint)
+    }
+
+    private fun configureGlyphPaint(attributes: TerminalAttributes) {
+        glyphPaint.color = resolveFgColor(attributes)
+        glyphPaint.typeface = android.graphics.Typeface.create(
+            android.graphics.Typeface.MONOSPACE,
+            if (attributes.isBold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
+        )
     }
 
     /**

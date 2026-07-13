@@ -35,9 +35,26 @@ internal class TerminalBuffer(
     }
 
     @Synchronized
-    fun putChar(c: Char) {
-        setCellRaw(cursorRow, cursorCol, TerminalCell(c, currentAttributes))
-        advanceCursorAfterChar()
+    fun putChar(c: Char) = putCodePoint(c.code)
+
+    /**
+     * Writes one Unicode code point as a terminal cell cluster. Double-width
+     * glyphs reserve a continuation cell; combining marks and emoji joiners
+     * extend the previous cluster without advancing the cursor.
+     */
+    @Synchronized
+    fun putCodePoint(codePoint: Int) {
+        require(Character.isValidCodePoint(codePoint)) { "invalid Unicode code point" }
+        val glyph = String(Character.toChars(codePoint))
+        when (TerminalCharacterWidth.columns(codePoint)) {
+            TerminalCharacterWidth.ZERO -> {
+                if (!appendToPreviousCluster(glyph)) writeGlyph("\u25cc$glyph", TerminalCharacterWidth.SINGLE)
+            }
+            TerminalCharacterWidth.DOUBLE -> {
+                if (!appendToJoinerCluster(glyph)) writeGlyph(glyph, TerminalCharacterWidth.DOUBLE)
+            }
+            else -> writeGlyph(glyph, TerminalCharacterWidth.SINGLE)
+        }
     }
 
     @Synchronized fun lineFeed() = cursorDownOne()
@@ -123,6 +140,7 @@ internal class TerminalBuffer(
         }
         val blank = TerminalCell(' ', currentAttributes)
         for (column in cursorCol until cursorCol + actual) screen.cells[rowStart + column] = blank
+        normalizeRow(screen, cursorRow)
         dirtyRows[cursorRow] = true
     }
 
@@ -137,6 +155,7 @@ internal class TerminalBuffer(
         }
         val blank = TerminalCell(' ', currentAttributes)
         for (column in cols - actual until cols) screen.cells[rowStart + column] = blank
+        normalizeRow(screen, cursorRow)
         dirtyRows[cursorRow] = true
     }
 
@@ -146,7 +165,11 @@ internal class TerminalBuffer(
         val actual = count.coerceAtLeast(1).coerceAtMost(cols - cursorCol)
         val blank = TerminalCell(' ', currentAttributes)
         val rowStart = cursorRow * cols
-        for (column in cursorCol until cursorCol + actual) activeScreen.cells[rowStart + column] = blank
+        for (column in cursorCol until cursorCol + actual) {
+            clearWideGlyphAt(activeScreen, cursorRow, column)
+            activeScreen.cells[rowStart + column] = blank
+        }
+        normalizeRow(activeScreen, cursorRow)
         dirtyRows[cursorRow] = true
     }
 
@@ -256,8 +279,86 @@ internal class TerminalBuffer(
     @Synchronized fun requestFullRedraw() = markAllDirty()
     @Synchronized fun scrollbackSnapshot(): Array<TerminalCellArray> = scrollback.toTypedArray()
 
+    private fun writeGlyph(glyph: String, requestedWidth: Int) {
+        val width = if (requestedWidth == TerminalCharacterWidth.DOUBLE && cols > 1) {
+            TerminalCharacterWidth.DOUBLE
+        } else {
+            TerminalCharacterWidth.SINGLE
+        }
+        if (width == TerminalCharacterWidth.DOUBLE && cursorCol == cols - 1) {
+            setCursor(cursorRow, 0)
+            cursorDownOne()
+        }
+
+        val screen = activeScreen
+        clearWideGlyphAt(screen, cursorRow, cursorCol)
+        setCellRaw(cursorRow, cursorCol, TerminalCell(glyph, currentAttributes, width))
+        if (width == TerminalCharacterWidth.DOUBLE) {
+            setCellRaw(cursorRow, cursorCol + 1, TerminalCell.continuation(currentAttributes))
+            advanceCursorAfterWideGlyph()
+        } else {
+            advanceCursorAfterChar()
+        }
+    }
+
+    private fun appendToPreviousCluster(suffix: String): Boolean {
+        val (row, col) = previousClusterPosition() ?: return false
+        val screen = activeScreen
+        val index = row * cols + col
+        screen.cells[index] = screen.cells[index].copy(text = screen.cells[index].text + suffix)
+        dirtyRows[row] = true
+        return true
+    }
+
+    private fun appendToJoinerCluster(glyph: String): Boolean {
+        val (row, col) = previousClusterPosition() ?: return false
+        val screen = activeScreen
+        val index = row * cols + col
+        val previous = screen.cells[index]
+        if (!previous.text.endsWith('\u200d')) return false
+        screen.cells[index] = previous.copy(text = previous.text + glyph)
+        dirtyRows[row] = true
+        return true
+    }
+
+    private fun previousClusterPosition(): Pair<Int, Int>? {
+        var row = cursorRow
+        var col = cursorCol - 1
+        if (col < 0) {
+            if (row == 0) return null
+            row -= 1
+            col = cols - 1
+        }
+        val screen = activeScreen
+        if (screen.cells[row * cols + col].isContinuation) col -= 1
+        if (col < 0) return null
+        val cell = screen.cells[row * cols + col]
+        return if (cell.isContinuation) null else row to col
+    }
+
+    private fun clearWideGlyphAt(screen: ScreenState, row: Int, col: Int) {
+        val cell = screen.cells[row * cols + col]
+        val leadCol = when {
+            cell.isWide -> col
+            cell.isContinuation && col > 0 && screen.cells[row * cols + col - 1].isWide -> col - 1
+            else -> return
+        }
+        val blank = TerminalCell(' ', currentAttributes)
+        screen.cells[row * cols + leadCol] = blank
+        if (leadCol + 1 < cols) screen.cells[row * cols + leadCol + 1] = blank
+        dirtyRows[row] = true
+    }
+
     private fun advanceCursorAfterChar() {
         if (cursorCol + 1 < cols) setCursor(cursorRow, cursorCol + 1)
+        else {
+            setCursor(cursorRow, 0)
+            cursorDownOne()
+        }
+    }
+
+    private fun advanceCursorAfterWideGlyph() {
+        if (cursorCol + 2 < cols) setCursor(cursorRow, cursorCol + 2)
         else {
             setCursor(cursorRow, 0)
             cursorDownOne()
@@ -330,14 +431,18 @@ internal class TerminalBuffer(
     private fun clearRowFrom(row: Int, fromCol: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
+        clearWideGlyphAt(activeScreen, row, fromCol)
         for (column in fromCol until cols) activeScreen.cells[start + column] = blank
+        normalizeRow(activeScreen, row)
         dirtyRows[row] = true
     }
 
     private fun clearRowUpToInclusive(row: Int, column: Int) {
         val blank = TerminalCell(' ', currentAttributes)
         val start = row * cols
+        clearWideGlyphAt(activeScreen, row, column.coerceAtMost(cols - 1))
         for (col in 0..column.coerceAtMost(cols - 1)) activeScreen.cells[start + col] = blank
+        normalizeRow(activeScreen, row)
         dirtyRows[row] = true
     }
 
@@ -349,6 +454,33 @@ internal class TerminalBuffer(
         val start = row * cols
         val blank = TerminalCell(' ', screen.attributes)
         for (column in 0 until cols) screen.cells[start + column] = blank
+    }
+
+    /** Repairs only malformed halves created by editing inside a wide cell. */
+    private fun normalizeRow(screen: ScreenState, row: Int) {
+        var col = 0
+        while (col < cols) {
+            val index = row * cols + col
+            val cell = screen.cells[index]
+            when {
+                cell.isWide -> {
+                    if (col + 1 >= cols || !screen.cells[index + 1].isContinuation) {
+                        // Preserve the glyph instead of silently deleting it
+                        // after an ICH/DCH operation split the pair.
+                        screen.cells[index] = cell.copy(columnWidth = TerminalCharacterWidth.SINGLE)
+                        col += 1
+                    } else {
+                        col += TerminalCharacterWidth.DOUBLE
+                    }
+                }
+                cell.isContinuation -> {
+                    val hasLead = col > 0 && screen.cells[index - 1].isWide
+                    if (!hasLead) screen.cells[index] = TerminalCell(' ', cell.attributes)
+                    col += 1
+                }
+                else -> col += 1
+            }
+        }
     }
 
     private fun markDirtyRows(first: Int, last: Int) {
@@ -392,20 +524,43 @@ internal class TerminalBuffer(
         val result = ArrayList<TerminalCellArray>()
         source.forEach { row ->
             val lastMeaningful = row.cells.indexOfLast {
-                it.char != ' ' || it.attributes.backgroundColor != TerminalAttributes.Color.BackgroundDefault
+                !it.isContinuation && (it.text != " " ||
+                    it.attributes.backgroundColor != TerminalAttributes.Color.BackgroundDefault)
             }
             if (lastMeaningful < 0) {
                 result += TerminalCellArray(targetCols)
                 return@forEach
             }
-            var offset = 0
-            while (offset <= lastMeaningful) {
-                val cells = Array(targetCols) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
-                val count = minOf(targetCols, lastMeaningful - offset + 1)
-                for (index in 0 until count) cells[index] = row.cells[offset + index]
-                result += TerminalCellArray(cells)
-                offset += count
+
+            var target = Array(targetCols) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
+            var targetCol = 0
+            var emitted = false
+            fun emitTarget() {
+                result += TerminalCellArray(target)
+                target = Array(targetCols) { TerminalCell(' ', TerminalAttributes.DEFAULT) }
+                targetCol = 0
+                emitted = true
             }
+            fun append(cell: TerminalCell) {
+                val width = if (cell.isWide && targetCols > 1) {
+                    TerminalCharacterWidth.DOUBLE
+                } else {
+                    TerminalCharacterWidth.SINGLE
+                }
+                if (width == TerminalCharacterWidth.DOUBLE && targetCol == targetCols - 1) emitTarget()
+                target[targetCol] = cell.copy(columnWidth = width)
+                if (width == TerminalCharacterWidth.DOUBLE) {
+                    target[targetCol + 1] = TerminalCell.continuation(cell.attributes)
+                }
+                targetCol += width
+                if (targetCol == targetCols) emitTarget()
+            }
+
+            for (index in 0..lastMeaningful) {
+                val cell = row.cells[index]
+                if (!cell.isContinuation) append(cell)
+            }
+            if (targetCol > 0 || !emitted) result += TerminalCellArray(target)
         }
         return result
     }
@@ -454,4 +609,21 @@ internal class TerminalCellArray(val cells: Array<TerminalCell>) {
     val size: Int get() = cells.size
 }
 
-internal data class TerminalCell(val char: Char, val attributes: TerminalAttributes)
+/** A rendered terminal cluster. A wide lead owns the following continuation. */
+internal data class TerminalCell(
+    val text: String,
+    val attributes: TerminalAttributes,
+    val columnWidth: Int = TerminalCharacterWidth.SINGLE
+) {
+    constructor(char: Char, attributes: TerminalAttributes) : this(char.toString(), attributes)
+
+    /** Compatibility accessor for ASCII-oriented callers and tests. */
+    val char: Char get() = text.firstOrNull() ?: ' '
+    val isContinuation: Boolean get() = columnWidth == TerminalCharacterWidth.ZERO
+    val isWide: Boolean get() = columnWidth == TerminalCharacterWidth.DOUBLE
+
+    companion object {
+        fun continuation(attributes: TerminalAttributes): TerminalCell =
+            TerminalCell(text = "", attributes = attributes, columnWidth = TerminalCharacterWidth.ZERO)
+    }
+}

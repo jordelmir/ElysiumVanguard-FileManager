@@ -46,6 +46,7 @@ internal class TerminalParser(
     private var intermediate: Char = ' '
     private var privateMarker: Char? = null
     private var oscBuffer: StringBuilder = StringBuilder(64)
+    private var pendingHighSurrogate: Char? = null
     private val utf8Decoder = StandardCharsets.UTF_8.newDecoder()
         .onMalformedInput(CodingErrorAction.REPLACE)
         .onUnmappableCharacter(CodingErrorAction.REPLACE)
@@ -84,8 +85,36 @@ internal class TerminalParser(
      * thing for multi-byte scripts (CJK, emoji, RTL).
      */
     fun feed(text: CharSequence) {
-        for (i in 0 until text.length) {
+        var i = 0
+        pendingHighSurrogate?.let { high ->
+            if (state == State.GROUND && text.isNotEmpty() && Character.isLowSurrogate(text[0])) {
+                buffer.putCodePoint(Character.toCodePoint(high, text[0]))
+                i = 1
+            } else {
+                buffer.putCodePoint(REPLACEMENT_CODE_POINT)
+            }
+            pendingHighSurrogate = null
+        }
+        while (i < text.length) {
             val c = text[i]
+            if (state == State.GROUND && Character.isHighSurrogate(c)) {
+                if (i + 1 < text.length && Character.isLowSurrogate(text[i + 1])) {
+                    buffer.putCodePoint(Character.toCodePoint(c, text[i + 1]))
+                    i += 2
+                } else if (i + 1 == text.length) {
+                    pendingHighSurrogate = c
+                    i += 1
+                } else {
+                    buffer.putCodePoint(REPLACEMENT_CODE_POINT)
+                    i += 1
+                }
+                continue
+            }
+            if (state == State.GROUND && Character.isLowSurrogate(c)) {
+                buffer.putCodePoint(REPLACEMENT_CODE_POINT)
+                i += 1
+                continue
+            }
             // The state machine dispatch is hot (called once per byte
             // from a typical PTY), so we keep it as a tight `when`
             // rather than a hash-based strategy.
@@ -96,11 +125,14 @@ internal class TerminalParser(
                 State.OSC_STRING -> handleOscString(c)
                 State.OSC_ESCAPE -> handleOscEscape(c)
             }
+            i += 1
         }
     }
 
     /** Flushes a final incomplete UTF-8 sequence as replacement text. */
     fun finishInput() {
+        pendingHighSurrogate?.let { buffer.putCodePoint(REPLACEMENT_CODE_POINT) }
+        pendingHighSurrogate = null
         if (incompleteUtf8.isEmpty()) return
         val input = ByteBuffer.wrap(incompleteUtf8)
         val output = CharBuffer.allocate(incompleteUtf8.size)
@@ -120,7 +152,7 @@ internal class TerminalParser(
                 state = State.ESCAPE
                 resetParams()
             }
-            else -> buffer.putChar(c)
+            else -> buffer.putCodePoint(c.code)
         }
     }
 
@@ -477,6 +509,7 @@ internal class TerminalParser(
     companion object {
         private const val MAX_OSC_CHARS = 8 * 1024
         private const val MAX_TITLE_CHARS = 256
+        private const val REPLACEMENT_CODE_POINT = 0xFFFD
         // A deliberately conservative VT100 identity. The zero option field
         // avoids claiming optional hardware or graphics capabilities that the
         // terminal has not implemented.

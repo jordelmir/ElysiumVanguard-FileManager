@@ -277,6 +277,22 @@ class TerminalParserTest {
     }
 
     @Test
+    fun `fragmented emoji bytes preserve one double width cluster`() {
+        val payload = "🙂X".toByteArray(Charsets.UTF_8)
+        val expected = TerminalBuffer(cols = 6, rows = 1).also { TerminalParser(it).feed(payload) }.snapshot()
+
+        for (split in 0..payload.size) {
+            val buffer = TerminalBuffer(cols = 6, rows = 1)
+            val parser = TerminalParser(buffer)
+            parser.feed(payload, 0, split)
+            parser.feed(payload, split, payload.size - split)
+            val actual = buffer.snapshot()
+            assertEquals("split=$split", expected.cells.toList(), actual.cells.toList())
+            assertEquals("split=$split", expected.cursorCol, actual.cursorCol)
+        }
+    }
+
+    @Test
     fun `fragmented CSI bytes retain parser state`() {
         val b = TerminalBuffer(cols = 8, rows = 1)
         val parser = TerminalParser(b)
@@ -316,6 +332,101 @@ class TerminalParserTest {
         assertEquals('l', b.cellAt(0, 2).char)
         assertEquals('l', b.cellAt(0, 3).char)
         assertEquals('o', b.cellAt(0, 4).char)
+    }
+
+    @Test
+    fun `CJK and emoji occupy two columns without corrupting following text`() {
+        val b = TerminalBuffer(cols = 8, rows = 2)
+        val parser = TerminalParser(b)
+        parser.feed("A界B🙂C")
+
+        assertEquals('A', b.cellAt(0, 0).char)
+        assertEquals("界", b.cellAt(0, 1).text)
+        assertTrue(b.cellAt(0, 2).isContinuation)
+        assertEquals('B', b.cellAt(0, 3).char)
+        assertEquals("🙂", b.cellAt(0, 4).text)
+        assertTrue(b.cellAt(0, 5).isContinuation)
+        assertEquals('C', b.cellAt(0, 6).char)
+        assertEquals(7, b.cursorCol)
+    }
+
+    @Test
+    fun `combining marks attach to prior glyph and do not consume a cell`() {
+        val b = TerminalBuffer(cols = 6, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("e\u0301X")
+
+        assertEquals("e\u0301", b.cellAt(0, 0).text)
+        assertEquals('X', b.cellAt(0, 1).char)
+        assertEquals(2, b.cursorCol)
+    }
+
+    @Test
+    fun `ZWJ emoji sequence remains one double width cluster`() {
+        val b = TerminalBuffer(cols = 8, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("👩\u200d💻X")
+
+        assertEquals("👩\u200d💻", b.cellAt(0, 0).text)
+        assertTrue(b.cellAt(0, 1).isContinuation)
+        assertEquals('X', b.cellAt(0, 2).char)
+        assertEquals(3, b.cursorCol)
+    }
+
+    @Test
+    fun `writing on a wide continuation clears the old wide glyph`() {
+        val b = TerminalBuffer(cols = 4, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("界")
+        b.setCursorPosition(1, 2)
+        parser.feed("A")
+
+        assertEquals(' ', b.cellAt(0, 0).char)
+        assertEquals('A', b.cellAt(0, 1).char)
+        assertFalse(b.cellAt(0, 1).isContinuation)
+    }
+
+    @Test
+    fun `erasing a wide continuation clears the full glyph`() {
+        val b = TerminalBuffer(cols = 4, rows = 1)
+        val parser = TerminalParser(b)
+        parser.feed("界")
+        b.setCursorPosition(1, 2)
+        b.eraseChars(1)
+
+        assertEquals(' ', b.cellAt(0, 0).char)
+        assertEquals(' ', b.cellAt(0, 1).char)
+        assertFalse(b.cellAt(0, 1).isContinuation)
+    }
+
+    @Test
+    fun `wide glyph at the final column wraps before rendering`() {
+        val b = TerminalBuffer(cols = 4, rows = 2)
+        val parser = TerminalParser(b)
+        parser.feed("ABC界")
+
+        assertEquals('C', b.cellAt(0, 2).char)
+        assertEquals("界", b.cellAt(1, 0).text)
+        assertTrue(b.cellAt(1, 1).isContinuation)
+        assertEquals(1, b.cursorRow)
+        assertEquals(2, b.cursorCol)
+    }
+
+    @Test
+    fun `resize preserves wide cells and maps a full line to its next row`() {
+        val b = TerminalBuffer(cols = 4, rows = 2)
+        val parser = TerminalParser(b)
+        parser.feed("界A")
+        b.resize(newCols = 3, newRows = 2)
+
+        assertEquals("界", b.cellAt(0, 0).text)
+        assertTrue(b.cellAt(0, 1).isContinuation)
+        assertEquals('A', b.cellAt(0, 2).char)
+        assertEquals(1, b.cursorRow)
+        assertEquals(0, b.cursorCol)
+
+        parser.feed("B")
+        assertEquals('B', b.cellAt(1, 0).char)
     }
 
     @Test
