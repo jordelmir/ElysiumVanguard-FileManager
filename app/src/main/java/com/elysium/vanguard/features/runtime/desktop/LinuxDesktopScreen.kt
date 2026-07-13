@@ -63,13 +63,14 @@ fun LinuxDesktopScreen(
     val snapshot by viewModel.snapshot.collectAsState()
     val capability by viewModel.capability.collectAsState()
     val rfbSession by viewModel.rfbSession.collectAsState()
+    val desktopError by viewModel.desktopError.collectAsState()
     var rfbState by remember(rfbSession) { mutableStateOf(rfbSession?.state?.value ?: RfbSession.State.Stopped) }
     LaunchedEffect(rfbSession) {
         rfbSession?.state?.collect { rfbState = it }
     }
 
     Scaffold(
-        containerColor = Color(0xFF0B0D10),
+        containerColor = Color.Black,
         topBar = {
             TopAppBar(
                 title = {
@@ -98,54 +99,95 @@ fun LinuxDesktopScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0F1115)
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
             )
         }
     ) { padding: PaddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            WorkspaceCapabilityCard(
-                capability = capability,
-                rfbState = rfbState,
-                onOpenTerminal = { onOpenTerminal(null) },
-                onConnectLocalVnc = viewModel::connectLocalVnc,
-                onDisconnectLocalVnc = viewModel::disconnectLocalVnc
+        val liveState = rfbState as? RfbSession.State.Streaming
+        val session = rfbSession
+        if (liveState != null && session != null) {
+            LiveDesktopWorkspace(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                session = session,
+                state = liveState,
+                onDisconnect = viewModel::disconnectLocalVnc
             )
-            if (rfbState is RfbSession.State.Streaming) {
-                rfbSession?.let { session ->
-                    RfbHost(
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WorkspaceCapabilityCard(
+                    capability = capability,
+                    rfbState = rfbState,
+                    launchError = desktopError,
+                    onOpenTerminal = { onOpenTerminal(null) },
+                    onConnectLocalVnc = viewModel::connectLocalVnc,
+                    onDisconnectLocalVnc = viewModel::disconnectLocalVnc
+                )
+                if (apps.isEmpty()) {
+                    Text(
+                        text = "no desktop entries discovered in this rootfs",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = Color(0xFF8B949E)
+                    )
+                } else {
+                    LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        session = session
-                    )
-                }
-            }
-            if (apps.isEmpty()) {
-                Text(
-                    text = "no desktop entries discovered in this rootfs",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = Color(0xFF8B949E)
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(apps, key = { it.id }) { app ->
-                        AppRow(app = app, onOpenTerminal = { onOpenTerminal(app.exec) })
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(apps, key = { it.id }) { app ->
+                            AppRow(app = app, onOpenTerminal = { onOpenTerminal(app.exec) })
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** A real guest framebuffer owns the available workspace instead of a card slot. */
+@Composable
+private fun LiveDesktopWorkspace(
+    modifier: Modifier,
+    session: RfbSession,
+    state: RfbSession.State.Streaming,
+    onDisconnect: () -> Unit
+) {
+    Box(modifier = modifier.background(Color.Black)) {
+        RfbHost(modifier = Modifier.fillMaxSize(), session = session)
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .background(Color.Black.copy(alpha = 0.84f))
+                .padding(10.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "LIVE · ${state.server.width}×${state.server.height} · ${state.frameCount} frames",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.sp,
+                color = Color(0xFF39FF14)
+            )
+            Button(
+                onClick = onDisconnect,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF3D71),
+                    contentColor = Color.Black
+                )
+            ) {
+                Text("DISCONNECT", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -155,6 +197,7 @@ fun LinuxDesktopScreen(
 private fun WorkspaceCapabilityCard(
     capability: GraphicalDesktopCapability,
     rfbState: RfbSession.State,
+    launchError: String?,
     onOpenTerminal: () -> Unit,
     onConnectLocalVnc: () -> Unit,
     onDisconnectLocalVnc: () -> Unit
@@ -162,7 +205,7 @@ private fun WorkspaceCapabilityCard(
     val accent = when (capability.state) {
         GraphicalDesktopCapability.State.ROOTFS_UNAVAILABLE -> Color(0xFFFF3D71)
         GraphicalDesktopCapability.State.TERMINAL_READY -> Color(0xFF00E5FF)
-        GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE -> Color(0xFFFFE600)
+        GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE -> Color(0xFFFFE600)
     }
     Card(
         modifier = Modifier
@@ -207,6 +250,7 @@ private fun WorkspaceCapabilityCard(
                 LocalVncStatus(
                     capability = capability,
                     state = rfbState,
+                    launchError = launchError,
                     onConnect = onConnectLocalVnc,
                     onDisconnect = onDisconnectLocalVnc
                 )
@@ -234,20 +278,29 @@ private fun WorkspaceCapabilityCard(
 private fun LocalVncStatus(
     capability: GraphicalDesktopCapability,
     state: RfbSession.State,
+    launchError: String?,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit
 ) {
+    if (!launchError.isNullOrBlank()) {
+        Text(
+            text = "desktop unavailable: $launchError",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            color = Color(0xFFFF6E6E)
+        )
+    }
     when (state) {
-        RfbSession.State.Idle -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) {
+        RfbSession.State.Idle -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE) {
             Button(
                 onClick = onConnect,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFE600), contentColor = Color.Black)
             ) {
-                Text("CONNECT LOCAL VNC :5901", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                Text("START AUTHENTICATED DESKTOP", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             }
         }
         RfbSession.State.Connecting -> Text(
-            text = "connecting to 127.0.0.1:5901…",
+            text = "starting authenticated local workspace…",
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             color = Color(0xFFFFE600)
@@ -273,17 +326,17 @@ private fun LocalVncStatus(
             }
         }
         is RfbSession.State.Failed -> Text(
-            text = "local VNC unavailable: ${state.detail}",
+            text = "desktop connection unavailable: ${state.detail}",
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             color = Color(0xFFFF6E6E)
         )
-        RfbSession.State.Stopped -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) {
+        RfbSession.State.Stopped -> if (capability.state == GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE) {
             Button(
                 onClick = onConnect,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFE600), contentColor = Color.Black)
             ) {
-                Text("RECONNECT LOCAL VNC", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                Text("RESTART AUTHENTICATED DESKTOP", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             }
         }
     }

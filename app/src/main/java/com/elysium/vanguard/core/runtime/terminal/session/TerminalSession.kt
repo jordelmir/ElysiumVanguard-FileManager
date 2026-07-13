@@ -314,6 +314,35 @@ class TerminalSession(
                 )
             )
         }
+
+        /**
+         * Starts a bounded, non-interactive guest workload while retaining
+         * the same native PTY lifecycle used by the visible terminal. The
+         * caller supplies only a program-owned script; it is never composed
+         * from raw UI input.
+         */
+        fun forDistroScript(
+            rootfsDir: File,
+            pick: LauncherPick,
+            script: String,
+            cols: Int = 120,
+            rows: Int = 40,
+            termName: String = "xterm-256color"
+        ): TerminalSession {
+            require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
+            require(script.isNotBlank()) { "guest script must not be blank" }
+            val launcher = pick.launcher
+            return TerminalSession(
+                Config(
+                    command = launcher.buildShellCommand(rootfsDir, script),
+                    workingDirectory = rootfsDir,
+                    cols = cols.coerceIn(20, 512),
+                    rows = rows.coerceIn(10, 256),
+                    termName = termName,
+                    environmentVariables = launcher.environmentVariables(rootfsDir)
+                )
+            )
+        }
     }
 
     private fun resolvedEnvironment(): Map<String, String> {

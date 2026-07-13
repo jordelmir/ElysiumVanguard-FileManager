@@ -69,7 +69,7 @@ internal class NativePty private constructor(
     }
 
     private fun ensureOpen() {
-        check(!closed.get()) { "Native PTY is closed" }
+        if (closed.get()) throw IOException("Native PTY is closed")
     }
 
     companion object {

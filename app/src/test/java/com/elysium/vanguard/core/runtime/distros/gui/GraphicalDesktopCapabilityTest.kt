@@ -24,7 +24,7 @@ class GraphicalDesktopCapabilityTest {
     }
 
     @Test
-    fun `a detected server is not misrepresented as a rendered desktop`() {
+    fun `a detected server enables the real RFB renderer`() {
         val rootfs = kotlin.io.path.createTempDirectory("desktop-server").toFile()
         val server = File(rootfs, "usr/bin/Xvnc").apply {
             parentFile?.mkdirs()
@@ -33,8 +33,8 @@ class GraphicalDesktopCapabilityTest {
         }
         val capability = GraphicalDesktopCapabilityDetector.inspect(rootfs, LauncherKind.NATIVE_PROOT)
         assertTrue(server.canExecute())
-        assertEquals(GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE, capability.state)
+        assertEquals(GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE, capability.state)
         assertEquals("usr/bin/Xvnc", capability.detectedServer)
-        assertFalse(capability.canRenderDesktop)
+        assertTrue(capability.canRenderDesktop)
     }
 }

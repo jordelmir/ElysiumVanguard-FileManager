@@ -15,6 +15,23 @@ import java.util.concurrent.TimeUnit
 class RfbSessionTest {
 
     @Test
+    fun `session retries a local server while its desktop process starts`() = runBlocking {
+        val connection = FakeConnection()
+        var attempts = 0
+        val session = RfbSession(RfbSession.Config(connectTimeoutMs = 500)) {
+            attempts += 1
+            if (attempts == 1) throw IOException("connection refused while Xvnc starts")
+            connection
+        }
+
+        session.start()
+        withTimeout(1_000) { session.state.first { it is RfbSession.State.Connected } }
+
+        assertEquals(2, attempts)
+        session.stop()
+    }
+
+    @Test
     fun `session streams local frames forwards input and closes deterministically`() = runBlocking {
         val connection = FakeConnection()
         val session = RfbSession(RfbSession.Config(port = 5901)) { connection }

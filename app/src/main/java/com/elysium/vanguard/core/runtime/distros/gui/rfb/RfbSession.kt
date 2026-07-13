@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,7 +35,12 @@ internal interface RfbConnection : Closeable {
 internal class RfbSession(
     val config: Config = Config(),
     private val connector: (Config) -> RfbConnection = { spec ->
-        RfbClient.connect(host = spec.host, port = spec.port, timeoutMs = spec.connectTimeoutMs)
+        RfbClient.connect(
+            host = spec.host,
+            port = spec.port,
+            timeoutMs = spec.connectTimeoutMs,
+            passwordProvider = spec.passwordProvider
+        )
     }
 ) : Closeable {
     private val lock = Any()
@@ -55,7 +61,7 @@ internal class RfbSession(
         _state.value = State.Connecting
         pump = scope.launch {
             try {
-                val active = connector(config)
+                val active = connectWhileServerStarts()
                 val accepted = synchronized(lock) {
                     if (_state.value is State.Stopped) false else {
                         connection = active
@@ -123,6 +129,23 @@ internal class RfbSession(
         }
     }
 
+    private suspend fun connectWhileServerStarts(): RfbConnection {
+        val deadline = System.currentTimeMillis() + config.connectTimeoutMs
+        var lastFailure: IOException? = null
+        while (scope.isActive) {
+            try {
+                return connector(config)
+            } catch (error: RfbAuthenticationException) {
+                throw error
+            } catch (error: IOException) {
+                lastFailure = error
+                if (System.currentTimeMillis() >= deadline) throw error
+                delay(CONNECT_RETRY_DELAY_MS)
+            }
+        }
+        throw lastFailure ?: IOException("RFB session stopped before connection")
+    }
+
     private fun sendInput(operation: (RfbConnection) -> Unit) {
         if (_state.value !is State.Connected && _state.value !is State.Streaming) return
         inputQueue.trySend(operation)
@@ -159,7 +182,8 @@ internal class RfbSession(
     data class Config(
         val host: String = "127.0.0.1",
         val port: Int = DEFAULT_PORT,
-        val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS
+        val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
+        val passwordProvider: RfbPasswordProvider? = null
     )
 
     sealed class State {
@@ -174,6 +198,7 @@ internal class RfbSession(
     private companion object {
         const val DEFAULT_PORT = 5901
         const val DEFAULT_CONNECT_TIMEOUT_MS = 5_000
+        const val CONNECT_RETRY_DELAY_MS = 100L
         const val MAX_ERROR_CHARS = 240
         const val INPUT_QUEUE_CAPACITY = 128
     }

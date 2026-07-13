@@ -8,11 +8,19 @@ import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.distros.RootfsIntrospectorSnapshot
 import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppCatalog
 import com.elysium.vanguard.core.runtime.distros.gui.LinuxAppEntry
+import com.elysium.vanguard.core.runtime.distros.gui.BoundedDiagnosticLog
 import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapability
 import com.elysium.vanguard.core.runtime.distros.gui.GraphicalDesktopCapabilityDetector
+import com.elysium.vanguard.core.runtime.distros.gui.LinuxDesktopGeometry
+import com.elysium.vanguard.core.runtime.distros.gui.LinuxDesktopLaunchPlan
+import com.elysium.vanguard.core.runtime.distros.gui.VncSessionMaterial
+import com.elysium.vanguard.core.runtime.distros.launcher.LauncherKind
 import com.elysium.vanguard.core.runtime.distros.gui.rfb.RfbSession
+import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,9 +31,9 @@ import javax.inject.Inject
 /**
  * PHASE 9.6.5 — Linux desktop view-model.
  *
- * Reads a distro's desktop entries and reports the real graphical capability
- * of that rootfs. It never manufactures a bitmap: until Elysium owns a real
- * X11/Wayland/VNC renderer, the workspace routes users to the PTY terminal.
+ * Reads a distro's desktop entries and runs a real local Xvnc framebuffer
+ * when the rootfs has the verified graphical runtime. It never manufactures
+ * a bitmap: the renderer only consumes the authenticated local RFB stream.
  */
 @HiltViewModel
 class LinuxDesktopViewModel @Inject constructor(
@@ -50,6 +58,13 @@ class LinuxDesktopViewModel @Inject constructor(
 
     private val _rfbSession = MutableStateFlow<RfbSession?>(null)
     internal val rfbSession: StateFlow<RfbSession?> = _rfbSession.asStateFlow()
+    private val _desktopError = MutableStateFlow<String?>(null)
+    val desktopError: StateFlow<String?> = _desktopError.asStateFlow()
+    private val desktopLock = Any()
+    private var desktopProcess: TerminalSession? = null
+    private var desktopMaterial: VncSessionMaterial? = null
+    private var desktopOutputCollector: Job? = null
+    private var desktopLog: BoundedDiagnosticLog? = null
 
     init {
         viewModelScope.launch {
@@ -76,28 +91,140 @@ class LinuxDesktopViewModel @Inject constructor(
         )
     }
 
-    /** Connect only to an already-running loopback VNC server inside this app sandbox. */
+    /** Starts a real, authenticated Xvnc/Openbox/xterm desktop inside PRoot. */
     fun connectLocalVnc() {
-        if (_capability.value.state != GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE) return
-        val existing = _rfbSession.value
-        if (existing != null && existing.state.value !is RfbSession.State.Failed &&
-            existing.state.value !is RfbSession.State.Stopped
-        ) return
-        existing?.stop()
-        _rfbSession.value = RfbSession().also(RfbSession::start)
+        if (_capability.value.state != GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE) return
+        if (_rfbSession.value != null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            startDesktop()
+        }
     }
 
-    fun disconnectLocalVnc() {
-        _rfbSession.value?.stop()
-        _rfbSession.value = null
-    }
+    fun disconnectLocalVnc() = releaseDesktop()
 
     override fun onCleared() {
         disconnectLocalVnc()
         super.onCleared()
     }
 
+    private fun startDesktop() {
+        var material: VncSessionMaterial? = null
+        var process: TerminalSession? = null
+        var outputCollector: Job? = null
+        var outputLog: BoundedDiagnosticLog? = null
+        try {
+            releaseDesktop()
+            val install = manager.findInstalled(distroId) ?: error("Linux rootfs is unavailable")
+            check(install.isHealthy) { "Linux rootfs is unhealthy" }
+            val pick = manager.launcherFor(distroId) ?: error("Linux launcher is unavailable")
+            check(pick.launcher.kind == LauncherKind.NATIVE_PROOT) { "A native PRoot runtime is required for the graphical workspace" }
+            requireDesktopBinaries(install.rootfsDir)
+
+            val metrics = getApplication<Application>().resources.displayMetrics
+            val plan = LinuxDesktopLaunchPlan(
+                guestPasswordPath = VncSessionMaterial.create(install.rootfsDir).let { created ->
+                    material = created
+                    created.guestPath
+                },
+                geometry = LinuxDesktopGeometry.fromDisplayPixels(metrics.widthPixels, metrics.heightPixels)
+            )
+            val launchedProcess = TerminalSession.forDistroScript(install.rootfsDir, pick, plan.script)
+            process = launchedProcess
+            val transcript = BoundedDiagnosticLog(MAX_SERVER_LOG_CHARS)
+            outputLog = transcript
+            outputCollector = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+                launchedProcess.output.collect(transcript::append)
+            }
+            launchedProcess.start()
+            val startError = launchedProcess.state.value as? TerminalSession.State.Error
+            check(startError == null) { startError?.message ?: "could not start the Linux desktop" }
+
+            val session = RfbSession(
+                config = RfbSession.Config(passwordProvider = material!!.passwordProvider)
+            )
+            synchronized(desktopLock) {
+                desktopProcess = process
+                desktopMaterial = material
+                desktopOutputCollector = outputCollector
+                desktopLog = outputLog
+                _rfbSession.value = session
+                _desktopError.value = null
+            }
+            process = null
+            material = null
+            outputCollector = null
+            outputLog = null
+            session.start()
+            viewModelScope.launch {
+                session.state.collect { state ->
+                    if (state is RfbSession.State.Failed) releaseDesktop(session, state.detail)
+                }
+            }
+        } catch (error: Exception) {
+            outputCollector?.cancel()
+            process?.stop()
+            material?.close()
+            _desktopError.value = desktopError(
+                error.message ?: "could not start the graphical workspace",
+                outputLog
+            )
+        }
+    }
+
+    private fun releaseDesktop(expectedSession: RfbSession? = null, error: String? = null) {
+        val resources = synchronized(desktopLock) {
+            val current = _rfbSession.value
+            if (expectedSession != null && current !== expectedSession) return
+            _rfbSession.value = null
+            val resources = DesktopResources(
+                session = current,
+                process = desktopProcess,
+                material = desktopMaterial,
+                outputCollector = desktopOutputCollector,
+                log = desktopLog
+            )
+            if (error != null) _desktopError.value = desktopError(error, resources.log)
+            resources.also {
+                desktopProcess = null
+                desktopMaterial = null
+                desktopOutputCollector = null
+                desktopLog = null
+            }
+        }
+        resources.session?.stop()
+        resources.outputCollector?.cancel()
+        resources.process?.stop()
+        resources.material?.close()
+    }
+
+    private fun requireDesktopBinaries(rootfsDir: java.io.File) {
+        val server = listOf("usr/bin/Xvnc", "usr/bin/Xtigervnc").any { java.io.File(rootfsDir, it).canExecute() }
+        check(server) { "TigerVNC is not installed in this rootfs" }
+        listOf("usr/bin/openbox", "usr/bin/xterm").firstOrNull { !java.io.File(rootfsDir, it).canExecute() }?.let {
+            error("required graphical program is missing: /$it")
+        }
+    }
+
+    private data class DesktopResources(
+        val session: RfbSession?,
+        val process: TerminalSession?,
+        val material: VncSessionMaterial?,
+        val outputCollector: Job?,
+        val log: BoundedDiagnosticLog?
+    )
+
+    private fun desktopError(error: String, log: BoundedDiagnosticLog?): String {
+        val serverOutput = log?.snapshot().orEmpty()
+        return if (serverOutput.isBlank()) {
+            error.take(MAX_ERROR_CHARS)
+        } else {
+            "$error · server: $serverOutput".take(MAX_ERROR_CHARS)
+        }
+    }
+
     companion object {
         const val DISTRO_ID_ARG = "distroId"
+        const val MAX_ERROR_CHARS = 240
+        private const val MAX_SERVER_LOG_CHARS = 160
     }
 }

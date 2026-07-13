@@ -18,18 +18,19 @@ data class GraphicalDesktopCapability(
     enum class State {
         ROOTFS_UNAVAILABLE,
         TERMINAL_READY,
-        SERVER_DETECTED_RENDERER_UNAVAILABLE
+        SERVER_DETECTED_RENDERER_AVAILABLE
     }
 
     val title: String
         get() = when (state) {
             State.ROOTFS_UNAVAILABLE -> "Runtime unavailable"
             State.TERMINAL_READY -> "Terminal workspace ready"
-            State.SERVER_DETECTED_RENDERER_UNAVAILABLE -> "Graphical server detected"
+            State.SERVER_DETECTED_RENDERER_AVAILABLE -> "Graphical workspace ready"
         }
 
-    /** Rendering must stay false until a real protocol client paints pixels. */
-    val canRenderDesktop: Boolean = false
+    /** True only when the rootfs has a local graphical server and Elysium has an RFB renderer. */
+    val canRenderDesktop: Boolean
+        get() = state == State.SERVER_DETECTED_RENDERER_AVAILABLE
 }
 
 /** Filesystem-only detector; safe to run before any Linux process is spawned. */
@@ -64,8 +65,8 @@ object GraphicalDesktopCapabilityDetector {
             )
         } else {
             GraphicalDesktopCapability(
-                state = GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_UNAVAILABLE,
-                detail = "Found $server. Elysium will not display a simulated desktop until a real framebuffer renderer is connected.",
+                state = GraphicalDesktopCapability.State.SERVER_DETECTED_RENDERER_AVAILABLE,
+                detail = "Found $server. Start an authenticated local workspace to render its real framebuffer.",
                 detectedServer = server
             )
         }

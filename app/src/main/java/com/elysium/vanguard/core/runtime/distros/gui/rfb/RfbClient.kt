@@ -13,11 +13,11 @@ import java.net.Socket
 /**
  * Small, real RFB 3.3/3.7/3.8 client for a localhost Linux VNC server.
  *
- * It deliberately accepts only the RFB "None" security type and requests
- * RAW true-colour rectangles. That keeps the first graphical transport
- * auditable: no fake desktop pixels, no remote exposure, no password
- * persistence, and no opaque native decoder. A caller must run this on an
- * I/O dispatcher, then render [RfbFrame] on Android's graphics surface.
+ * It accepts only VNC challenge-response authentication and requests RAW
+ * true-colour rectangles. That keeps the graphical transport auditable:
+ * no fake desktop pixels, no remote exposure, no unauthenticated server, no
+ * password persistence, and no opaque native decoder. A caller must run this
+ * on an I/O dispatcher, then render [RfbFrame] on Android's graphics surface.
  */
 internal class RfbClient private constructor(
     private val socket: Socket,
@@ -152,7 +152,12 @@ internal class RfbClient private constructor(
     }
 
     companion object {
-        fun connect(host: String = LOOPBACK_HOST, port: Int, timeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS): RfbClient {
+        fun connect(
+            host: String = LOOPBACK_HOST,
+            port: Int,
+            timeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
+            passwordProvider: RfbPasswordProvider? = null
+        ): RfbClient {
             require(host == LOOPBACK_HOST || host == LOOPBACK_IPV6) { "RFB is restricted to loopback" }
             require(port in 1..65535) { "invalid RFB port" }
             require(timeoutMs in 1..MAX_CONNECT_TIMEOUT_MS) { "invalid RFB timeout" }
@@ -162,7 +167,7 @@ internal class RfbClient private constructor(
                 socket.tcpNoDelay = true
                 val input = DataInputStream(BufferedInputStream(socket.getInputStream()))
                 val output = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
-                val server = negotiate(input, output)
+                val server = negotiate(input, output, passwordProvider)
                 return RfbClient(socket, input, output, server)
             } catch (error: Exception) {
                 try {
@@ -174,7 +179,11 @@ internal class RfbClient private constructor(
             }
         }
 
-        private fun negotiate(input: DataInputStream, output: DataOutputStream): RfbServerInfo {
+        private fun negotiate(
+            input: DataInputStream,
+            output: DataOutputStream,
+            passwordProvider: RfbPasswordProvider?
+        ): RfbServerInfo {
             val bannerBytes = ByteArray(PROTOCOL_BANNER_BYTES)
             input.readFully(bannerBytes)
             val banner = bannerBytes.toString(Charsets.US_ASCII)
@@ -190,22 +199,26 @@ internal class RfbClient private constructor(
             output.flush()
 
             if (selectedMinor == 3) {
-                if (input.readInt() != SECURITY_NONE) throw IOException("RFB server requires unsupported security")
+                when (val securityType = input.readInt()) {
+                    SECURITY_VNC_AUTH -> {
+                        authenticateWithVnc(input, output, passwordProvider)
+                        requireSecuritySuccess(input, selectedMinor)
+                    }
+                    0 -> throw RfbAuthenticationException("RFB server rejected connection: ${readFailureReason(input)}")
+                    else -> throw RfbAuthenticationException("RFB server requires VNC authentication, got security type $securityType")
+                }
             } else {
                 val count = input.readUnsignedByte()
                 if (count == 0) throw IOException("RFB server rejected connection: ${readFailureReason(input)}")
                 val types = ByteArray(count)
                 input.readFully(types)
-                if (types.none { it.toInt() and 0xFF == SECURITY_NONE }) {
-                    throw IOException("RFB server requires authentication")
+                if (types.none { it.toInt() and 0xFF == SECURITY_VNC_AUTH }) {
+                    throw RfbAuthenticationException("RFB server does not offer required VNC authentication")
                 }
-                output.writeByte(SECURITY_NONE)
+                output.writeByte(SECURITY_VNC_AUTH)
                 output.flush()
-                val securityResult = input.readInt()
-                if (securityResult != 0) {
-                    val reason = if (selectedMinor >= 8) readFailureReason(input) else "server rejected connection"
-                    throw IOException("RFB security negotiation failed: $reason")
-                }
+                authenticateWithVnc(input, output, passwordProvider)
+                requireSecuritySuccess(input, selectedMinor)
             }
             output.writeByte(1) // shared desktop
             output.flush()
@@ -223,6 +236,45 @@ internal class RfbClient private constructor(
             setTrueColorPixelFormat(output)
             setEncodings(output)
             return RfbServerInfo(width, height, nameBytes.toString(Charsets.UTF_8), selectedMinor)
+        }
+
+        private fun authenticateWithVnc(
+            input: DataInputStream,
+            output: DataOutputStream,
+            passwordProvider: RfbPasswordProvider?
+        ) {
+            val password = passwordProvider?.acquirePassword()
+            if (password == null || password.isEmpty()) {
+                password?.fill('\u0000')
+                throw RfbAuthenticationException("RFB requires an ephemeral VNC credential")
+            }
+            val challenge = ByteArray(VNC_CHALLENGE_BYTES)
+            val response: ByteArray
+            try {
+                input.readFully(challenge)
+                response = RfbVncAuth.response(challenge, password)
+            } catch (error: IllegalArgumentException) {
+                throw RfbAuthenticationException("invalid VNC credential", error)
+            } catch (error: IllegalStateException) {
+                throw RfbAuthenticationException("VNC authentication is unavailable on this device", error)
+            } finally {
+                password.fill('\u0000')
+                challenge.fill(0)
+            }
+            try {
+                output.write(response)
+                output.flush()
+            } finally {
+                response.fill(0)
+            }
+        }
+
+        private fun requireSecuritySuccess(input: DataInputStream, protocolMinor: Int) {
+            val securityResult = input.readInt()
+            if (securityResult != 0) {
+                val reason = if (protocolMinor >= 8) readFailureReason(input) else "server rejected connection"
+                throw RfbAuthenticationException("RFB security negotiation failed: $reason")
+            }
         }
 
         private fun setTrueColorPixelFormat(output: DataOutputStream) {
@@ -265,7 +317,8 @@ internal class RfbClient private constructor(
         private const val MAX_CONNECT_TIMEOUT_MS = 30_000
         private const val PROTOCOL_BANNER_BYTES = 12
         private val PROTOCOL_BANNER = Regex("RFB 003\\.[0-9]{3}\\n")
-        private const val SECURITY_NONE = 1
+        private const val SECURITY_VNC_AUTH = 2
+        private const val VNC_CHALLENGE_BYTES = 16
         private const val PIXEL_FORMAT_BYTES = 16
         private const val CLIENT_SET_PIXEL_FORMAT = 0
         private const val CLIENT_SET_ENCODINGS = 2
@@ -298,3 +351,6 @@ internal data class RfbFrame(
     val height: Int,
     val argb: IntArray
 )
+
+/** Authentication failures are terminal; connection-refused startup races are not. */
+internal class RfbAuthenticationException(message: String, cause: Throwable? = null) : IOException(message, cause)

@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 class RfbClientTest {
 
     @Test
-    fun `negotiates localhost RFB raw framebuffer and sends input`() {
+    fun `refuses VNC authentication when no ephemeral credential is supplied`() {
         ServerSocket(0).use { serverSocket ->
             val executor = Executors.newSingleThreadExecutor()
             try {
@@ -27,9 +27,51 @@ class RfbClientTest {
                         output.flush()
                         assertArrayEquals("RFB 003.008\n".toByteArray(Charsets.US_ASCII), ByteArray(12).also(input::readFully))
                         output.writeByte(1)
-                        output.writeByte(1)
+                        output.writeByte(2)
                         output.flush()
-                        assertEquals(1, input.readUnsignedByte())
+                        assertEquals(2, input.readUnsignedByte())
+                    }
+                }
+
+                val failure = try {
+                    RfbClient.connect(port = serverSocket.localPort)
+                    null
+                } catch (error: java.io.IOException) {
+                    error
+                }
+                assertEquals("RFB requires an ephemeral VNC credential", failure?.message)
+                server.get(5, TimeUnit.SECONDS)
+            } finally {
+                executor.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `negotiates authenticated localhost RFB raw framebuffer and sends input`() {
+        ServerSocket(0).use { serverSocket ->
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                val server = executor.submit<Unit> {
+                    serverSocket.accept().use { socket ->
+                        val input = DataInputStream(BufferedInputStream(socket.getInputStream()))
+                        val output = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
+                        output.write("RFB 003.008\n".toByteArray(Charsets.US_ASCII))
+                        output.flush()
+                        assertArrayEquals("RFB 003.008\n".toByteArray(Charsets.US_ASCII), ByteArray(12).also(input::readFully))
+                        output.writeByte(1)
+                        output.writeByte(2)
+                        output.flush()
+                        assertEquals(2, input.readUnsignedByte())
+                        output.write(ByteArray(16) { it.toByte() })
+                        output.flush()
+                        assertArrayEquals(
+                            byteArrayOf(
+                                0xB8.toByte(), 0x66, 0x92.toByte(), 0x41, 0x25, 0xC8.toByte(), 0xEE.toByte(), 0xBB.toByte(),
+                                0x9D.toByte(), 0xEB.toByte(), 0xC1.toByte(), 0xDB.toByte(), 0x61, 0xC5.toByte(), 0x38, 0xE2.toByte()
+                            ),
+                            ByteArray(16).also(input::readFully)
+                        )
                         output.writeInt(0)
                         output.flush()
                         assertEquals(1, input.readUnsignedByte()) // ClientInit / shared desktop
@@ -69,7 +111,11 @@ class RfbClientTest {
 
                 var clientFailure: Throwable? = null
                 try {
-                    RfbClient.connect(port = serverSocket.localPort).use { client ->
+                    val ephemeralPassword = "password".toCharArray()
+                    RfbClient.connect(
+                        port = serverSocket.localPort,
+                        passwordProvider = RfbPasswordProvider { ephemeralPassword }
+                    ).use { client ->
                         assertEquals("Elysium test desktop", client.server.desktopName)
                         client.requestFramebufferUpdate(incremental = false)
                         val frame = client.readFrame() ?: error("expected framebuffer update")
@@ -79,6 +125,7 @@ class RfbClientTest {
                         client.sendPointer(x = -4, y = 99, buttonMask = 1)
                         client.sendKey(keysym = 0xFF0D, down = true)
                     }
+                    assertArrayEquals(CharArray(ephemeralPassword.size), ephemeralPassword)
                 } catch (failure: Throwable) {
                     clientFailure = failure
                 }

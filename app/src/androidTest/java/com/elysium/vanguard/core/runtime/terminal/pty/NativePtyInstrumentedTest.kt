@@ -3,12 +3,33 @@ package com.elysium.vanguard.core.runtime.terminal.pty
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class NativePtyInstrumentedTest {
+    @Test fun read_after_close_is_an_io_condition_not_a_process_crash() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val pty = NativePty.spawn(
+            command = listOf("/system/bin/sh", "-c", "sleep 5"),
+            environment = mapOf("TERM" to "xterm-256color", "PATH" to System.getenv("PATH").orEmpty()),
+            workingDirectory = context.cacheDir,
+            columns = 80,
+            rows = 24
+        )
+        pty.close()
+
+        try {
+            pty.read(ByteArray(64), timeoutMs = 1)
+            fail("read after close must throw IOException")
+        } catch (_: IOException) {
+            // Expected: callers can handle teardown on their normal I/O path.
+        }
+    }
+
     @Test fun shell_receives_a_real_controlling_terminal_and_window_size() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val pty = NativePty.spawn(

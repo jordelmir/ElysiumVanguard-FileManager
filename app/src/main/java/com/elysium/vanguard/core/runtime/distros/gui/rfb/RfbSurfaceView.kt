@@ -153,18 +153,33 @@ internal class RfbSurfaceView @JvmOverloads constructor(
         }
     }
 
-    private class RfbInputConnection(private val view: RfbSurfaceView) : BaseInputConnection(view, false) {
+    private class RfbInputConnection(private val view: RfbSurfaceView) : BaseInputConnection(view, true) {
+        private val composer = RfbImeComposer(
+            sendText = view::sendText,
+            sendBackspace = {
+                view.session?.sendKey(XK_BACKSPACE, down = true)
+                view.session?.sendKey(XK_BACKSPACE, down = false)
+            }
+        )
+
+        override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+            composer.setComposingText(text)
+            return true
+        }
+
+        override fun finishComposingText(): Boolean {
+            composer.finishComposingText()
+            return true
+        }
+
         override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
             if (text.isNullOrEmpty()) return false
-            view.sendText(text)
+            composer.commitText(text)
             return true
         }
 
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-            repeat(beforeLength.coerceAtLeast(0)) {
-                view.session?.sendKey(XK_BACKSPACE, down = true)
-                view.session?.sendKey(XK_BACKSPACE, down = false)
-            }
+            composer.deleteBefore(beforeLength)
             return true
         }
     }
