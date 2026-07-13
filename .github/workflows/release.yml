@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.0)'
+        required: true
+        type: string
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.parallel=true
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Lint
+        run: ./gradlew lintDebug --no-daemon
+      - name: Tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+      - name: Build
+        run: ./gradlew assembleDebug --no-daemon
+
+  sign-and-release:
+    runs-on: ubuntu-22.04
+    needs: [validate]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > release.jks
+      - name: Build signed release
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=release.jks \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
+            --no-daemon
+      - name: Verify APK
+        run: |
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          unzip -l "$apk" | grep META-INF/ | head -5
+      - name: Generate checksums
+        run: |
+          for apk in app/build/outputs/apk/release/*.apk; do
+            sha256sum "$apk" > "$apk.sha256"
+          done
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Elysium Vanguard ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.apk.sha256
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-rc') }}
+      - name: Upload mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-mapping
+          path: app/build/outputs/mapping/release/
+
+  version-bump:
+    runs-on: ubuntu-22.04
+    needs: [sign-and-release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+      - name: Bump version
+        run: |
+          echo "Version bump needed for develop branch"
