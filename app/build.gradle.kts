@@ -263,6 +263,11 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    // Coroutines test utilities (runTest, UnconfinedTestDispatcher,
+    // advanceUntilIdle). Version pinned to the same 1.7.3 that the
+    // rest of the module resolves to, so the BOM-aligned artifacts
+    // stay consistent.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
