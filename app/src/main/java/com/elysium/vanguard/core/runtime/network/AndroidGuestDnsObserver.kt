@@ -9,7 +9,6 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 
 /**
@@ -78,7 +77,7 @@ class AndroidGuestDnsObserver(context: Context) : GuestDnsObserver {
     @Volatile
     private var lastPublished: GuestDnsConfig = snapshot()
 
-    override fun current(): GuestDnsConfig = lastPublished
+    override fun current(): GuestDnsConfig = snapshot()
 
     override fun observe(): Flow<GuestDnsConfig> = flow {
         // Emit whatever we have on subscribe, then merge in subsequent
@@ -110,16 +109,11 @@ class AndroidGuestDnsObserver(context: Context) : GuestDnsObserver {
     private fun snapshot(): GuestDnsConfig {
         val network = connectivityManager.activeNetwork ?: return GuestDnsConfig.EMPTY
         val properties = connectivityManager.getLinkProperties(network) ?: return GuestDnsConfig.EMPTY
-        val nameservers = properties.dnsServers
-            .mapNotNull { server -> server.hostAddress?.substringBefore('%') }
-            .filter { it.isNotBlank() }
-            .distinct()
-        val domains = properties.domains ?: ""
-        val searchDomains = domains
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-            .distinct()
-        return GuestDnsConfig(nameservers = nameservers, searchDomains = searchDomains)
+        val rawAddresses = properties.dnsServers.mapNotNull { it.hostAddress }
+        return buildGuestDnsConfig(
+            rawHostAddresses = rawAddresses,
+            domains = properties.domains
+        )
     }
 
     /**
