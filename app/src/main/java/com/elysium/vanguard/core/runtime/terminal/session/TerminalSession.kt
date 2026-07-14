@@ -231,6 +231,14 @@ class TerminalSession(
     data class Config(
         val command: List<String> = listOf("/system/bin/sh"),
         val workingDirectory: File? = null,
+        /**
+         * Phase 11.4 — the guest rootfs the session is bound to, if any.
+         * When non-null, the session lifecycle (start / stop) registers
+         * the rootfs with the DNS refresh pipeline; when null, the
+         * session is host-only (e.g. `/system/bin/sh`) and has no
+         * resolv.conf to refresh.
+         */
+        val rootfsDir: File? = null,
         val cols: Int = 80,
         val rows: Int = 24,
         val termName: String = "xterm-256color",
@@ -310,6 +318,7 @@ class TerminalSession(
                 Config(
                     command = baseCommand,
                     workingDirectory = rootfsDir,
+                    rootfsDir = rootfsDir,
                     cols = cols,
                     rows = rows,
                     termName = termName,
@@ -339,6 +348,7 @@ class TerminalSession(
                 Config(
                     command = launcher.buildShellCommand(rootfsDir, script),
                     workingDirectory = rootfsDir,
+                    rootfsDir = rootfsDir,
                     cols = cols.coerceIn(20, 512),
                     rows = rows.coerceIn(10, 256),
                     termName = termName,

@@ -34,13 +34,19 @@ class ActiveRootfsRegistry @Inject constructor() {
     private val refreshers = mutableMapOf<File, () -> Unit>()
 
     /**
-     * Bind a rootfs to its DNS refresh closure. Re-registering the same
-     * rootfs replaces the previous closure (idempotent for repeated
-     * start events on the same rootfs).
+     * Bind a rootfs to its DNS refresh closure. The [refresher] is
+     * invoked with [rootfs] itself, so the caller can write
+     * `register(rootfs, launcher::refreshDnsForRootfs)` without a
+     * manual `let` lambda. The closure is stored as `() -> Unit`
+     * internally so the existing tracker / test paths can keep
+     * using the parameterless shape.
+     *
+     * Re-registering the same rootfs replaces the previous closure
+     * (idempotent for repeated start events on the same rootfs).
      */
-    fun register(rootfs: File, refresher: () -> Unit) {
+    fun register(rootfs: File, refresher: (File) -> Unit) {
         require(rootfs.isDirectory) { "rootfs must be an existing directory: $rootfs" }
-        synchronized(lock) { refreshers[rootfs] = refresher }
+        synchronized(lock) { refreshers[rootfs] = { refresher(rootfs) } }
     }
 
     /**

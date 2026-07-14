@@ -82,6 +82,32 @@ object DistroModule {
         )
 
     /**
+     * PHASE 11.4 — Provide the [com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher]
+     * as a singleton, separate from the registry. The launcher owns
+     * the per-process DNS temp dir and the bind-mount writer; the
+     * DNS refresh pipeline needs the *same* instance the command
+     * builder uses, otherwise two writers race on the same file.
+     * Exposing the launcher via Hilt lets the `DistroSessionRegistry`
+     * register a closure against the same instance.
+     */
+    @Provides
+    @Singleton
+    fun provideNativeProotLauncher(
+        @ApplicationContext context: Context,
+        nativeLibrary: ProotNativeLibrary,
+        workspaceMounts: RuntimeWorkspaceMountRegistry,
+        guestDnsObserver: GuestDnsObserver
+    ): com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher {
+        return com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher(
+            bundledAbis = currentSupportedAbis(),
+            nativeLibrary = nativeLibrary,
+            runtimeTmpDir = java.io.File(context.cacheDir, "proot"),
+            additionalMountsProvider = workspaceMounts::mountsForRootfs,
+            guestDnsConfigProvider = guestDnsObserver
+        )
+    }
+
+    /**
      * The launcher registry used by the resolution path; exposed so
      * future launchers (Termux-style binary detection, etc.) can be
      * registered here at install time instead of touching the manager.
@@ -89,17 +115,14 @@ object DistroModule {
     @Provides
     @Singleton
     fun provideLauncherRegistry(
-        @ApplicationContext context: Context,
-        nativeLibrary: ProotNativeLibrary,
-        workspaceMounts: RuntimeWorkspaceMountRegistry,
-        guestDnsObserver: GuestDnsObserver
+        nativeProotLauncher: com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher
     ): DistroLauncherRegistry {
-        return DistroLauncherRegistry.production(
-            supportedAbis = currentSupportedAbis(),
-            nativeLibrary = nativeLibrary,
-            prootTmpDir = java.io.File(context.cacheDir, "proot"),
-            mountsProvider = workspaceMounts::mountsForRootfs,
-            guestDnsConfigProvider = guestDnsObserver
+        return DistroLauncherRegistry(
+            listOf(
+                nativeProotLauncher,
+                com.elysium.vanguard.core.runtime.distros.launcher.DirectExecDistroLauncher(),
+                com.elysium.vanguard.core.runtime.distros.launcher.JailedDistroLauncher()
+            )
         )
     }
 

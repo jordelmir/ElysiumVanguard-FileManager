@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.terminal.session
 
+import com.elysium.vanguard.core.runtime.network.DistroSessionRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,7 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,12 +26,21 @@ import javax.inject.Singleton
  * process death because an OS PTY cannot be serialized; callers therefore
  * attach by id when the process is still alive and create a fresh shell when
  * it is not.
+ *
+ * Phase 11.4 — the manager now also tracks per-rootfs session counts so the
+ * DNS refresh pipeline knows when a guest is alive. The first session on a
+ * rootfs registers the rootfs with [DistroSessionRegistry]; the last
+ * session on the same rootfs unregisters it. Two sessions on one rootfs
+ * keep the registration alive until both close.
  */
 @Singleton
-class TerminalSessionManager @Inject constructor() {
+class TerminalSessionManager @Inject constructor(
+    private val distroSessionRegistry: DistroSessionRegistry
+) {
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
     private val trackingJobs = ConcurrentHashMap<String, Job>()
+    private val activeRootfsCounts = ConcurrentHashMap<File, AtomicInteger>()
     private val _activeSessionIds = MutableStateFlow<Set<String>>(emptySet())
 
     /** IDs that still require foreground-process protection. */
@@ -70,19 +82,53 @@ class TerminalSessionManager @Inject constructor() {
 
     /** Stops a session and releases its process, buffer, and manager references. */
     fun close(id: String) {
+        val session = sessions.remove(id) ?: return
+        val rootfs = session.config.rootfsDir
+        if (rootfs != null) {
+            decrementRootfsCount(rootfs)
+        }
         trackingJobs.remove(id)?.cancel()
-        sessions.remove(id)?.stop()
+        session.stop()
         publishActiveSessions()
     }
 
     private fun register(session: TerminalSession): TerminalSession {
         check(sessions.putIfAbsent(session.id, session) == null) { "duplicate terminal session id" }
+        val rootfs = session.config.rootfsDir
+        if (rootfs != null) {
+            incrementRootfsCount(rootfs)
+        }
         trackingJobs[session.id] = managerScope.launch {
             session.state.collect { publishActiveSessions() }
         }
         session.start()
         publishActiveSessions()
         return session
+    }
+
+    /**
+     * Increment the per-rootfs live-session count. The first session on
+     * a rootfs fires [DistroSessionRegistry.onSessionStarted]; subsequent
+     * sessions are no-ops as far as the registry is concerned.
+     */
+    private fun incrementRootfsCount(rootfs: File) {
+        val count = activeRootfsCounts.computeIfAbsent(rootfs) { AtomicInteger(0) }
+        if (count.incrementAndGet() == 1) {
+            distroSessionRegistry.onSessionStarted(rootfs)
+        }
+    }
+
+    /**
+     * Decrement the per-rootfs live-session count. When the count
+     * reaches zero, fire [DistroSessionRegistry.onSessionStopped] and
+     * drop the entry from the map.
+     */
+    private fun decrementRootfsCount(rootfs: File) {
+        val count = activeRootfsCounts[rootfs] ?: return
+        if (count.decrementAndGet() <= 0) {
+            activeRootfsCounts.remove(rootfs, count)
+            distroSessionRegistry.onSessionStopped(rootfs)
+        }
     }
 
     private fun publishActiveSessions() {
