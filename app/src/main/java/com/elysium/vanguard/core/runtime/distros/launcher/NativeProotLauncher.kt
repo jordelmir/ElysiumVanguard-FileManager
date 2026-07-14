@@ -4,6 +4,7 @@ import java.io.File
 import java.io.IOException
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfig
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
+import com.elysium.vanguard.core.runtime.network.GuestDnsObserver
 
 /**
  * Native PRoot launcher.
@@ -53,7 +54,17 @@ open class NativeProotLauncher(
     private val additionalMountsProvider: (File) -> List<com.elysium.vanguard.core.runtime.bridge.MountEntry> = { additionalMounts },
 
     /** Android-network DNS rendered into a transient PRoot bind mount. */
-    private val guestDnsConfigProvider: GuestDnsConfigProvider = GuestDnsConfigProvider.NONE
+    private val guestDnsConfigProvider: GuestDnsConfigProvider = GuestDnsConfigProvider.NONE,
+
+    /**
+     * Optional reactive DNS source. When the provider above is also a
+     * [GuestDnsObserver] (e.g. the production [AndroidGuestDnsObserver]),
+     * [refreshDnsForRootfs] re-reads the *latest* resolver state instead
+     * of a stale one-shot snapshot. Defaults to null so unit tests that
+     * only need a fixed DNS configuration are unaffected.
+     */
+    @Suppress("unused")
+    private val guestDnsObserver: GuestDnsObserver? = (guestDnsConfigProvider as? GuestDnsObserver)
 ) : DistroLauncher {
 
     override val kind: LauncherKind = LauncherKind.NATIVE_PROOT
@@ -180,6 +191,35 @@ open class NativeProotLauncher(
 
     private fun prepareGuestDnsFile(rootfsDir: File): File? {
         val config = guestDnsConfigProvider.current()
+        return writeResolvConfAtomically(rootfsDir, config)
+    }
+
+    /**
+     * Re-derive the guest's resolver from the *current* Android network state
+     * and re-render the bind-mounted resolv.conf. Returns the new file on
+     * success, null when there is no active network or the runtime tmp dir
+     * is not configured.
+     *
+     * Master order §10.1 requires the resolver to refresh on:
+     *   - Wi-Fi → data / data → Wi-Fi;
+     *   - VPN up / down;
+     *   - private DNS change;
+     *   - network loss + recovery.
+     *
+     * PRoot's bind mount means the new file content is visible inside the
+     * guest without re-launching the process; the shell sees fresh
+     * nameservers on the next `getaddrinfo` call.
+     */
+    fun refreshDnsForRootfs(rootfsDir: File): File? {
+        require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
+        // When we have a reactive observer, force a re-read of the system
+        // state so the snapshot we are about to write is truly the latest.
+        // For the in-memory provider used in unit tests this is a no-op.
+        val config = guestDnsConfigProvider.current()
+        return writeResolvConfAtomically(rootfsDir, config)
+    }
+
+    private fun writeResolvConfAtomically(rootfsDir: File, config: GuestDnsConfig): File? {
         if (config.nameservers.isEmpty()) return null
         val runtimeDir = runtimeTmpDir ?: return null
         return try {

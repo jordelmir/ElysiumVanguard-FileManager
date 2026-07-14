@@ -9,6 +9,9 @@ import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolver
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolution
 import com.elysium.vanguard.core.runtime.distros.launcher.ProotNativeLibrary
 import com.elysium.vanguard.core.runtime.network.AndroidGuestDnsConfigProvider
+import com.elysium.vanguard.core.runtime.network.AndroidGuestDnsObserver
+import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
+import com.elysium.vanguard.core.runtime.network.GuestDnsObserver
 import com.elysium.vanguard.core.runtime.bridge.RuntimeWorkspaceMountRegistry
 import com.elysium.vanguard.core.runtime.distros.snapshot.RootfsSnapshot
 import dagger.Module
@@ -88,16 +91,38 @@ object DistroModule {
     fun provideLauncherRegistry(
         @ApplicationContext context: Context,
         nativeLibrary: ProotNativeLibrary,
-        workspaceMounts: RuntimeWorkspaceMountRegistry
+        workspaceMounts: RuntimeWorkspaceMountRegistry,
+        guestDnsObserver: GuestDnsObserver
     ): DistroLauncherRegistry {
         return DistroLauncherRegistry.production(
             supportedAbis = currentSupportedAbis(),
             nativeLibrary = nativeLibrary,
             prootTmpDir = java.io.File(context.cacheDir, "proot"),
             mountsProvider = workspaceMounts::mountsForRootfs,
-            guestDnsConfigProvider = AndroidGuestDnsConfigProvider(context)
+            guestDnsConfigProvider = guestDnsObserver
         )
     }
+
+    /**
+     * Reactive DNS source. Backed by the production [AndroidGuestDnsObserver]
+     * so the PRoot guest follows the device's active network. The class is
+     * process-wide; consumers that want to react to changes collect the
+     * [GuestDnsObserver.observe] flow.
+     */
+    @Provides
+    @Singleton
+    fun provideGuestDnsObserver(@ApplicationContext context: Context): GuestDnsObserver =
+        AndroidGuestDnsObserver(context)
+
+    /**
+     * Back-compat alias for callers that still depend on the one-shot
+     * [GuestDnsConfigProvider] interface (e.g. distros outside the
+     * [com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher]
+     * happy path). The reactive observer is also a provider.
+     */
+    @Provides
+    @Singleton
+    fun provideGuestDnsConfigProvider(observer: GuestDnsObserver): GuestDnsConfigProvider = observer
 
     /**
      * PHASE 9.6.3.2 — The custom rootfs installer. Uses the
