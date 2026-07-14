@@ -29,7 +29,15 @@ class DistroInstaller(
     /** Emits immutable phase snapshots for UI and diagnostic consumers. */
     private val onProgress: (DistroInstallProgress) -> Unit = {},
     private val maxDownloadAttempts: Int = DEFAULT_DOWNLOAD_ATTEMPTS,
-    private val retryDelayMillis: Long = DEFAULT_RETRY_DELAY_MS
+    private val retryDelayMillis: Long = DEFAULT_RETRY_DELAY_MS,
+    /**
+     * PHASE 12.1 — Elysium Vanguard Linux identity overlay, applied
+     * after extraction so every installed guest identifies itself as
+     * "Elysium Vanguard Linux" (see ADR-003). Null disables the
+     * overlay (used by the test fixtures that install raw upstream
+     * rootfses).
+     */
+    private val elysiumOverlay: ElysiumOsReleaseOverlay? = null
 ) {
     init {
         require(maxDownloadAttempts > 0) { "maxDownloadAttempts must be positive" }
@@ -104,6 +112,12 @@ class DistroInstaller(
                 val health = RootfsHealth.inspect(stagingDir, result.bytesWritten)
                 if (!health.isHealthy) {
                     throw IOException(health.reason ?: "rootfs validation failed")
+                }
+            }
+
+            elysiumOverlay?.let { overlay ->
+                runStage(DistroInstallStage.VALIDATING) {
+                    overlay.apply(stagingDir)
                 }
             }
 
