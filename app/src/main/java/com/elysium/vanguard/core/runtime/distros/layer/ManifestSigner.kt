@@ -4,6 +4,7 @@ import java.io.File
 import java.security.KeyFactory
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
@@ -119,5 +120,26 @@ object ManifestSigner {
     fun importPublic(x509: ByteArray): PublicKey {
         val keyFactory = KeyFactory.getInstance(ALGORITHM)
         return keyFactory.generatePublic(X509EncodedKeySpec(x509))
+    }
+
+    /**
+     * Compute the SHA-256 hex digest of [file]. Public so the
+     * provisioning pipeline and the [com.elysium.vanguard.core.runtime.distros.pipeline.DistroProvisioningPipeline]
+     * can hash a layer tarball before constructing a [SystemLayer].
+     * The result is a 64-character lowercase hex string, the
+     * same shape [SystemLayer.sha256] expects.
+     */
+    fun sha256Hex(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read == 0) continue
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

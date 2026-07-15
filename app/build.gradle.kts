@@ -263,6 +263,12 @@ dependencies {
     // build pulls it transitively but the JVM test runtime does not —
     // declare it explicitly so the unit tests don't NoClassDefFound.
     testImplementation("commons-codec:commons-codec:1.16.0")
+    // org.json is a stub on the Android classpath that returns
+    // default values (0, null, false) under isReturnDefaultValues.
+    // The runtime uses the real org.json via the Android API, but
+    // the JVM unit tests need the real implementation so JSON
+    // parse + read paths work end-to-end.
+    testImplementation("org.json:json:20231013")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
