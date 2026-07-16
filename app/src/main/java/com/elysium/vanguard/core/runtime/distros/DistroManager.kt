@@ -8,6 +8,8 @@ import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncher
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherPick
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolver
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolutionResolver
+import com.elysium.vanguard.core.runtime.distros.pipeline.DistroProvisioningPipeline
+import com.elysium.vanguard.core.runtime.distros.profile.ElysiumProfile
 import com.elysium.vanguard.core.runtime.distros.snapshot.DistroSnapshot
 import com.elysium.vanguard.core.runtime.distros.snapshot.RootfsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +55,32 @@ class DistroManager(
      */
     private val storageProvider: () -> DistroStorage = {
         DistroStorage(baseDir)
-    }
+    },
+    /**
+     * Resolver from distro id to [Distro]. Production uses
+     * [DistroCatalog.find] (the static catalog). Tests inject a
+     * custom resolver to register a synthetic distro for the
+     * integration test (the static catalog is immutable in
+     * production code paths and shouldn't be touched from
+     * tests).
+     */
+    private val distroResolver: (String) -> Distro? = { DistroCatalog.find(it) },
+    /**
+     * Phase 17 — the provisioning pipeline. When non-null, every
+     * successful [installBlocking] call hands the extracted rootfs
+     * to the pipeline, which writes the Elysium os-release
+     * overlay, plans the profile, and signs the manifest. When
+     * null (the legacy / minimal path), the manager constructs a
+     * default overlay and passes it to the installer directly.
+     */
+    private val provisioningPipeline: DistroProvisioningPipeline? = null,
+    /**
+     * Phase 17 — the overlay the installer applies when no
+     * pipeline owns it. The pipeline applies the overlay itself
+     * (so the manager passes null to the installer when
+     * [provisioningPipeline] is set, to avoid double-applying).
+     */
+    private val fallbackOverlay: ElysiumOsReleaseOverlay = defaultOverlay()
 ) {
     private val _installed = MutableStateFlow(loadInstalled())
     val installed: StateFlow<List<DistroInstallation>> = _installed.asStateFlow()
@@ -70,17 +97,44 @@ class DistroManager(
     /**
      * Synchronous install: blocks the calling thread until the download
      * finishes. Used from coroutines via `withContext(Dispatchers.IO)`.
+     *
+     * Phase 17 — when a [provisioningPipeline] is configured, the
+     * install hands the extracted rootfs off to the pipeline after
+     * the installer's extraction succeeds. The pipeline applies
+     * the Elysium os-release overlay, plans the profile, applies
+     * any layer tarball, and writes a signed manifest next to
+     * the rootfs. The installer is told NOT to apply the overlay
+     * (the pipeline owns that step) so we don't double-write.
      */
     @Throws(IOException::class)
-    fun installBlocking(id: String): Result<File> {
-        val distro = DistroCatalog.find(id)
+    fun installBlocking(
+        id: String,
+        profile: ElysiumProfile = ElysiumProfile.DEFAULT
+    ): Result<File> {
+        val distro = distroResolver(id)
             ?: return Result.failure(IOException("Unknown distro: $id"))
         if (!beginInstall(id)) {
             return Result.failure(IOException("Already installing $id"))
         }
-        val installer = DistroInstaller(downloader, onProgress = { updateProgress(id, it) })
+        val overlayForInstaller = if (provisioningPipeline != null) null else fallbackOverlay
+        val installer = DistroInstaller(
+            downloader,
+            elysiumOverlay = overlayForInstaller,
+            onProgress = { updateProgress(id, it) }
+        )
         return try {
             val rootfs = installer.install(distro, baseDir)
+            provisioningPipeline?.let { pipeline ->
+                val manifestDir = File(rootfs.parentFile, "manifest")
+                manifestDir.mkdirs()
+                pipeline.provision(
+                    rootfsDir = rootfs,
+                    profile = profile,
+                    family = distro.family,
+                    layerTarball = null,
+                    manifestDir = manifestDir
+                )
+            }
             finishInstall(id, error = null)
             refreshInstalled()
             Result.success(rootfs)
@@ -219,6 +273,21 @@ class DistroManager(
         _installing.value = _installing.value + id
         _progress.value = _progress.value + (id to DistroInstallProgress(DistroInstallStage.PREFLIGHT))
         true
+    }
+
+    private companion object {
+        /**
+         * Default overlay for the legacy install path (no
+         * pipeline). Production wires the version + channel
+         * from the build; the fallback here uses TITAN +
+         * stable. A future phase replaces this with a build
+         * config injection.
+         */
+        fun defaultOverlay(): ElysiumOsReleaseOverlay = ElysiumOsReleaseOverlay(
+            elysiumVersion = "1.0.0-TITAN",
+            baseDistro = "unknown",
+            channel = ElysiumOsReleaseOverlay.Channel.STABLE
+        )
     }
 
     private fun updateProgress(id: String, progress: DistroInstallProgress) = synchronized(installLock) {
