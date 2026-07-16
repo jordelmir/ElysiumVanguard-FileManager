@@ -1,0 +1,199 @@
+package com.elysium.vanguard.core.runtime.workspaces
+
+/**
+ * Phase 24 — the user-facing orchestrator for workspaces.
+ *
+ * The manager is the runtime's single public surface for
+ * the workspace path. It composes:
+ *
+ *   - a [WorkspaceStore] (the persistence seam),
+ *   - a per-process workspace index ([byId]) that
+ *     mirrors the store's view and survives across
+ *     calls.
+ *
+ * The manager's job is translation: the UI calls
+ * [createWorkspace] / [addSession] / [pauseWorkspace] /
+ * etc. The manager mutates the workspace's state, calls
+ * the store to persist, and returns the updated
+ * workspace.
+ *
+ * Cross-workspace isolation: the manager refuses to
+ * return a session that belongs to a different
+ * workspace. The typed error is [WorkspaceError].
+ */
+class WorkspaceManager(
+    private val store: WorkspaceStore
+) {
+    private val byId = java.util.concurrent.ConcurrentHashMap<String, Workspace>()
+    private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    private fun lockFor(workspaceId: String): Any =
+        locks.computeIfAbsent(workspaceId) { Any() }
+
+    init {
+        // Hydrate the in-memory index from the store.
+        // A freshly-installed runtime sees the user's
+        // existing workspaces on first launch.
+        for (ws in store.list()) byId[ws.id] = ws
+    }
+
+    /**
+     * Create a new workspace. The manager auto-generates
+     * a unique id (the id is `ws-<systemTimeMs>-<counter>`);
+     * callers do not need to provide one. The workspace
+     * starts in [WorkspaceState.Active].
+     */
+    fun createWorkspace(
+        name: String,
+        sessions: List<WorkspaceSession> = emptyList(),
+        nowMs: Long = System.currentTimeMillis()
+    ): Result<Workspace> {
+        if (name.isBlank()) {
+            return Result.failure(WorkspaceError.InvalidName(name))
+        }
+        val id = "ws-$nowMs-${nextCounter.incrementAndGet()}"
+        val workspace = Workspace(
+            id = id,
+            name = name,
+            createdAtMs = nowMs,
+            sessions = sessions
+        )
+        byId[workspace.id] = workspace
+        store.save(workspace)
+        return Result.success(workspace)
+    }
+
+    /** Look up a workspace by id. */
+    fun getWorkspace(id: String): Workspace? = byId[id]
+
+    /** List all workspaces, sorted by `createdAtMs`
+     *  ascending. */
+    fun listWorkspaces(): List<Workspace> = byId.values.sortedBy { it.createdAtMs }
+
+    /** Transition a workspace to [WorkspaceState.Paused]. */
+    fun pauseWorkspace(id: String): Result<Workspace> {
+        val workspace = byId[id] ?: return Result.failure(WorkspaceError.NotFound(id))
+        val paused = workspace.copy(state = WorkspaceState.Paused)
+        byId[id] = paused
+        store.save(paused)
+        return Result.success(paused)
+    }
+
+    /** Transition a workspace to [WorkspaceState.Active]
+     *  from any other state. */
+    fun activateWorkspace(id: String): Result<Workspace> {
+        val workspace = byId[id] ?: return Result.failure(WorkspaceError.NotFound(id))
+        val active = workspace.copy(state = WorkspaceState.Active)
+        byId[id] = active
+        store.save(active)
+        return Result.success(active)
+    }
+
+    /** Close a workspace. A closed workspace can be
+     *  re-opened via [activateWorkspace] (the runtime
+     *  preserves the sessions; closing is a logical
+     *  state, not a delete). */
+    fun closeWorkspace(id: String): Result<Workspace> {
+        val workspace = byId[id] ?: return Result.failure(WorkspaceError.NotFound(id))
+        if (workspace.sessions.isEmpty()) {
+            // A closed workspace must contain at least
+            // one session per the [Workspace] init.
+            return Result.failure(WorkspaceError.CannotCloseEmpty(id))
+        }
+        val closed = workspace.copy(state = WorkspaceState.Closed)
+        byId[id] = closed
+        store.save(closed)
+        return Result.success(closed)
+    }
+
+    /** Add a session to a workspace. Refuses to add a
+     *  session whose id already exists in the workspace
+     *  or whose id exists in a *different* workspace
+     *  (cross-workspace isolation).
+     *
+     * The check-then-act is atomic: a per-workspace lock
+     *  serialises concurrent `addSession` calls so two
+     *  threads adding different sessions see the
+     *  latest workspace state. Without the lock, a race
+     *  could cause a write to be lost. */
+    fun addSession(workspaceId: String, session: WorkspaceSession): Result<Workspace> {
+        synchronized(lockFor(workspaceId)) {
+            val workspace = byId[workspaceId] ?: return Result.failure(WorkspaceError.NotFound(workspaceId))
+            if (session.id in workspace.sessions.map { it.id }) {
+                return Result.failure(WorkspaceError.DuplicateSessionId(session.id, workspaceId))
+            }
+            // Cross-workspace isolation: a session id used
+            // by another workspace is a hard error.
+            val conflicting = byId.values.firstOrNull {
+                it.id != workspaceId && session.id in it.sessions.map { s -> s.id }
+            }
+            if (conflicting != null) {
+                return Result.failure(
+                    WorkspaceError.SessionIdUsedElsewhere(
+                        sessionId = session.id,
+                        workspaceId = workspaceId,
+                        otherWorkspaceId = conflicting.id
+                    )
+                )
+            }
+            val updated = workspace.copy(sessions = workspace.sessions + session)
+            byId[workspaceId] = updated
+            store.save(updated)
+            return Result.success(updated)
+        }
+    }
+
+    /** Remove a session from a workspace. The same
+     *  per-workspace lock as [addSession] serialises
+     *  the read-modify-write. */
+    fun removeSession(workspaceId: String, sessionId: String): Result<Workspace> {
+        synchronized(lockFor(workspaceId)) {
+            val workspace = byId[workspaceId] ?: return Result.failure(WorkspaceError.NotFound(workspaceId))
+            if (sessionId !in workspace.sessions.map { it.id }) {
+                return Result.failure(WorkspaceError.SessionNotFound(sessionId, workspaceId))
+            }
+            val updated = workspace.copy(sessions = workspace.sessions.filter { it.id != sessionId })
+            byId[workspaceId] = updated
+            store.save(updated)
+            return Result.success(updated)
+        }
+    }
+
+    /** Look up a session by its id. The lookup is
+     *  workspace-scoped: a session that exists in a
+     *  different workspace is not visible. */
+    fun findSession(workspaceId: String, sessionId: String): WorkspaceSession? {
+        val workspace = byId[workspaceId] ?: return null
+        return workspace.findSession(sessionId)
+    }
+
+    /** Persist every in-memory workspace to the store.
+     *  The manager auto-saves on every state change; this
+     *  is a belt-and-braces hook the runtime calls on
+     *  shutdown. */
+    fun flushAll() {
+        for (workspace in byId.values) store.save(workspace)
+    }
+
+    private companion object {
+        val nextCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    }
+}
+
+/** Typed errors the manager returns. The caller branches
+ *  on the kind rather than parsing free-form strings. */
+sealed class WorkspaceError(message: String) : RuntimeException(message) {
+    data class NotFound(val workspaceId: String) : WorkspaceError("Workspace not found: $workspaceId")
+    data class InvalidName(val name: String) : WorkspaceError("Invalid workspace name: '$name'")
+    data class DuplicateSessionId(val sessionId: String, val workspaceId: String) :
+        WorkspaceError("Session $sessionId already exists in workspace $workspaceId")
+    data class SessionIdUsedElsewhere(
+        val sessionId: String,
+        val workspaceId: String,
+        val otherWorkspaceId: String
+    ) : WorkspaceError("Session $sessionId is used by another workspace ($otherWorkspaceId); cannot add to $workspaceId")
+    data class SessionNotFound(val sessionId: String, val workspaceId: String) :
+        WorkspaceError("Session $sessionId not found in workspace $workspaceId")
+    data class CannotCloseEmpty(val workspaceId: String) :
+        WorkspaceError("Cannot close workspace $workspaceId: it has no sessions")
+}
