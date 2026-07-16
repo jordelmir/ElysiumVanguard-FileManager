@@ -1,125 +1,211 @@
-# ADR-002: Native PTY and terminal architecture
+# ADR-002 — PTY Terminal Renderer (Rust-Owned Native PTY)
 
-- Status: Accepted
-- Date: 2026-07-12
-- Owners: Elysium Vanguard terminal/runtime
-- Depends on: ADR-001
+Status: **Accepted** (originally Phase 9.6.x; documented
+in Phase 27, 2026-07-15)
+Owners: Runtime
+Supersedes: none
+Superseded by: none
 
 ## Context
 
-The current terminal connects `ProcessBuilder` pipes to a partial character
-parser. Pipes do not provide terminal line discipline, controlling-terminal
-behavior, process-group signals, window size or reliable full-screen TUI
-support. The screen dimensions are immutable and resize clears content. The
-renderer repaints the complete centered grid. This cannot correctly run `vim`,
-`htop`, `tmux`, `less` or interactive package managers.
+The runtime's Linux terminal needs a real PTY
+(pseudo-terminal), not a pipe. Many programs refuse
+to run on a pipe because they check `isatty(stdout)`:
+`vi` enters raw mode only when stdout is a TTY, `htop`
+refuses to draw its UI when stdout is a pipe, `less`
+paginates only when stdout is a TTY, `top` switches to
+an interactive mode only when stdout is a TTY, `vim`
+emits error messages when stdout is a pipe. A user
+running `apt-get install vim` in a pipe-only terminal
+would get a degraded experience.
+
+The PTY is also the OS-level mechanism that ties the
+runtime to the child process: the PTY's slave side is
+the child's stdin/stdout/stderr; the master side is the
+parent's read/write interface; closing the master
+signals `SIGHUP` to the child (the child can clean up
+gracefully). A pipe does not give the parent the
+`SIGHUP-on-close` semantics; a PTY does.
+
+The challenge: a PTY is OS-specific. Android's bionic
+libc has `posix_openpt(O_RDWR | O_NOCTTY)` but the
+runtime also needs `grantpt` + `unlockpt` + the
+`ioctl(TIOCSWINSZ)` for window size + the
+`ioctl(TIOCSCTTY)` for controlling terminal + a
+`waitpid(-1, ..., WUNTRACED)` for foreground process
+group signalling. Doing this in Kotlin via the
+Android NDK is the platform's native path; doing it
+in pure JVM requires reflection on private APIs
+(forbidden on modern Android).
 
 ## Decision
 
-Implement the first real terminal as this strict pipeline:
+The runtime uses **Elysium's own Rust PTY runtime**
+(loaded via JNI) as the production terminal backend.
+The Kotlin side owns an opaque handle (a `Long`); the
+Rust side owns the file descriptor, the child PID, the
+process group, and the wait/reap lifecycle. The
+contract is:
 
-```text
-Compose host
-  → SessionManager
-  → JNI bridge with opaque handles
-  → Rust PTY owner + minimal C spawn shim where post-fork safety requires it
-  → PRoot argv/env + distro shell
-  → raw byte stream
-  → incremental Kotlin VT parser
-  → mutable main/alternate screen buffer + bounded scrollback
-  → damage-tracked Android Surface renderer
+```kotlin
+internal class NativePty private constructor(
+    private val handle: Long,
+    val pid: Long
+) : AutoCloseable {
+    fun read(destination: ByteArray, timeoutMs: Int): Int
+    fun write(source: ByteArray): Int
+    fun resize(columns: Int, rows: Int)
+    override fun close()
+}
 ```
 
-### Native ownership
+The Kotlin layer never uses reflection or hidden APIs
+to access a raw descriptor. The Rust layer is the
+single source of truth for the POSIX PTY dance
+(`posix_openpt` / `grantpt` / `unlockpt` /
+`ioctl(TIOCSWINSZ)` / `forkpty` / `waitpid`).
 
-The native runtime owns the PTY master FD, child PID, process group, nonblocking
-I/O registration and exit status. It uses `posix_openpt`, `grantpt`, `unlockpt`,
-`ptsname`, `setsid`, controlling-terminal setup, `dup2`, `execve`,
-`TIOCSWINSZ`, `SIGWINCH` and `epoll` where supported by Android's stable NDK
-surface.
+For JVM unit tests, the runtime ships a `PtyPipe`
+interface — a regular Java pipe harness that models
+the read/write semantics without an actual PTY. The
+`PtyPipe` is **never** selected by a production
+terminal session; the comment on the interface
+explicitly says: *"Production terminal sessions use
+[NativePty], backed by Elysium's Rust runtime. This
+file models ordinary Java pipes only for deterministic
+tests; it must not be selected by a production
+terminal session."*
 
-Rust owns state, synchronization, validation and error conversion. A minimal C
-shim may perform the child-side post-`fork` sequence so only
-async-signal-safe operations run before `execve`. No panic or C++ exception may
-cross JNI.
+The two backends share a `PtyPipe` interface (read /
+write / resize / close), so the terminal session can
+be tested end-to-end without spawning a real PTY.
 
-JNI accepts bounded arrays and byte buffers, returns typed result codes and
-opaque 64-bit handles, and never stores an Activity. Reads, writes, wait and
-shutdown execute off the main thread.
+### Why a Rust-owned PTY, not pure JVM
 
-### Parser and screen
+A pure-JVM PTY would require:
+- `ProcessBuilder` with a hand-crafted `/system/bin/sh
+  -i < /dev/ptmx > /dev/ptmx 2>&1` invocation (no
+  built-in PTY support in `ProcessBuilder`).
+- Reflection on `android.os.ParcelFileDescriptor` or
+  `libc.ptsname` to read the slave path. Forbidden on
+  modern Android (private API restrictions).
+- Manual `ioctl` calls via JNI for window size and
+  controlling terminal. A re-implementation of libc.
 
-The parser consumes arbitrary byte fragments and retains UTF-8 and escape state
-across calls. It emits typed terminal operations rather than mutating Android
-views. Required behavior includes CSI/OSC/SGR, 16/256/truecolor, cursor modes,
-tabs, erase, insert/delete, scroll regions, alternate screen, bracketed paste,
-mouse modes, titles, OSC 8, combining marks and wide cells.
+The Rust runtime does the POSIX dance once, in
+maintainable Rust, with the platform's native
+syscalls. The Kotlin side is a thin facade over an
+opaque handle. The tradeoff: the runtime ships a
+`librustpty.so` (~ 200 KB) per ABI. The cost is
+acceptable; the alternative (reflection on private
+APIs) is fragile and breaks on every Android version.
 
-The screen owns mutable rows/columns, main and alternate buffers, bounded
-scrollback, cursor and style tables. Resize defines reflow and invalidates only
-affected rows. Malformed input has bounded recovery and cannot allocate without
-limits.
+### Why a `PtyPipe` test impl, not a mock
 
-### Renderer and input
+A mock would be a `NativePty` that returns canned
+data. The runtime's tests want to assert on the
+*bytes* the child writes to stdout — `cat` a file,
+pipe through `grep`, verify the result. A `PtyPipe`
+is regular Java pipes; the test runs `cat
+/rootfs/etc/os-release | grep ID=` and asserts on the
+captured stdout. The interface is small enough that
+a fake is straightforward; mocking would be overkill.
 
-The renderer draws a single coherent grid on an Android surface. Pure black is
-`#000000`; ANSI/neon colors are uniform cell fills rather than overlaid black
-rectangles. Glyph metrics, cursor and hit testing use the same geometry.
-Changed rows/regions are batched once per frame.
+### Why the `Long` handle, not a `FileDescriptor`
 
-IME, hardware keyboard, touch and mouse feed one key translator. Enter,
-backspace, Ctrl-C, function/navigation keys, modifiers, bracketed paste and
-mouse reporting are encoded according to terminal modes, not pipe-specific
-special cases.
+The Kotlin side does not own the descriptor; the Rust
+side does. The `Long` is an opaque token. The Kotlin
+side never `close(fd)`s; the Rust side does. This
+prevents a class of bugs where the Kotlin side closes
+the descriptor twice (once in `close()` and once in
+`finalize()`) and the second close corrupts a
+different file descriptor that the process re-opened
+in the meantime.
 
-## Invariants
+## Consequences
 
-1. No Compose state update occurs per byte, character or cell.
-2. All native handles are single-owner and close exactly once.
-3. Stop closes input, signals the process group, waits with a deadline,
-   escalates, reaps, unregisters I/O and closes all FDs in order.
-4. Window-size state agrees across UI grid, buffer and kernel PTY.
-5. Parser output is independent of input fragmentation.
-6. Scrollback and escape payloads have hard memory limits.
-7. Pipe mode is labelled legacy/non-PTY and cannot claim TUI compatibility.
+### Positive
+
+- **Real PTY semantics.** The runtime's terminal
+  behaves like a real terminal: `vi` enters raw mode,
+  `htop` renders its UI, `less` paginates, `top` is
+  interactive. Programs that check `isatty(stdout)`
+  see `true` and behave correctly.
+- **`SIGHUP`-on-close.** Closing the PTY master
+  signals the child, which can clean up gracefully
+  (write a "disconnected" line to the log, close its
+  own file handles, exit). A pipe does not give the
+  parent this semantics.
+- **JVM-testable end-to-end.** The `PtyPipe` test
+  interface is regular Java pipes; tests run real
+  `cat` / `grep` / `sed` invocations against it. The
+  test fixture is `cat /rootfs/etc/os-release | grep
+  ID=`, asserted on the captured bytes.
+- **Stable Kotlin contract.** The `NativePty` class
+  is a thin facade. A future port (e.g. to a
+  Crostini-style custom backend) replaces the Rust
+  side; the Kotlin side does not change.
+
+### Negative
+
+- **Rust dependency.** The runtime ships a
+  `librustpty.so` per ABI (~ 200 KB × 4 ABIs ≈
+  800 KB). The dependency is unavoidable for native
+  PTY semantics; the alternative is reflection on
+  private APIs.
+- **The Rust layer is integration-only.** The JVM
+  unit tests assert on the Kotlin contract; the
+  `librustpty.so` itself is tested via
+  `androidTest/` instrumentation tests on a real
+  device. A unit test cannot exercise the
+  `posix_openpt` / `grantpt` / `unlockpt` dance
+  without a real Linux PTY.
+- **The `Long` handle leaks across JNI boundaries.**
+  A bug in the Kotlin side (e.g. passing a stale
+  handle after `close()`) would manifest as a
+  segfault, not a typed exception. The tests pin the
+  contract; the integration tests on a real device
+  catch the segfault.
+- **`PtyPipe` is a fixture, not a fallback.** A
+  future contributor who wires `PtyPipe` into
+  production would ship a terminal that does not
+  behave like a real terminal. The comment on the
+  interface is the only guard; a runtime config flag
+  would be more explicit.
 
 ## Alternatives considered
 
-### Continue with Java process pipes
-
-Rejected because the missing behavior is kernel PTY behavior, not a formatting
-bug.
-
-### Render terminal cells directly as Compose text nodes
-
-Rejected because high-volume output would cause excessive recomposition and
-cannot provide predictable grid timing.
-
-### Import a complete terminal application wholesale
-
-Rejected for the first vertical slice because ownership, licensing, UI
-integration and lifecycle would remain opaque. Small audited libraries may be
-adopted later through a separate ADR.
-
-## Verification
-
-- Native tests: spawn, read/write, resize, signal, wait, close races and process
-  group cleanup.
-- Parser fixtures: every fragmentation boundary, malformed UTF-8/escape input,
-  alternate screen and wide/combining text.
-- Screen tests: resize/reflow, scroll regions, bounded history and dirty rows.
-- Device matrix: `stty size`, Ctrl-C, rotation/fold, `vim`, `htop`, `tmux`,
-  `less`, `nano`, `top` and output stress without ANR.
-
-## Rollback
-
-The native backend is capability-gated. A failed probe returns a stable error
-and leaves the legacy shell available only for commands that do not require PTY
-semantics. No graphical or TUI capability is advertised during rollback.
+1. **Use `ProcessBuilder` with a `/system/bin/sh -i`
+   shim.** Rejected: `ProcessBuilder` does not give
+   a real PTY; the child's stdout is a pipe. Programs
+   that check `isatty(stdout)` see `false`.
+2. **Use the Android NDK directly from Kotlin via
+   JNI.** Equivalent to the Rust runtime but
+   Kotlin/JNI is harder to maintain than Rust/JNI.
+   The Rust runtime is the right place for the
+   POSIX PTY dance.
+3. **Use `java.util.concurrent` channels instead of a
+   PTY.** Rejected: a channel is a pipe; programs
+   that check `isatty(stdout)` see `false`. The
+   whole point of a PTY is the `isatty` semantics.
+4. **Use Termux's `libptsocket.so`.** Rejected: it
+   is a third-party native lib; the runtime already
+   has its own native layer for the launcher
+   backends (Phase 9.6.x). One native lib to
+   maintain, not two.
 
 ## Revisit triggers
 
-- parser profiling proves the managed implementation cannot meet throughput;
-- Android surface rendering cannot meet frame pacing with dirty regions;
-- a maintained terminal core can be adopted with compatible licensing and
-  demonstrably lower risk.
+- The Rust runtime is ported to a new platform
+  (Crostini, WSL2, a research OS). The Kotlin side
+  does not change; the Rust side is rebuilt.
+- A user wants a real terminal on a device without
+  a native lib (e.g. a WebAssembly build). The
+  Kotlin side gains a `WebPty` impl that uses a
+  browser-side PTY emulator. The interface does not
+  change.
+- The runtime adds `ioctl(TIOCSTI)` or
+  `ioctl(TIOCSPTLCK)` support (terminal injection,
+  tab lock). The Rust side gains the new
+  `ioctl` calls; the Kotlin side gains a
+  corresponding `PtyPipe` test impl.
