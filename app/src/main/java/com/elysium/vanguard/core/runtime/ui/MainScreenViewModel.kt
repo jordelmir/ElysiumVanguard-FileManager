@@ -9,6 +9,10 @@ import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceState
+import com.elysium.vanguard.core.runtime.MainScreenRecentEventsCapacity
+import androidx.lifecycle.ViewModel
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,15 +51,22 @@ import kotlinx.coroutines.flow.asStateFlow
  * [MainScreenState.runningSessionCount] field that
  * reflects the runner's `activeCount()` (live
  * Linux + Windows sessions, any kind).
+ *
+ * Phase 36 — annotated `@HiltViewModel` + `@Inject
+ * constructor`. The five collaborators are now Hilt
+ * singletons (see [com.elysium.vanguard.core.runtime.RuntimeModule]).
+ * Tests construct the ViewModel directly with the
+ * same collaborators (no Hilt).
  */
-class MainScreenViewModel(
+@HiltViewModel
+class MainScreenViewModel @Inject constructor(
     private val workspaceManager: WorkspaceManager,
     private val distroManager: DistroManager,
     private val windowsVmManager: WindowsVmManager,
     private val sessionRunner: SessionRunner,
     private val eventBus: RuntimeEventBus,
-    private val recentEventsCapacity: Int = 20
-) : AutoCloseable {
+    @MainScreenRecentEventsCapacity private val recentEventsCapacity: Int
+) : ViewModel(), AutoCloseable {
 
     private val _state = MutableStateFlow(MainScreenState.EMPTY)
     val state: StateFlow<MainScreenState> = _state.asStateFlow()
@@ -120,6 +131,28 @@ class MainScreenViewModel(
      */
     fun forceRefresh() = refresh()
 
+    /**
+     * Phase 36 — the ViewModel's cleanup hook.
+     *
+     * In production, the [ViewModel] base class calls
+     * [onCleared] when the host Activity / Fragment is
+     * destroyed. The override delegates to [close] so
+     * the production and test paths share one
+     * implementation.
+     *
+     * Tests use [close] directly (the test fixture
+     * is `AutoCloseable` so `vm.use { ... }` works
+     * unchanged from Phase 28).
+     */
+    override fun onCleared() {
+        close()
+    }
+
+    /**
+     * Phase 36 — the shared cleanup logic. Unsubscribes
+     * from the bus. Idempotent: a second call is a
+     * no-op (the [AutoCloseable.close] contract).
+     */
     override fun close() {
         subscription.close()
     }

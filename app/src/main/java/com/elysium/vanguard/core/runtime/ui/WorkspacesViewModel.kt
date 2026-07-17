@@ -9,6 +9,10 @@ import com.elysium.vanguard.core.runtime.workspaces.WorkspaceError
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceState
+import com.elysium.vanguard.core.runtime.WallClock
+import androidx.lifecycle.ViewModel
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,12 +52,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * UI uses to render the start / stop / running badge
  * per session.
  */
-class WorkspacesViewModel(
+@HiltViewModel
+class WorkspacesViewModel @Inject constructor(
     private val workspaceManager: WorkspaceManager,
     private val eventBus: RuntimeEventBus,
     private val sessionRunner: SessionRunner,
-    private val clock: () -> Long = System::currentTimeMillis
-) : AutoCloseable {
+    @WallClock private val clock: () -> Long
+) : ViewModel(), AutoCloseable {
 
     private val _state = MutableStateFlow(WorkspacesState.EMPTY)
     val state: StateFlow<WorkspacesState> = _state.asStateFlow()
@@ -260,6 +265,28 @@ class WorkspacesViewModel(
         return result
     }
 
+    /**
+     * Phase 36 — the ViewModel's cleanup hook.
+     *
+     * In production, the [ViewModel] base class calls
+     * [onCleared] when the host Activity / Fragment is
+     * destroyed. The override delegates to [close] so
+     * the production and test paths share one
+     * implementation.
+     *
+     * Tests use [close] directly (the test fixture
+     * is `AutoCloseable` so `vm.use { ... }` works
+     * unchanged from Phase 29).
+     */
+    override fun onCleared() {
+        close()
+    }
+
+    /**
+     * Phase 36 — the shared cleanup logic. Unsubscribes
+     * from the bus. Idempotent: a second call is a
+     * no-op (the [AutoCloseable.close] contract).
+     */
     override fun close() {
         subscription.close()
     }
