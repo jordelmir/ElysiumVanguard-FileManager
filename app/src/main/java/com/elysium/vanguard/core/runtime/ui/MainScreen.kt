@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -58,7 +59,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -128,12 +131,14 @@ fun MainScreen(
     onBack: () -> Unit,
     onOpenRuntime: () -> Unit = {},
     onOpenTerminal: () -> Unit = {},
+    onOpenLinuxSession: (distroId: String) -> Unit = {},
     mainViewModel: MainScreenViewModel = hiltViewModel(),
     workspacesViewModel: WorkspacesViewModel = hiltViewModel()
 ) {
     val mainState by mainViewModel.state.collectAsState()
     val workspacesState by workspacesViewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
 
     // Phase 40 — local UI state for the dialogs
     // (create workspace, add session). `null` means
@@ -259,6 +264,36 @@ fun MainScreen(
                             onClose = { workspacesViewModel.closeWorkspace(workspace.id) },
                             onRemoveSession = { sessionId ->
                                 workspacesViewModel.removeSession(workspace.id, sessionId)
+                            },
+                            // Phase 45 — the per-kind open
+                            // affordance. LinuxProot sessions
+                            // navigate to the terminal screen
+                            // pre-loaded with the distro; WindowsVm
+                            // sessions would open a VNC viewer
+                            // (not yet implemented; for now the
+                            // snackbar is the affordance).
+                            onOpenSession = { session ->
+                                when (session) {
+                                    is WorkspaceSession.LinuxProot -> {
+                                        onOpenLinuxSession(session.distroId)
+                                    }
+                                    is WorkspaceSession.WindowsVm -> {
+                                        // Phase 45 — VNC viewer is
+                                        // not yet implemented (Phase
+                                        // 9.6.5 in the Worldwide Vision
+                                        // doc). The snackbar is the
+                                        // user-facing affordance until
+                                        // then. The launch fires from
+                                        // a coroutine scope because
+                                        // [SnackbarHostState.showSnackbar]
+                                        // is a suspend function.
+                                        snackbarScope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "VNC viewer not yet implemented"
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
@@ -365,7 +400,8 @@ private fun WorkspaceCard(
     onPause: () -> Unit,
     onActivate: () -> Unit,
     onClose: () -> Unit,
-    onRemoveSession: (String) -> Unit
+    onRemoveSession: (String) -> Unit,
+    onOpenSession: (WorkspaceSession) -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -474,7 +510,14 @@ private fun WorkspaceCard(
                         ] ?: SessionState.Idle,
                         onStart = { onStartSession(session) },
                         onStop = { onStopSession(session) },
-                        onRemove = { onRemoveSession(session.id) }
+                        onRemove = { onRemoveSession(session.id) },
+                        // Phase 45 — the "Open" affordance.
+                        // The row only renders the button
+                        // when the session is Running;
+                        // here we pass the navigation
+                        // callback unconditionally so the
+                        // row can decide visibility.
+                        onOpen = { onOpenSession(session) }
                     )
                 }
             }
@@ -499,13 +542,17 @@ private fun WorkspaceCard(
 /**
  * A single session row inside a [WorkspaceCard].
  * Shows the session's display name + kind, a
- * [SessionStateBadge], and a Start / Stop button
- * that delegates to the parent [WorkspaceCard]'s
- * callbacks.
+ * [SessionStateBadge], a Start / Stop button,
+ * and (when the session is Running) an "Open"
+ * affordance that navigates to the matching
+ * runtime surface.
  *
  * Phase 40 — added a long-press friendly "remove"
- * affordance (`onRemove`) for callers that want
- * one. Phase 41 will add the visible delete button.
+ * affordance (`onRemove`).
+ * Phase 45 — added `onOpen` (a navigation
+ * callback the parent supplies for the
+ * session's kind) and the [OpenSessionButton]
+ * that surfaces it when the session is live.
  */
 @Composable
 private fun SessionRow(
@@ -513,7 +560,8 @@ private fun SessionRow(
     state: SessionState,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onOpen: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -543,6 +591,14 @@ private fun SessionRow(
         }
         Spacer(modifier = Modifier.width(8.dp))
         SessionStateBadge(state = state)
+        // Phase 45 — the "Open" affordance appears
+        // only when the session is Running AND a
+        // navigation callback is provided. The
+        // callback is null in tests / previews.
+        if (state is SessionState.Running && onOpen != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            OpenSessionButton(onClick = onOpen)
+        }
         Spacer(modifier = Modifier.width(8.dp))
         SessionActionButton(
             state = state,
@@ -566,11 +622,29 @@ private fun SessionRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        // Suppress the unused-variable warning
-        // while keeping the parameter for
-        // documentation. The icon above already
-        // calls onRemove.
-        @Suppress("UNUSED_EXPRESSION") onRemove
+    }
+}
+
+/**
+ * Phase 45 — the "Open" affordance for a Running
+ * session. Compact icon-only button (the session
+ * row is already full-width with badge + Start /
+ * Stop + remove). The label is the icon's
+ * contentDescription; the visual cue is a "play
+ * in a window" icon (`OpenInNew`).
+ */
+@Composable
+private fun OpenSessionButton(onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(32.dp)
+    ) {
+        Icon(
+            Icons.Filled.OpenInNew,
+            contentDescription = "Open session",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

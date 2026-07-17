@@ -221,12 +221,19 @@ class MainActivity : ComponentActivity() {
                     // PHASE 37 — the new sovereign runtime home screen.
                     // Status bar (runningSessionCount + distros +
                     // windows VMs) + workspace list. Phase 38 adds
-                    // the per-session Start / Stop actions.
+                    // the per-session Start / Stop actions. Phase 45
+                    // adds the "Open" affordance for Running Linux
+                    // sessions — tapping it navigates to the
+                    // terminal screen with the distro pre-loaded.
                     composable("runtime_main") {
                         com.elysium.vanguard.core.runtime.ui.MainScreen(
                             onBack = { navController.popBackStack() },
                             onOpenRuntime = { navController.navigate("runtime") },
-                            onOpenTerminal = { navController.navigate("terminal") }
+                            onOpenTerminal = { navController.navigate("terminal") },
+                            onOpenLinuxSession = { distroId ->
+                                val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
+                                navController.navigate("terminal_distro/$encoded")
+                            }
                         )
                     }
                     // Linux workspace: a capability-accurate graphical route
