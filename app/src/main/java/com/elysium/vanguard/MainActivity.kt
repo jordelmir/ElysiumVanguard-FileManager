@@ -233,7 +233,29 @@ class MainActivity : ComponentActivity() {
                             onOpenLinuxSession = { distroId ->
                                 val encoded = URLEncoder.encode(distroId, StandardCharsets.UTF_8.toString())
                                 navController.navigate("terminal_distro/$encoded")
+                            },
+                            // Phase 48 — the "Open" affordance
+                            // for Running WindowsVm sessions.
+                            // The MainScreen looks up the
+                            // session's VNC port (via the
+                            // WindowsVmManager) and passes
+                            // the port to the viewer.
+                            onOpenWindowsSession = { vncPort ->
+                                navController.navigate("vnc_windows_vm/$vncPort")
                             }
+                        )
+                    }
+                    // PHASE 48 — the Windows VM VNC viewer.
+                    // Takes the VNC port from nav args;
+                    // the RfbSession connects to
+                    // 127.0.0.1:<vncPort> (the QEMU VNC
+                    // display the backend exposed in
+                    // Phase 47).
+                    composable("vnc_windows_vm/{vncPort}") { backStackEntry ->
+                        val vncPort = backStackEntry.arguments?.getString("vncPort")?.toIntOrNull() ?: 5900
+                        com.elysium.vanguard.core.runtime.windows.WindowsVmVncScreen(
+                            vncPort = vncPort,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     // Linux workspace: a capability-accurate graphical route

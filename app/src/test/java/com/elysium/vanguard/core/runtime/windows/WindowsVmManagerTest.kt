@@ -3,6 +3,7 @@ package com.elysium.vanguard.core.runtime.windows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -255,6 +256,47 @@ class WindowsVmManagerTest {
         }
         start.countDown()
         assertTrue(done.await(15, TimeUnit.SECONDS))
+    }
+
+    // --- Phase 48: VNC port lookup ---
+
+    @Test
+    fun `vncPortFor returns the VNC port of a running VM`() {
+        val manager = WindowsVmManager(
+            baseDir = Files.createTempDirectory("elysium-vnc-lookup").toFile(),
+            backend = InMemoryWindowsVmBackend().apply {
+                start(testSpec(id = "win-1")).also { state ->
+                    require(state is WindowsVmState.Running) { "expected Running, got $state" }
+                }
+            }
+        )
+        val vncPort = manager.vncPortFor("win-1")
+        // The InMemoryWindowsVmBackend's Running state
+        // does not populate vncPort (the field is
+        // null for the in-memory test backend). The
+        // manager returns null in that case.
+        assertNull("InMemoryWindowsVmBackend's Running state has no VNC port",
+            vncPort)
+    }
+
+    @Test
+    fun `vncPortFor returns null for a non-existent VM`() {
+        val manager = WindowsVmManager(
+            baseDir = Files.createTempDirectory("elysium-vnc-missing").toFile(),
+            backend = InMemoryWindowsVmBackend()
+        )
+        assertNull(manager.vncPortFor("does-not-exist"))
+    }
+
+    @Test
+    fun `vncPortFor returns null for a stopped VM`() {
+        val manager = WindowsVmManager(
+            baseDir = Files.createTempDirectory("elysium-vnc-stopped").toFile(),
+            backend = InMemoryWindowsVmBackend()
+        )
+        // The VM was never started; the manager
+        // has no record of it.
+        assertNull(manager.vncPortFor("never-started"))
     }
 
     // --- helpers ---

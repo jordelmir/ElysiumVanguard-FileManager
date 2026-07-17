@@ -204,6 +204,21 @@ class WindowsVmManager(
         .filter { (_, s) -> s is WindowsVmState.Running }
         .map { (k, _) -> k }
 
+    /**
+     * Phase 48 — the VNC port for a running VM. Returns
+     * `null` if the VM is not running, or if the
+     * running state does not carry a VNC port
+     * (the in-memory test backend does not). The
+     * [com.elysium.vanguard.core.runtime.windows.WindowsVmVncScreen]
+     * uses this to look up the VNC port the user
+     * tapped on, given a [WorkspaceSession.WindowsVm]'s
+     * [WorkspaceSession.WindowsVm.windowsSpecId].
+     */
+    fun vncPortFor(specId: String): Int? {
+        val state = states[specId] ?: return null
+        return (state as? WindowsVmState.Running)?.vncPort
+    }
+
     /** Refresh the manager's view of a VM by asking the backend. */
     fun refreshState(specId: String): WindowsVmState {
         val fresh = backend.queryState(specId)

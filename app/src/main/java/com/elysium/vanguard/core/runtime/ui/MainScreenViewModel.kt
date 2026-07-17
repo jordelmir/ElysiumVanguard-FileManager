@@ -165,6 +165,21 @@ class MainScreenViewModel @Inject constructor(
     fun forceRefresh() = refresh()
 
     /**
+     * Phase 48 — the VNC port for a running Windows
+     * VM. Returns `null` if the VM is not running
+     * or if the running state does not carry a VNC
+     * port (the in-memory test backend does not).
+     * The
+     * [com.elysium.vanguard.core.runtime.windows.WindowsVmVncScreen]
+     * uses this to look up the port the user tapped
+     * on, given a
+     * [com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession.WindowsVm]'s
+     * [com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession.WindowsVm.windowsSpecId].
+     */
+    fun vncPortForWindowsSession(specId: String): Int? =
+        windowsVmManager.vncPortFor(specId)
+
+    /**
      * Phase 36 — the ViewModel's cleanup hook.
      *
      * In production, the [ViewModel] base class calls

@@ -132,6 +132,7 @@ fun MainScreen(
     onOpenRuntime: () -> Unit = {},
     onOpenTerminal: () -> Unit = {},
     onOpenLinuxSession: (distroId: String) -> Unit = {},
+    onOpenWindowsSession: (vncPort: Int) -> Unit = {},
     mainViewModel: MainScreenViewModel = hiltViewModel(),
     workspacesViewModel: WorkspacesViewModel = hiltViewModel()
 ) {
@@ -278,19 +279,33 @@ fun MainScreen(
                                         onOpenLinuxSession(session.distroId)
                                     }
                                     is WorkspaceSession.WindowsVm -> {
-                                        // Phase 45 — VNC viewer is
-                                        // not yet implemented (Phase
-                                        // 9.6.5 in the Worldwide Vision
-                                        // doc). The snackbar is the
-                                        // user-facing affordance until
-                                        // then. The launch fires from
-                                        // a coroutine scope because
-                                        // [SnackbarHostState.showSnackbar]
-                                        // is a suspend function.
-                                        snackbarScope.launch {
-                                            snackbarHostState.showSnackbar(
-                                                "VNC viewer not yet implemented"
-                                            )
+                                        // Phase 48 — the VNC viewer
+                                        // IS implemented now. Look
+                                        // up the running VM's VNC
+                                        // port via the
+                                        // WindowsVmManager (the
+                                        // specId on the session
+                                        // maps 1:1 to a running
+                                        // VM) and navigate to
+                                        // the viewer. If the VM
+                                        // is not running (e.g.
+                                        // the user just tapped
+                                        // Start and the runner
+                                        // hasn't published the
+                                        // Running state yet),
+                                        // fall back to the
+                                        // snackbar.
+                                        val vncPort = mainViewModel.vncPortForWindowsSession(
+                                            session.windowsSpecId
+                                        )
+                                        if (vncPort != null) {
+                                            onOpenWindowsSession(vncPort)
+                                        } else {
+                                            snackbarScope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    "VM is not running yet"
+                                                )
+                                            }
                                         }
                                     }
                                 }
