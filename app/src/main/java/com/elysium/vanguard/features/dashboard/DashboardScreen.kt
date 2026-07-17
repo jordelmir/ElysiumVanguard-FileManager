@@ -68,6 +68,7 @@ fun DashboardScreen(
     onNavigateToGallery: () -> Unit,
     onNavigateToMusic: () -> Unit,
     onNavigateToRuntime: (() -> Unit)? = null,
+    onNavigateToWorkspaces: (() -> Unit)? = null,
     onNavigateToTerminal: (() -> Unit)? = null,
     onNavigateToWord: (() -> Unit)? = null,
     onNavigateToSheet: (() -> Unit)? = null,
@@ -115,6 +116,19 @@ fun DashboardScreen(
             neonColor = gQuaternary,
             onClick = onNavigateToRuntime ?: {},
             gradientBg = moduleSurface(gQuaternary)
+        ),
+        // PHASE 42 — Sovereign runtime home (workspaces, sessions,
+        // status bar). Distinct from the catalog tile above; the
+        // catalog is for "I want to install a new distro" and the
+        // home is for "I want to start / stop my existing
+        // sessions".
+        PortalItem(
+            title = "WORKSPACES",
+            subtitle = "SESSIONS · STATUS · CONTROL",
+            icon = Icons.Default.Computer,
+            neonColor = gPrimary,
+            onClick = onNavigateToWorkspaces ?: {},
+            gradientBg = moduleSurface(gPrimary)
         ),
         // PHASE 10.5 — Elysium Word. The full Word clone: font,
         // typography, spacing, alignment, lists, headings, etc.

@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                             onNavigateToGallery = { navController.navigate("gallery") },
                             onNavigateToMusic = { navController.navigate("music_hub") },
                             onNavigateToRuntime = { navController.navigate("runtime") },
+                            onNavigateToWorkspaces = { navController.navigate("runtime_main") },
                             onNavigateToTerminal = { navController.navigate("terminal") },
                             onNavigateToWord = { navController.navigate("editor_word_new") },
                             onNavigateToSheet = { navController.navigate("editor_sheet_new") },
