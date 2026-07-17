@@ -30,6 +30,28 @@ ontology is the contract; the rest is plumbing.
   `Authorship`, `Contribution`, `RoyaltyContract`,
   `License`, `Listing`, `Order`, `Escrow`,
   `Settlement`.
+- Defining the **vehicle representation types**
+  (the platform's "what kind of truth is this
+  vehicle?" answer):
+  - `VehicleRepresentationLevel` — the enum
+    (`OEM_EXACT`, `OEM_PARTIAL`,
+    `PARAMETRIC_FUNCTIONAL`, `CONCEPTUAL`,
+    `VISUAL_ONLY`). Owned here, on the `Vehicle`
+    aggregate. Append-only transitions.
+  - `EngineeringFact<T>` — the value class
+    that wraps every engineering value with
+    its provenance. The shape is mirrored in
+    every language the platform uses.
+  - `VerificationStatus` — the enum
+    (`OEM_VERIFIED`, `REGULATORY_VERIFIED`,
+    `LAB_VERIFIED`, `ENGINEER_REVIEWED`,
+    `COMMUNITY_CORROBORATED`, `AI_INFERRED`,
+    `UNKNOWN`).
+  - `SourceType` — the enum
+    (`OEM_DOC`, `REGULATORY_FILING`,
+    `LAB_REPORT`, `ENGINEER_MEMO`,
+    `TELEMETRY`, `AI_INFERENCE`,
+    `USER_INPUT`, `COMMUNITY`).
 - Defining the strongly-typed IDs:
   `BrandId`, `ProjectId`, `VehicleId`,
   `SubsystemId`, `PartId`, `AssemblyId`,
@@ -37,11 +59,19 @@ ontology is the contract; the rest is plumbing.
 - Defining the relations: a `Vehicle` HAS-MANY
   `Subsystem`; a `Subsystem` HAS-MANY `Part`; a
   `Part` HAS-MANY `Revision`; a `Project` OWNS
-  `Authorship`; etc.
+  `Authorship`; a `Vehicle` HAS-ONE
+  `VehicleRepresentationLevel`; a `Part` HAS-MANY
+  `EngineeringFact<T>`; etc.
 - Defining the invariants: a `Part` MUST have at
   least one `Revision`; a `Revision` MUST be
   signed by an `Authorship`; a `RoyaltyContract`
-  MUST reference at least one `Contribution`; etc.
+  MUST reference at least one `Contribution`;
+  a `Vehicle` MUST declare a
+  `VehicleRepresentationLevel`; an
+  `EngineeringFact` MUST have a non-empty
+  `Source`, `Source type`, `Vehicle applicability`,
+  `Revision`, `Confidence`, `Verification status`,
+  and `Timestamp`; etc.
 - Maintaining the schema version. Every ontology
   change is a versioned migration. Consumers
   MUST refuse a schema version they do not
@@ -118,6 +148,92 @@ The codebase mirror is the **only** place the
 types are defined. The docs are documentation
 of the codebase, not the source of truth.
 
+In addition, the following are the canonical
+shapes for the provenance-bearing types. Every
+language the platform uses mirrors these:
+
+```kotlin
+// The Vehicle's "what kind of truth is this?" enum.
+// Append-only. The transition is signed.
+enum class VehicleRepresentationLevel {
+    OEM_EXACT,
+    OEM_PARTIAL,
+    PARAMETRIC_FUNCTIONAL,
+    CONCEPTUAL,
+    VISUAL_ONLY
+}
+
+// Where the fact came from. Required on every fact.
+enum class SourceType {
+    OEM_DOC,
+    REGULATORY_FILING,
+    LAB_REPORT,
+    ENGINEER_MEMO,
+    TELEMETRY,
+    AI_INFERENCE,
+    USER_INPUT,
+    COMMUNITY
+}
+
+// The fact's verification status. AI_INFERRED
+// MUST NOT silently become VERIFIED — the
+// transition is a human review + a signed
+// counter-signature.
+enum class VerificationStatus {
+    OEM_VERIFIED,
+    REGULATORY_VERIFIED,
+    LAB_VERIFIED,
+    ENGINEER_REVIEWED,
+    COMMUNITY_CORROBORATED,
+    AI_INFERRED,
+    UNKNOWN
+}
+
+// The provenance-bearing value wrapper. Every
+// engineering fact in the platform is an
+// EngineeringFact<T>. A fact without all
+// required fields is rejected at the invariant
+// check (skill 14).
+data class EngineeringFact<T>(
+    val value: T,
+    val source: String,
+    val sourceType: SourceType,
+    val jurisdiction: String? = null,
+    val vehicleApplicability: String,
+    val revision: String,
+    val confidence: Float,                 // [0.0, 1.0]
+    val verificationStatus: VerificationStatus,
+    val reviewer: String? = null,
+    val timestamp: String                  // ISO-8601
+)
+```
+
+The `Vehicle` aggregate carries the level:
+
+```kotlin
+data class Vehicle(
+    val id: VehicleId,
+    val brandId: BrandId,
+    val projectId: ProjectId,
+    val name: String,
+    val representationLevel: VehicleRepresentationLevel,  // REQUIRED
+    val currentRevision: RevisionId,
+    val createdAt: String,
+    val updatedAt: String
+)
+```
+
+A `Vehicle` without `representationLevel` is a
+**contract violation**. The DSL compiler (skill
+04) refuses to emit a `Spec.Artifact` without a
+level; the verifier (skill 14) rejects the PR.
+
+The full standard — the meaning of each level,
+the transition protocol, the UI requirement, the
+ineligibility for marketplace / royalty /
+regulatory / diagnostic — is in
+[`.ai/STANDARDS.md`](../../STANDARDS.md) section 4.
+
 ## 6. Workflow
 
 1. **Receive a request.** From the orchestrator
@@ -139,16 +255,23 @@ of the codebase, not the source of truth.
 6. **Define the invariants.** What must always
    be true? E.g. "a `Subscription` MUST have a
    non-empty `Plan` and a non-empty
-   `validUntil`".
+   `validUntil`". A `Vehicle` MUST have a
+   `representationLevel`; every `Part` field of
+   type `T` that is engineering-grade MUST be
+   wrapped in `EngineeringFact<T>` with all
+   required metadata.
 7. **Define the schema version.** The new
    ontology version is `MAJOR.MINOR`. A new
    type is a MINOR bump; a breaking change to an
-   existing type is a MAJOR bump.
+   existing type is a MAJOR bump. A new
+   representation level or a new verification
+   status is a MAJOR bump.
 8. **Write the migration.** The migration is a
    pure function `(old_schema: JsonNode) ->
    new_schema: JsonNode`. The migration is
    idempotent (running it twice produces the
-   same result).
+   same result). A migration that downgrades a
+   `VehicleRepresentationLevel` is a violation.
 9. **File the ontology ADR.** The ADR
    documents: the new type, the new ID, the
    relations, the invariants, the schema
@@ -174,6 +297,21 @@ of the codebase, not the source of truth.
 - The docs and the code are in sync. A drift
   between the docs and the code is a quality
   gate failure.
+- Every `Vehicle` has a `representationLevel`.
+  An invariant test rejects a `Vehicle`
+  constructed without one.
+- Every `EngineeringFact<T>` has all required
+  metadata fields. An invariant test rejects
+  a fact missing any field. The test is
+  parameterized over each field.
+- Every transition of
+  `VehicleRepresentationLevel` is forward-only
+  (`VISUAL_ONLY → CONCEPTUAL →
+  PARAMETRIC_FUNCTIONAL → OEM_PARTIAL →
+  OEM_EXACT`). A test rejects a regression.
+- The AI council (skill 05) votes on every
+  new `VehicleRepresentationLevel` value or
+  every new `VerificationStatus` value.
 
 ## 8. Failure modes
 
@@ -233,6 +371,28 @@ of the codebase, not the source of truth.
   types are pure data.
 - **Schema drift.** The docs say `X`; the code
   says `Y`. The orchestrator blocks release.
+- **A `Vehicle` without a
+  `representationLevel`.** Every `Vehicle`
+  aggregate MUST carry a
+  `VehicleRepresentationLevel`. A default
+  value is a smell; the level is a deliberate
+  declaration by the spec author.
+- **A `Part` field of type `T` that is
+  engineering-grade but not wrapped in
+  `EngineeringFact<T>`.** The provenance is
+  not optional. A raw `Float` for a torque
+  value is a contract violation.
+- **`AI_INFERRED` masquerading as `VERIFIED`.**
+  A fact with `verificationStatus =
+  AI_INFERRED` and a `confidence` of `1.0` is
+  still `AI_INFERRED`. Confidence does not
+  promote verification. The transition is a
+  human review + a signed counter-signature
+  (skill 09).
+- **A `VehicleRepresentationLevel` regression.**
+  A vehicle cannot move from `OEM_EXACT` to
+  `VISUAL_ONLY`. The transition is append-only.
+  A regression is a contract violation.
 
 ## 11. Anti-patterns in the wild
 

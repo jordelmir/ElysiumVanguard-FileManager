@@ -36,6 +36,25 @@ platform is a fiction.
   block a failing release).
 - The verification report (per release, per
   PR).
+- **The error model as a quality gate.** The
+  verifier checks that every new code path
+  uses the typed `FoundryError` model (per
+  `.ai/AGENTS.md` section 10 and `.ai/STANDARDS.md`
+  section 7). A `throw Exception("oops")` is
+  a CI failure. A free-form string error is a
+  CI failure. A `Double` / `Float` / `f64`
+  for money is a CI failure. A generic
+  catch-block that hides a failure is a CI
+  failure. An unchecked null assertion is a
+  CI failure.
+- **The standards-compliance gate.** The
+  verifier checks the technical standards
+  (per `.ai/STANDARDS.md`) as part of the
+  global quality gates. A standard violation
+  is a CI failure. The security skill (12)
+  enforces the security-relevant standards;
+  the regulatory skill (13) enforces the
+  regulatory-relevant standards.
 
 ## 3. Out-of-scope
 
@@ -101,8 +120,19 @@ orchestrator uses to approve a release.
    coverage threshold is 80% on changed lines.
 10. **Compute the gate status.** Every gate
     is pass / fail. A fail blocks the release.
+    The gates include the error-model gate,
+    the money-type gate, the null-safety gate,
+    the main-thread gate, the asset-trust
+    gate, the AI-authority gate, the
+    vehicle-representation-level gate, and the
+    truth-model gate (per section 7).
 11. **Emit the verification report.** The
-    report is the orchestrator's input.
+    report is the orchestrator's input. The
+    report includes the standards-compliance
+    status: which standards were checked,
+    which ones passed, which ones failed,
+    and the diff against the previous
+    release.
 
 ## 7. Quality gates
 
@@ -116,7 +146,12 @@ orchestrator uses to approve a release.
   pass.
 - No new dependency without ADR — pass.
 - Artifact contract honored — pass.
-- No secrets in repo — pass.
+- No secrets in repo, in the config, in the
+  assets, in the build artifacts, or in the
+  application package — pass. The CI scans
+  every PR + every build for known secret
+  patterns. A positive match is a hard build
+  failure.
 - No license-incompatible deps — pass.
 - Mutation score ≥ 70% on critical modules —
   pass (critical modules are: skill 03
@@ -124,6 +159,68 @@ orchestrator uses to approve a release.
   07 diagnostic, skill 08 event platform,
   skill 09 catalog, skill 12 auth, skill 13
   regulatory).
+- **Error model gate** — every catch block
+  re-throws, logs with a typed error, or
+  returns a typed `Result` / `Either`. A
+  `catch (e: Exception) { /* ignore */ }`
+  is a CI failure. A `throw Exception("oops")`
+  is a CI failure. A free-form string error
+  is a CI failure (per `.ai/AGENTS.md`
+  section 5.3 and section 10, and
+  `.ai/STANDARDS.md` section 2.3 and
+  section 7).
+- **Money type gate** — no `Double` /
+  `Float` / `f64` for money. Money is
+  `BigDecimal` (or equivalent). A money
+  type that is not `BigDecimal` /
+  `decimal.Decimal` / `rust_decimal::Decimal`
+  is a CI failure (per `.ai/AGENTS.md`
+  section 5.2 and `.ai/STANDARDS.md`
+  section 2.2).
+- **Null-safety gate** — no `!!` in Kotlin,
+  no unchecked `as` in TypeScript, no
+  `unwrap()` / `expect` in production Rust,
+  no `Object!` cast in C#. A null-safety
+  violation is a CI failure.
+- **Main-thread gate (Android)** — no model
+  loading, decoding, or network work on the
+  Android main thread. A `StrictMode`
+  violation is a CI failure (per
+  `.ai/AGENTS.md` section 5.4).
+- **Asset-trust gate** — every imported 3D
+  asset is validated (manifold + units +
+  coordinate system + file size + no-
+  embedded-scripts + provenance coverage)
+  before it enters the canonical store. An
+  unvalidated asset is a CI failure.
+- **AI-authority gate** — no LLM directly
+  mutates authoritative financial or
+  engineering state. A model that writes to
+  the database, the catalog, the audit
+  trail, the royalty engine, the regulatory
+  submission, the settlement service, or the
+  safety gate is a CI failure (per
+  `.ai/AGENTS.md` section 5.6 and section 8,
+  and `.ai/STANDARDS.md` section 2.6 and
+  section 5).
+- **Vehicle-representation-level gate** —
+  every `Vehicle` carries a
+  `VehicleRepresentationLevel`. A vehicle
+  without a level is a CI failure. A
+  level-regression is a CI failure. An
+  `OEM_EXACT` or `OEM_PARTIAL` spec with an
+  `AI_INFERRED` fact is a CI failure (per
+  `.ai/AGENTS.md` section 7 and
+  `.ai/STANDARDS.md` section 4).
+- **Truth-model gate** — every engineering
+  fact carries a full `EngineeringFact<T>`
+  with all required metadata (per
+  `.ai/AGENTS.md` section 6 and
+  `.ai/STANDARDS.md` section 3). A fact
+  missing any required field is a CI
+  failure. An `AI_INFERRED → VERIFIED`
+  transition without a signed event in the
+  audit trail is a CI failure.
 
 A failed gate is a blocker. The release is
 blocked until the gate is green.
@@ -183,6 +280,71 @@ blocked until the gate is green.
   bypasses the gates is a contract violation.
   The orchestrator does not merge a release
   with a failing gate.
+- **`throw Exception("oops")` in production
+  code.** Every error path is a typed
+  `FoundryError` (per `.ai/AGENTS.md`
+  section 10 and `.ai/STANDARDS.md` section
+  7). A free-form string throw is a CI
+  failure.
+- **Free-form string errors at the API
+  boundary.** Every error is a typed JSON
+  envelope. A string-only error is a CI
+  failure.
+- **Generic catch blocks that hide failures.**
+  Every catch block re-throws, logs with a
+  typed error, or returns a typed `Result` /
+  `Either`. A `catch (e: Exception) { /* ignore */ }`
+  is a CI failure.
+- **Float / Double for money.** A
+  `Double` / `Float` / `f64` for a royalty
+  amount, a settlement, a price, or a
+  balance is a CI failure. Money is
+  `BigDecimal` (or equivalent) — see
+  `.ai/AGENTS.md` section 5.2 and
+  `.ai/STANDARDS.md` section 2.2.
+- **Unchecked null assertions.** A `!!` in
+  Kotlin, an unchecked `as` in TypeScript,
+  an `unwrap()` / `expect` in production
+  Rust, a hard `Object!` cast in C# is a
+  CI failure.
+- **Main-thread blocking on Android.** A
+  model load, a decode, or a network call on
+  the Android main thread is a CI failure
+  (per `.ai/AGENTS.md` section 5.4).
+- **Trusting imported 3D assets without
+  validation.** An unvalidated asset is a CI
+  failure (per `.ai/AGENTS.md` section 5.5
+  and skill 06).
+- **Executing scripts embedded in uploaded
+  assets.** A glTF with a script, a STEP
+  with macros, a USD with a custom schema
+  that runs code: rejected at the parse
+  step. The pipeline never executes user-
+  supplied code.
+- **AI-claimed road legality, safety
+  approval, mechanical compatibility, or
+  financial settlement.** A model that
+  directly mutates any of these is a CI
+  failure. The model is a draft; the
+  deterministic engine + a human review
+  apply the draft (per `.ai/AGENTS.md`
+  section 5.6 and section 8, and
+  `.ai/STANDARDS.md` section 2.6 and
+  section 5).
+- **A `Vehicle` without a
+  `VehicleRepresentationLevel`.** A vehicle
+  card, vehicle detail page, or spec view
+  without the level is a UI test failure
+  (per `.ai/AGENTS.md` section 7 and
+  `.ai/STANDARDS.md` section 4).
+- **A `VehicleRepresentationLevel`
+  regression.** A vehicle that moves from
+  `OEM_EXACT` to `VISUAL_ONLY` is a CI
+  failure. The transition is append-only.
+- **An `AI_INFERRED → VERIFIED` transition
+  without a signed event in the audit
+  trail.** A silent transition is a CI
+  failure.
 
 ## 11. Test strategy in the Elysium Automotive
 Foundry

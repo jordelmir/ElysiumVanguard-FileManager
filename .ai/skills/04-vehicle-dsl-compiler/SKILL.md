@@ -29,6 +29,34 @@ compiler translates that into a typed
   (skill 03).
 - Producing a typed spec artifact (the input to
   skill 06 + skill 07).
+- **Enforcing the `VehicleRepresentationLevel`
+  requirement.** Every `vehicle` declaration in
+  the DSL MUST carry a `representationLevel`
+  (`oem-exact`, `oem-partial`,
+  `parametric-functional`, `conceptual`, or
+  `visual-only`). The compiler refuses to emit
+  a `Spec.Artifact` without one. A missing
+  level is a `VehicleDefinitionInvalid` error.
+- **Enforcing the `EngineeringFact<T>` wrapper
+  on every engineering-grade value.** Every
+  `part` field that is engineering-grade
+  (capacity, torque, voltage, tolerance,
+  mass, material) MUST be specified as a
+  typed engineering fact, not a raw scalar.
+  The compiler refuses a raw scalar where a
+  fact is required. A raw scalar where a fact
+  is required is a `VehicleDefinitionInvalid`
+  error.
+- **Enforcing the verification-level rules.**
+  A `oem-exact` or `oem-partial` level
+  requires every OEM-sourced fact to carry
+  `OEM_VERIFIED`. A `parametric-functional`
+  level requires every fact to carry
+  `ENGINEER_REVIEWED` or higher. A fact
+  with `AI_INFERRED` status is rejected in
+  an OEM-bound spec unless it is wrapped in
+  an explicit `// ai-draft` comment that the
+  human reviewer must resolve before sign-off.
 - Providing editor support: syntax highlighting,
   autocomplete, go-to-definition, hover docs.
 - Maintaining the DSL version. The DSL is
@@ -95,8 +123,24 @@ internal to this skill.
    (unknown part, ambiguous reference).
 4. **Type-check.** Walk the resolved tree,
    enforce the invariants. Errors here are
-   semantic errors (a 75 kWh battery pack on a
-   motorcycle that requires 12V).
+   semantic errors. The invariants include:
+   - A `vehicle` MUST declare a
+     `representationLevel`. A missing level
+     is a `VehicleDefinitionInvalid` error.
+   - A `part` field that is engineering-grade
+     MUST be a typed engineering fact. A raw
+     scalar is a `VehicleDefinitionInvalid`
+     error.
+   - The level's verification requirements
+     MUST be met. An `oem-exact` spec with an
+     `AI_INFERRED` fact is a
+     `VehicleDefinitionInvalid` error
+     (or a `ProvenanceIncomplete` error if
+     the fact is missing metadata).
+   - The level's append-only invariant
+     applies to a new revision of an existing
+     vehicle. A regression is a
+     `VehicleDefinitionInvalid` error.
 5. **Emit the spec.** Produce the typed
    `Spec.Artifact`. Content-address it. Sign it.
    The artifact is the input to skill 06 + 07.
@@ -125,6 +169,25 @@ internal to this skill.
   testable end-to-end with golden files
   (`tests/golden/<dsl-source>.in` +
   `<spec-output>.out` + `<errors>.err`).
+- A golden test asserts that a `vehicle`
+  without a `representationLevel` is
+  rejected with a `VehicleDefinitionInvalid`
+  error.
+- A golden test asserts that a `part` with
+  a raw scalar where a fact is required is
+  rejected with a `VehicleDefinitionInvalid`
+  error.
+- A golden test asserts that an `oem-exact`
+  spec with an `AI_INFERRED` fact is rejected
+  (or surfaced for human resolution).
+- A golden test asserts that a `visual-only`
+  or `conceptual` spec is rejected for
+  marketplace / royalty / regulatory paths
+  (the compiler is the gate; the runtime is
+  the enforcement).
+- A golden test asserts that a
+  representation-level regression is rejected
+  with a `RevisionConflict` error.
 - The artifact is content-addressed, versioned,
   signed (per the global artifact contract).
 - The DSL grammar is documented in
@@ -199,6 +262,23 @@ internal to this skill.
   anti-pattern.** The invariant is in the
   grammar. Adding it later is a breaking
   change.
+- **A `vehicle` declaration without a
+  `representationLevel`.** The level is a
+  grammatical requirement, not a lint
+  suggestion. A missing level is a compile
+  error, not a warning.
+- **A raw scalar where a fact is required.**
+  A `part.capacity = 75.kWh` is a smell when
+  `capacity` is engineering-grade; the
+  grammar requires
+  `part.capacity = fact(75, unit=kWh,
+  source=...)`. A raw scalar is a compile
+  error.
+- **AI-injected OEM-bound facts without
+  human review.** An `AI_INFERRED` fact in an
+  `oem-exact` or `oem-partial` spec is
+  rejected. The AI is a draft, not the
+  authority (per `.ai/AGENTS.md` section 8).
 
 ## 11. The DSL in the Elysium Automotive Foundry
 

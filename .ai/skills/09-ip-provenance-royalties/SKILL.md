@@ -65,17 +65,49 @@ its own concern.
 ## 4. Inputs
 
 - An `AuthorshipClaim` (a signed claim that a
-  user contributed to an artifact).
+  user contributed to an artifact). The claim
+  carries:
+  - The artifact ID.
+  - The user's ID.
+  - The role (`author` / `contributor` /
+    `reviewer` / `supplier` / `agent`).
+  - The evidence (a reference to a git
+    commit, a design document, a review, a
+    test).
+  - The timestamp.
+  - The royalty share (a percentage or a
+    formula).
+  - **The verification level of the
+    contribution.** An `AI_INFERRED`
+    contribution is signed by the agent
+    + counter-signed by a human reviewer
+    before it is `VERIFIED` (per skill 03).
+    The transition is a signed event in the
+    audit trail, not a silent state flip.
 - A `RoyaltyContract` (a smart-contract-like
-  rule that defines the royalty).
-- A `Sale` (a marketplace event that triggers a
-  settlement).
+  rule that defines the royalty). The contract
+  is bound to the artifact's
+  `VehicleRepresentationLevel`. A
+  `VISUAL_ONLY` or `CONCEPTUAL` artifact is
+  not eligible for royalty settlement; the
+  contract is rejected at validation.
+- A `Sale` (a marketplace event that triggers
+  a settlement). A sale of a
+  `VISUAL_ONLY` or `CONCEPTUAL` artifact is
+  rejected; the marketplace (skill 10)
+  enforces this at listing time.
 - A `License` (the license under which the
   artifact is published).
 - An `ExportControlDeclaration` (the export
   controls the user agrees to).
 - A `GDPRRequest` (a user request to erase,
   access, or port their data).
+- A `ProvenanceComplete` flag (a typed
+  boolean asserting that every engineering
+  fact in the artifact has all required
+  metadata). A `ProvenanceIncomplete`
+  artifact is rejected for royalty
+  settlement.
 
 ## 5. Outputs
 
@@ -116,6 +148,12 @@ UX reads the catalog to get the asset's metadata.
    - The timestamp.
    - The royalty share (a percentage or a
      formula).
+   - **The verification level of the
+     contribution** (`OEM_VERIFIED` /
+     `REGULATORY_VERIFIED` / `LAB_VERIFIED` /
+     `ENGINEER_REVIEWED` /
+     `COMMUNITY_CORROBORATED` / `AI_INFERRED`
+     / `UNKNOWN`).
 2. **Validate the claim.** The skill checks:
    - The signature is valid.
    - The user is authorized (the user has access
@@ -123,8 +161,24 @@ UX reads the catalog to get the asset's metadata.
    - The evidence exists and is accessible.
    - The claim does not conflict with a prior
      claim.
+   - **The verification level is consistent
+     with the artifact's
+     `VehicleRepresentationLevel`.** A
+     `VISUAL_ONLY` or `CONCEPTUAL` artifact
+     cannot have an `OEM_VERIFIED`
+     contribution; an `OEM_EXACT` artifact
+     cannot have an `AI_INFERRED`
+     contribution without an explicit human
+     review counter-signature.
+   - **The verification transition (if any)
+     is signed.** An `AI_INFERRED → VERIFIED`
+     transition requires a signed event
+     from a human reviewer; a silent transition
+     in the data is a violation.
 3. **Record the claim.** The claim lands in the
    catalog. The authorship chain is updated.
+   The verification level is part of the
+   recorded claim.
 4. **Receive a `RoyaltyContract`.** A user
    defines a contract: "every unit of this asset
    sold for $X pays user Y a 5% royalty". The
@@ -138,19 +192,46 @@ UX reads the catalog to get the asset's metadata.
    - The contract complies with the jurisdiction's
      royalty caps (e.g. some jurisdictions cap
      agent royalties at 30%).
+   - **The artifact is eligible for royalty.**
+     A `VISUAL_ONLY` or `CONCEPTUAL` artifact
+     is rejected with a `ContractNotActive`
+     error (the contract is malformed
+     because the asset is not commerce-grade).
+   - **The artifact's provenance is complete.**
+     An artifact with `ProvenanceIncomplete`
+     is rejected with a `ProvenanceIncomplete`
+     error.
 6. **Record the contract.** The contract lands in
    the catalog.
 7. **Receive a `Sale`.** A marketplace event
-   triggers a settlement.
+   triggers a settlement. A sale of a
+   `VISUAL_ONLY` or `CONCEPTUAL` artifact is
+   rejected with a `ContractNotActive` error
+   (the marketplace enforces this at listing
+   time; the settlement is the backstop).
 8. **Run the settlement.** The engine:
    - Walks the asset's royalty contracts.
-   - Calculates the per-user amounts.
+   - Verifies the artifact's
+     `VehicleRepresentationLevel` is eligible
+     (rejects `VISUAL_ONLY` / `CONCEPTUAL`).
+   - Verifies the artifact's provenance is
+     complete.
+   - Calculates the per-user amounts using
+     `BigDecimal` (Kotlin / JVM) or
+     `rust_decimal::Decimal` (Rust). A
+     `Double` / `Float` / `f64` for money is
+     a contract violation (per
+     `.ai/STANDARDS.md` section 2.2).
    - Produces a signed settlement artifact.
 9. **Pay the users.** The settlement is sent to
    the payment provider. The payment provider
    is out of scope (a third-party SaaS).
 10. **Archive the audit trail.** The full
-    settlement chain lands in the audit log.
+    settlement chain — the claim, the contract,
+    the level-check, the provenance-check, the
+    verification-level transitions, the
+    settlement itself — lands in the audit log.
+    The audit log is append-only.
 
 ## 7. Quality gates
 
@@ -164,6 +245,31 @@ UX reads the catalog to get the asset's metadata.
   within the regulatory deadline (30 days for
   GDPR).
 - The catalog is queryable + reproducible.
+- **Every settlement is bound to a
+  `VehicleRepresentationLevel`.** A
+  settlement against a `VISUAL_ONLY` or
+  `CONCEPTUAL` artifact is rejected at the
+  gate.
+- **Every settlement is bound to a
+  `ProvenanceComplete` flag.** A settlement
+  against an artifact with `UNKNOWN` facts
+  in commerce-relevant fields is rejected
+  with a `ProvenanceIncomplete` error.
+- **Every AI-inferred contribution that
+  participated in a settlement has a
+  corresponding human-review event in the
+  audit trail.** A settlement that
+  references an `AI_INFERRED` claim
+  without a transition event is rejected
+  with a `ProvenanceIncomplete` error.
+- **Money is `BigDecimal` (or equivalent).**
+  A settlement that uses `Double` / `Float`
+  / `f64` is rejected at the gate.
+- **The settlement envelope is a typed
+  `FoundryError`-compatible JSON object**
+  when the settlement fails (per `.ai/AGENTS.md`
+  section 10 and `.ai/STANDARDS.md` section 7).
+  A free-form string error is a violation.
 
 ## 8. Failure modes
 
@@ -221,6 +327,25 @@ UX reads the catalog to get the asset's metadata.
   contribution that ships without a claim is
   untracked. The next skill that consumes the
   asset cannot verify provenance.
+- **`AI_INFERRED` masquerading as `VERIFIED`
+  in a settlement.** A settlement that
+  references an `AI_INFERRED` claim without
+  a human-review transition event in the
+  audit trail is a contract violation.
+- **Royalty on a `VISUAL_ONLY` or
+  `CONCEPTUAL` artifact.** A settlement
+  against an ineligible level is rejected
+  with a `ContractNotActive` error.
+- **Float / Double for money.** A `Double`
+  / `Float` / `f64` for a royalty amount
+  is a contract violation. Money is
+  `BigDecimal` (or equivalent) — see
+  `.ai/STANDARDS.md` section 2.2.
+- **Free-form string errors.** A settlement
+  failure that returns a string instead of
+  a typed `FoundryError` is a contract
+  violation. The error envelope is typed
+  JSON (per `.ai/AGENTS.md` section 10).
 
 ## 11. The catalog in the Elysium Automotive
 Foundry

@@ -38,6 +38,23 @@ Every audit is filed in the catalog.
 - The regulatory change log (which regulation
   was updated, when, what the platform's
   response was).
+- **The verification-level + safety-gate
+  contract.** A `SafetyGoal` requires
+  `REGULATORY_VERIFIED` + `ENGINEER_REVIEWED`
+  + a human counter-signature (per
+  `.ai/AGENTS.md` section 8 and `.ai/STANDARDS.md`
+  section 5). A `RoadLegal` flag requires
+  `ENGINEER_REVIEWED` + `REGULATORY_VERIFIED`
+  + a human counter-signature. An AI-inferred
+  "this is safe" / "this is compliant" / "this
+  fits" is a draft, not an approval.
+- **The `VehicleRepresentationLevel`
+  regulatory gates.** A `VISUAL_ONLY` or
+  `CONCEPTUAL` vehicle is NOT eligible for
+  regulatory submission. A `PARAMETRIC_FUNCTIONAL`
+  vehicle is eligible only after the
+  verification-level requirements are met
+  (per `.ai/STANDARDS.md` section 4).
 
 ## 3. Out-of-scope
 
@@ -87,7 +104,11 @@ can prove it" answer.
    automatically.
 2. **Identify the regulations.** The reviewer
    checks: does this PR touch a regulated
-   surface? Which regulations apply?
+   surface? Which regulations apply? Does
+   the PR touch a `SafetyGoal`, a `RoadLegal`
+   flag, a `Compatibility` fact, or a
+   `Settlement`? Each of these is a
+   regulated surface.
 3. **Assess the impact.** The reviewer
    documents:
    - The regulation(s) the PR affects.
@@ -96,21 +117,52 @@ can prove it" answer.
    - The gap (if any) between the current
      state and the required state.
    - The remediation (if needed).
+   - **The verification-level impact.** If
+     the PR introduces or changes a
+     `SafetyGoal`, a `RoadLegal` flag, a
+     `Compatibility` fact, or a `Settlement`,
+     the reviewer checks that the
+     verification level is consistent with
+     the regulatory requirement. A
+     `SafetyGoal` MUST be
+     `REGULATORY_VERIFIED` +
+     `ENGINEER_REVIEWED` + a human
+     counter-signature (per `.ai/AGENTS.md`
+     section 8 and `.ai/STANDARDS.md`
+     section 5).
+   - **The `VehicleRepresentationLevel`
+     impact.** If the PR introduces a
+     vehicle, a `SafetyGateNotSatisfied`
+     error is raised for a `VISUAL_ONLY` or
+     `CONCEPTUAL` vehicle that is being
+     submitted for regulatory approval.
 4. **Sign off.** The reviewer approves or
    requests changes. A "request changes"
-   blocks the PR.
+   blocks the PR. A "request changes" is
+   the only way to reject a PR that tries
+   to bypass the verification-level or
+   safety-gate contract.
 5. **Receive a release.** The compliance
    report is required. The SBOM is required.
+   The verification-level + safety-gate
+   report is required (a list of every
+   `SafetyGoal` + its verification level
+   + its counter-signature).
 6. **Receive a regulatory change.** The
    reviewer updates the regulatory change
    log. The change is filed in the next
    release's compliance report.
 7. **Receive an audit.** The reviewer
    prepares the audit response. The audit
-   is filed in the catalog.
+   is filed in the catalog. The audit
+   response includes the verification
+   levels + the safety gates + the human
+   counter-signatures.
 8. **Annual review.** The reviewer updates
    the regulatory change log. The platform
-   is re-assessed per jurisdiction.
+   is re-assessed per jurisdiction. The
+   verification-level + safety-gate
+   contract is re-confirmed.
 
 ## 7. Quality gates
 
@@ -123,6 +175,32 @@ can prove it" answer.
 - The audit response is in the catalog.
 - The homologation package is in the catalog.
 - The regulatory change log is up to date.
+- **Every `SafetyGoal` carries a verification
+  level + a human counter-signature.** A
+  `SafetyGoal` with `verificationStatus =
+  AI_INFERRED` is rejected with a
+  `SafetyGateNotSatisfied` error.
+- **Every `RoadLegal` flag carries
+  `ENGINEER_REVIEWED` + `REGULATORY_VERIFIED`
+  + a human counter-signature.** A
+  `RoadLegal` flag with `AI_INFERRED` is
+  rejected with a `SafetyGateNotSatisfied`
+  error.
+- **Every `Compatibility` fact carries
+  `LAB_VERIFIED` or `OEM_VERIFIED` + a human
+  counter-signature.** An `AI_INFERRED`
+  compatibility fact is rejected with a
+  `SafetyGateNotSatisfied` error.
+- **Every `Settlement` carries
+  `ENGINEER_REVIEWED` + an audit trail + a
+  human counter-signature.** An `AI_INFERRED`
+  settlement is rejected with a
+  `SafetyGateNotSatisfied` error.
+- **No `VISUAL_ONLY` or `CONCEPTUAL` vehicle
+  is in a regulatory submission.** A
+  submission that includes an ineligible
+  level is rejected with a
+  `SafetyGateNotSatisfied` error.
 
 ## 8. Failure modes
 
@@ -169,6 +247,42 @@ can prove it" answer.
 - **"We'll localize later".** A release that
   ships without i18n is a contract violation
   in any non-English jurisdiction.
+- **AI-claimed road legality.** A `RoadLegal`
+  flag whose only verification is
+  `AI_INFERRED` is a contract violation (per
+  `.ai/AGENTS.md` section 5.6 and section 8,
+  and `.ai/STANDARDS.md` section 2.6 and
+  section 5). The flag requires
+  `ENGINEER_REVIEWED` + `REGULATORY_VERIFIED`
+  + a human counter-signature.
+- **AI-claimed safety approval.** A `SafetyGoal`
+  whose only verification is `AI_INFERRED`
+  is a contract violation. The goal requires
+  `REGULATORY_VERIFIED` + `ENGINEER_REVIEWED`
+  + a human counter-signature.
+- **AI-claimed mechanical compatibility.** A
+  `Compatibility` fact whose only verification
+  is `AI_INFERRED` is a contract violation.
+  The fact requires `LAB_VERIFIED` or
+  `OEM_VERIFIED` + a human counter-signature.
+- **AI-claimed financial settlement.** A
+  `Settlement` whose only review is
+  `AI_INFERRED` is a contract violation. The
+  settlement requires `ENGINEER_REVIEWED` +
+  an audit trail + a human counter-signature.
+- **Regulatory submission of an ineligible
+  vehicle.** A submission that includes a
+  `VISUAL_ONLY` or `CONCEPTUAL` vehicle is
+  a contract violation. The submission is
+  rejected with a `SafetyGateNotSatisfied`
+  error.
+- **Silent `AI_INFERRED → VERIFIED`
+  transitions.** A fact that flips from
+  `AI_INFERRED` to `OEM_VERIFIED` /
+  `REGULATORY_VERIFIED` / `LAB_VERIFIED` /
+  `ENGINEER_REVIEWED` / `COMMUNITY_CORROBORATED`
+  without a signed transition event in the
+  audit trail is a contract violation.
 
 ## 11. The regulatory contract in the Elysium
 Automotive Foundry

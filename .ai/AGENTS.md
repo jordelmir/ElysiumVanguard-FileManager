@@ -121,6 +121,29 @@ dependency, document:
 - The replacement risk (what happens if the project
   is abandoned tomorrow).
 
+### 4.1 Canonical tech stack
+
+The canonical tech stack is a contract. A skill
+that introduces a new dependency in one of these
+slots without an ADR is a contract violation.
+
+| Slot | Default |
+|---|---|
+| Android | Kotlin, Jetpack Compose, coroutines, Flow |
+| Web | React + TypeScript |
+| Mobile 3D | Filament (Android / iOS) with glTF / GLB |
+| Backend application services | Kotlin + Spring Boot **or** Ktor, per repository convention |
+| Geometry / compiler workers | Rust (when deterministic computation, memory control, or concurrency justifies it) |
+| Database (OLTP) | PostgreSQL |
+| Object storage | S3-compatible, or Supabase Storage |
+| Cache + transient coordination | Redis only when required |
+| API contracts | OpenAPI + generated clients |
+| Internal events | Typed domain events (per skill 08) |
+| Authentication | OIDC / OAuth2-compatible |
+| Authorization | RBAC + ABAC |
+| Observability | OpenTelemetry |
+| Infrastructure | Docker + reproducible CI/CD |
+
 When no equivalent implementation exists, prefer
 (before reaching for third-party SaaS):
 
@@ -131,22 +154,18 @@ When no equivalent implementation exists, prefer
 | Language (mobile) | Kotlin (Android) / Swift (iOS) |
 | UI (web) | React + Vite or SolidJS |
 | UI (mobile) | Jetpack Compose / SwiftUI |
-| Database (OLTP) | PostgreSQL 16+ |
 | Database (analytics) | ClickHouse or DuckDB |
-| Cache | Redis 7+ |
-| Object storage | S3-compatible (MinIO for local) |
 | Search | OpenSearch (or PostgreSQL FTS for < 1M docs) |
 | Message bus | NATS or PostgreSQL LISTEN/NOTIFY |
 | Identity | OIDC (Keycloak or self-hosted) |
 | 3D viewer (web) | Three.js + glTF |
-| 3D engine (native) | Filament (Android/iOS) |
 | CAD kernel | OpenCascade (OCCT) — vendored |
-| Telemetry | OpenTelemetry |
 | CI | GitHub Actions or self-hosted Woodpecker |
 | IaC | Terraform (Pulumi acceptable) |
 
-Every choice in this table is a default. A skill MAY
-propose a different choice with an ADR that:
+Every choice in the canonical table is a **default
++ a contract**. A skill MAY propose a different
+choice with an ADR that:
 
 - Names a measurable constraint the default cannot
   satisfy.
@@ -154,9 +173,353 @@ propose a different choice with an ADR that:
 - Identifies the migration path away from the
   alternative if it fails.
 
+The full canonical stack is in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 1.
+
 ---
 
-## 5. Skills Architecture
+## 5. Non-negotiable Engineering Constraints
+
+These are **non-negotiable**. A skill, an agent, a
+PR, or a release that violates any of these is a
+contract violation. The orchestrator blocks the
+release; the security skill escalates the incident;
+the regulatory skill files the RIA.
+
+### 5.1 Data integrity
+
+- **Never invent OEM data.** Every OEM figure
+  MUST be sourced from a verifiable OEM document.
+  An AI-inferred value is `AI_INFERRED`, never
+  `OEM_VERIFIED` (see section 6).
+- **Never invent dimensions, torques, pinouts, or
+  homologation requirements.** Every value MUST
+  carry the full truth-metadata (section 6).
+- **Never present AI-generated geometry as
+  validated production CAD.** A generated mesh is
+  `PARAMETRIC_FUNCTIONAL` or `CONCEPTUAL`
+  (section 7). Promoting it to `OEM_EXACT` or
+  `OEM_PARTIAL` is a contract violation.
+- **Never treat visual mesh compatibility as
+  mechanical compatibility.** The compatibility
+  check is the fault model + engineering review,
+  not the 3D viewer.
+
+### 5.2 Commercial integrity
+
+- **Never calculate royalties without an active
+  contract version.** Royalties are computed only
+  against a `RoyaltyContract` whose status is
+  `ACTIVE` (skill 09).
+- **Never allow mutable historical commercial
+  releases.** A signed release is append-only. A
+  rollback is a new release, not an edit.
+- **Never store money using floating-point types.**
+  Money is `BigDecimal` (JVM), `decimal.Decimal`
+  (Python), or `rust_decimal::Decimal` (Rust).
+
+### 5.3 Code hygiene
+
+- **Never use generic catch blocks that hide
+  failures.** Every catch block MUST re-throw, log
+  with a typed error, or return a typed `Result` /
+  `Either`.
+- **Never use unchecked null assertions.** A `!!`
+  in Kotlin, an unchecked `as` in TypeScript, an
+  `unwrap()` in production Rust, a hard `Object!`
+  cast in C# is a contract violation.
+- **Never use `unwrap`, `expect`, or panic-driven
+  control flow in production Rust.** The error
+  path is typed.
+
+### 5.4 Concurrency
+
+- **Never block the Android main thread with model
+  loading, decoding, or network work.** Every
+  heavy operation is on `Dispatchers.IO`. The
+  Compose render path is non-blocking.
+
+### 5.5 Trust
+
+- **Never trust imported 3D assets.** Every asset
+  is validated (manifold, units, coordinate system,
+  file size) before it enters the canonical store
+  (skill 06).
+- **Never execute scripts embedded in uploaded
+  assets.** A glTF with a script, a STEP with
+  macros, a USD with a custom schema that runs
+  code: rejected at the parse step.
+- **Never place secrets in the application
+  package.** Secrets live in the vault (skill 12).
+  A secret in code / config / assets / build
+  artifacts is a P0 incident.
+
+### 5.6 AI authority
+
+- **Never let an LLM directly mutate authoritative
+  financial or engineering state.** A model
+  proposes; a deterministic engine + human review
+  applies.
+- **Never mark a vehicle as road legal based
+  solely on AI output.** A `RoadLegal` flag
+  requires `ENGINEER_REVIEWED` AND
+  `REGULATORY_VERIFIED` AND a human
+  counter-signature.
+
+The full non-negotiable list, the rationale, and
+the recovery patterns are in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 2.
+
+---
+
+## 6. Truth and Confidence Model
+
+Every engineering fact in the platform MUST carry
+the following metadata. A fact without provenance
+is a hypothesis.
+
+| Field | Type | Notes |
+|---|---|---|
+| `Source` | `String` | URL, doc id, sensor id, etc. |
+| `Source type` | `String` | `OEM_DOC`, `REGULATORY_FILING`, `LAB_REPORT`, `ENGINEER_MEMO`, `TELEMETRY`, `AI_INFERENCE`, `USER_INPUT`, `COMMUNITY` |
+| `Jurisdiction or market` | `String?` | EU / US / CN / BR / etc. — when applicable |
+| `Vehicle applicability` | `String` | The `VehicleId` (or family) the fact applies to |
+| `Revision` | `String` | The `RevisionId` of the spec the fact is associated with |
+| `Confidence` | `Float` in [0.0, 1.0] | Per the verifier (skill 14) |
+| `Verification status` | `VerificationStatus` | See below |
+| `Reviewer` | `String?` | The human who reviewed the fact, if any |
+| `Timestamp` | `ISO-8601` | When the fact was recorded |
+
+**Verification status** is one of:
+
+- `OEM_VERIFIED` — sourced from an OEM document,
+  OEM signed off.
+- `REGULATORY_VERIFIED` — sourced from a regulatory
+  filing (UN, EU, ISO, etc.).
+- `LAB_VERIFIED` — produced by a lab test.
+- `ENGINEER_REVIEWED` — a human engineer reviewed
+  + signed.
+- `COMMUNITY_CORROBORATED` — 3+ independent
+  contributors corroborate.
+- `AI_INFERRED` — produced by an AI model (model,
+  version, prompt, temperature in the audit trail).
+- `UNKNOWN` — no source. Refused in production
+  paths; allowed only in dev / preview.
+
+**`AI_INFERRED` MUST NOT silently become
+`VERIFIED`.** The transition is a human review + a
+signed counter-signature, recorded in the audit
+trail (skill 09).
+
+The in-code shape is the value class
+`EngineeringFact<T>` (owned by skill 03; mirrored
+in every language the platform uses). The full
+spec, including the storage shape and the
+in-code example, is in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 3.
+
+---
+
+## 7. Vehicle Representation Levels
+
+Every generated vehicle MUST declare one
+representation level on the `Vehicle` aggregate
+(per skill 03). The level is **append-only**. The
+transition is:
+
+```
+VISUAL_ONLY → CONCEPTUAL → PARAMETRIC_FUNCTIONAL → OEM_PARTIAL → OEM_EXACT
+```
+
+A regression is forbidden. A new level is a
+signed revision.
+
+| Level | Meaning |
+|---|---|
+| `OEM_EXACT` | Vehicle spec produced from an OEM's authoritative document. Every fact is `OEM_VERIFIED` or higher. |
+| `OEM_PARTIAL` | OEM document for a subset of the parts; the rest are `PARAMETRIC_FUNCTIONAL` or `CONCEPTUAL`. UI shows which parts are OEM and which are not. |
+| `PARAMETRIC_FUNCTIONAL` | Produced by the platform's parametric model, validated by a human engineer. Every fact is `ENGINEER_REVIEWED` or higher. |
+| `CONCEPTUAL` | Concept; no engineer has signed it. UI must show "CONCEPTUAL — not validated". |
+| `VISUAL_ONLY` | Visual mock; engineering is not validated. UI must show "VISUAL_ONLY — not for production". |
+
+A `VISUAL_ONLY` or `CONCEPTUAL` vehicle is NOT
+eligible for:
+
+- Marketplace listing (skill 10)
+- Royalty settlement (skill 09)
+- Regulatory submission (skill 13)
+- Field diagnostic reference (skill 07)
+
+The mobile UI (skill 11) MUST display the level
+prominently on every vehicle card. A `VISUAL_ONLY`
+or `CONCEPTUAL` vehicle's UI MUST include a
+"this is not validated" warning. The orchestrator's
+verifier (skill 14) checks the UI for this
+constraint.
+
+The full rules, the UI requirements, and the
+transition protocol are in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 4.
+
+---
+
+## 8. AI Authority Boundary
+
+The AI in the platform is a **drafting tool**, not
+an **authority**. The platform's authoritative
+workflow is:
+
+```
+natural language
+  → structured proposal (the AI)
+  → schema validation (the deterministic engine)
+  → simulation or evidence (the deterministic engine + skill 07)
+  → human review (the reviewer in the catalog)
+  → signed revision (the catalog)
+```
+
+A model is a draft. A deterministic engine + a
+human review apply the draft.
+
+### 8.1 What AI may do
+
+The AI may:
+
+- Interpret requirements.
+- Propose architectures.
+- Generate candidate configurations.
+- Explain trade-offs.
+- Resolve terminology.
+- Suggest validation plans.
+- Generate drafts.
+- Identify inconsistencies.
+- Produce structured commands for deterministic
+  engines.
+
+### 8.2 What AI may NOT directly do
+
+The AI may NOT directly:
+
+- Approve safety-critical requirements.
+- Certify regulatory compliance.
+- Declare mechanical compatibility.
+- Finalize financial settlements.
+- Determine legal ownership.
+- Modify signed releases.
+- Create verified technical facts without
+  evidence.
+
+A decision that bypasses the workflow is a
+contract violation. The full boundary, the
+rationale, and the recovery patterns are in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 5.
+
+---
+
+## 9. Delivery Rules
+
+Work in **vertical, reviewable increments**. An
+increment is a slice that ships end-to-end (domain
+→ DB → use case → API → UI → auth → errors →
+tests → observability → docs → migration).
+
+### 9.1 Required contents of an increment
+
+Every increment MUST contain:
+
+1. **Domain model** — the new / changed types
+   (per skill 03).
+2. **Database migration** — when the domain
+   model changed (per skill 08).
+3. **Application use case** — the new / changed
+   command (per skill 08).
+4. **API contract** — the OpenAPI delta (per
+   skill 08).
+5. **UI integration** — when applicable (per
+   skill 11).
+6. **Authorization checks** — every new action
+   has an auth check (per skill 12).
+7. **Structured errors** — every new failure
+   path is a typed error (per section 10).
+8. **Unit tests** — per skill 14.
+9. **Integration tests** — per skill 14.
+10. **Observability** — the traces + metrics
+    + logs for the new code path (per skill 15).
+11. **Documentation** — the PRD + the ADR +
+    the user-facing docs.
+12. **Migration or rollback instructions** —
+    every increment that changes the schema or
+    the API has a migration + a rollback.
+
+A "placeholder production logic disguised as
+complete implementation" is a contract
+violation. The verifier (skill 14) rejects the PR.
+
+### 9.2 Verification report
+
+Every increment is verified by skill 14 before
+merge. The verification report is the
+orchestrator's primary input. The full
+verification gate list is in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section 6.
+
+---
+
+## 10. Required Error Model
+
+Use **explicit domain and application errors**. An
+error is not a string; an error is a typed value
+with a code, a message, a cause, a recovery hint,
+and the provenance metadata (per section 6).
+
+### 10.1 Canonical errors
+
+The platform uses the following canonical errors.
+A skill that introduces a new error type without
+an ADR is a contract violation; the new error MUST
+be added to the canonical list.
+
+| Error | When | Recovery |
+|---|---|---|
+| `VehicleDefinitionInvalid` | The spec fails validation (DSL / ontology rejected it) | The user fixes the spec. |
+| `CompatibilityConstraintViolation` | Two parts are not compatible | The user picks compatible parts. |
+| `ArtifactIntegrityFailure` | Hash / signature does not verify | The user re-uploads the artifact. |
+| `ContractNotActive` | A royalty contract is not `ACTIVE` | The user activates the contract, or picks an active one. |
+| `RoyaltyCalculationRejected` | The royalty engine rejected the calc | The user fixes the contract. |
+| `UnauthorizedProjectAccess` | The user does not have access | The user requests access. |
+| `RevisionConflict` | Optimistic-concurrency collision | The user refreshes + retries. |
+| `ProvenanceIncomplete` | An engineering fact is missing required metadata | The user provides the metadata. |
+| `SafetyGateNotSatisfied` | A `SafetyGoal` is not `REGULATORY_VERIFIED` + `ENGINEER_REVIEWED` + counter-signed | The user obtains the missing verifications. |
+| `AssetLimitExceeded` | A per-asset limit (file size, polygon count) is exceeded | The user reduces the asset or requests a limit exception (an ADR). |
+
+### 10.2 Error shape
+
+Errors are typed (`sealed class` / value class /
+tagged union), never free-form strings. Errors
+flow through the platform as typed values:
+
+- Domain → Application: `Result<DomainValue,
+  FoundryError>` (Kotlin) or `Either<FoundryError,
+  DomainValue>` (Haskell-style) or tagged union
+  (TypeScript).
+- Application → Infrastructure: typed JSON
+  envelope (code, message, field, reason,
+  provenance).
+- Application → UI: the UI receives the typed
+  error and renders a typed message.
+
+A `throw Exception("oops")` is a contract
+violation. A string-only error path is a contract
+violation. The full error transport, the
+serialization envelope, and the logging contract
+are in [`.ai/STANDARDS.md`](./STANDARDS.md)
+section 7.
+
+---
+
+---
+
+## 11. Skills Architecture
 
 The platform is built by a **team of specialized
 agents**, each one mapped to a skill under
@@ -164,7 +527,7 @@ agents**, each one mapped to a skill under
 only skill that has the full picture; every other
 skill owns a bounded context.
 
-### 5.1 The 16 Skills
+### 11.1 The 16 Skills
 
 | # | Skill | Bounded context |
 |---|---|---|
@@ -185,7 +548,7 @@ skill owns a bounded context.
 | 14 | `quality-verification` | Test strategy, fuzzing, coverage, mutation |
 | 15 | `devops-observability` | CI, SLOs, tracing, on-call |
 
-### 5.2 Skill Contract
+### 11.2 Skill Contract
 
 Every skill MUST publish a `SKILL.md` with:
 
@@ -217,7 +580,7 @@ Every skill MUST publish a `SKILL.md` with:
 A skill that does not list its **forbidden patterns**
 is not yet production-ready.
 
-### 5.3 Skill Topology
+### 11.3 Skill Topology
 
 ```
                 ┌──────────────────────────┐
@@ -250,7 +613,7 @@ auth).
 
 ---
 
-## 6. Artifact Contract
+## 12. Artifact Contract
 
 Every cross-skill artifact (a 3D model, a diagnostic
 trace, a royalty settlement, a regulatory submission)
@@ -283,7 +646,7 @@ failure.
 
 ---
 
-## 7. Quality Gates (Global)
+## 13. Quality Gates (Global)
 
 Every change MUST pass the following gates before
 merge. Skills MAY add stricter gates; no skill MAY
@@ -310,7 +673,7 @@ failing gate.
 
 ---
 
-## 8. Security Posture
+## 14. Security Posture
 
 Assume breach. The platform:
 
@@ -332,7 +695,7 @@ Assume breach. The platform:
 
 ---
 
-## 9. Regulatory Posture
+## 15. Regulatory Posture
 
 The platform is a regulated product in several
 jurisdictions. Skill 13 (functional-safety-regulatory)
@@ -353,7 +716,7 @@ linked from the ADR.
 
 ---
 
-## 10. Working with This Contract
+## 16. Working with This Contract
 
 When an agent (human or AI) needs to deviate from
 this contract, the deviation:
@@ -368,7 +731,7 @@ A deviation without an ADR is a bug.
 
 ---
 
-## 11. Coordination Protocol
+## 17. Coordination Protocol
 
 When a skill needs help from another skill, the
 protocol is:
@@ -393,7 +756,7 @@ orchestrator.
 
 ---
 
-## 12. Local Development Contract
+## 18. Local Development Contract
 
 Every developer (human or AI agent) MUST:
 
@@ -407,14 +770,14 @@ Every developer (human or AI agent) MUST:
 
 ---
 
-## 13. How to Use This Document
+## 19. How to Use This Document
 
 - **New agent onboarding** — read this document
   first. Then read the SKILL.md of the skill
   you are operating.
 - **Adding a new skill** — add a new `SKILL.md`
-  under `.ai/skills/`. Update section 5.1 of
-  this document. Update section 5.3 (the topology)
+  under `.ai/skills/`. Update section 11.1 of
+  this document. Update section 11.3 (the topology)
   if the new skill has cross-skill calls.
 - **Changing an existing skill** — update the
   `SKILL.md`. If the change violates a global
@@ -422,6 +785,30 @@ Every developer (human or AI agent) MUST:
 - **Resolving a cross-skill conflict** — the
   orchestrator (skill 00) decides. The decision
   is filed under `docs/adr/`.
+
+---
+
+## 20. Companion Document
+
+This document is the **global contract** — the
+mission, the architecture, the topology, the
+artifact contract, the security posture, the
+regulatory posture, the delivery rules.
+
+The **technical specifics** — the tech stack, the
+non-negotiables, the truth model, the vehicle
+representation levels, the AI authority boundary,
+the delivery rules, the error model — live in
+[`.ai/STANDARDS.md`](./STANDARDS.md). Every section
+in this document that needs canonical detail (4.1,
+5, 6, 7, 8, 9, 10) cross-references STANDARDS.md
+for the full spec.
+
+When this document and STANDARDS.md disagree,
+**STANDARDS.md wins for technical specifics**; this
+document wins for meta-rules (mission, topology,
+artifact contract, security posture, regulatory
+posture).
 
 ---
 

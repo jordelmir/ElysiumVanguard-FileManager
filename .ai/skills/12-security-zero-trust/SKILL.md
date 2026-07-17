@@ -40,6 +40,35 @@ is a blocked push.
   GDPR, CCPA, LGPD).
 - The red team (the quarterly exercise on the
   auth + marketplace surfaces).
+- **The AI authority boundary.** The security
+  skill owns the "AI may / AI may not"
+  boundary (per `.ai/AGENTS.md` section 8 and
+  `.ai/STANDARDS.md` section 5). The
+  authoritative workflow is enforced at the
+  application layer: a model is a draft, a
+  deterministic engine + a human review apply
+  the draft. A model never directly mutates
+  authoritative financial or engineering
+  state.
+- **Asset trust.** Every imported 3D asset is
+  untrusted by default. The asset is validated
+  (manifold + units + coordinate system + file
+  size + no-embedded-scripts + provenance
+  coverage) before it enters the canonical
+  store (per skill 06). The pipeline never
+  executes user-supplied code embedded in
+  assets. A glTF with a script, a STEP with
+  macros, a USD with a custom schema that runs
+  code: rejected at the parse step.
+- **Secrets in the application package.** A
+  secret in the binary, the assets, the
+  config, or the build artifacts is a P0
+  incident. Secrets live in the vault + the
+  secure enclave + the KMS. The CI scans every
+  build artifact for known secret patterns
+  (AWS keys, OAuth tokens, private keys,
+  database URLs with embedded credentials).
+  A positive match is a hard build failure.
 
 ## 3. Out-of-scope
 
@@ -100,25 +129,48 @@ trail).
    threat model if the PR changes the attack
    surface.
 3. **Secure code review.** The reviewer checks:
-   - No new secrets in the code.
+   - No new secrets in the code, the config,
+     the assets, the build artifacts, or the
+     application package. The CI scans every
+     PR + every build for known secret
+     patterns. A positive match is a hard
+     build failure.
    - No new dependencies without a license +
      CVE audit.
    - No new external integrations without a
      threat model.
    - No new auth flows without a council review.
+   - No imported 3D asset that has not been
+     validated by skill 06.
+   - No main-thread blocking on Android (model
+     loading, decoding, network) — per
+     `.ai/AGENTS.md` section 5.4.
+   - No unchecked null assertions (`!!` in
+     Kotlin, unchecked `as` in TypeScript,
+     `unwrap()` in production Rust) — per
+     `.ai/AGENTS.md` section 5.3.
+   - No AI-claimed road legality, AI-claimed
+     safety approval, AI-claimed mechanical
+     compatibility, AI-claimed financial
+     settlement. The model is a draft; the
+     deterministic engine + human review apply
+     the draft (per `.ai/AGENTS.md` section 8
+     and `.ai/STANDARDS.md` section 5).
 4. **Sign off.** The reviewer approves or
    requests changes. A "request changes"
    blocks the PR.
 5. **Receive a release.** The security sign-off
-   is required.
+   is required. The CI scan for secrets in
+   the application package is required.
 6. **Receive an incident.** The incident
    response plan is invoked.
 7. **CVE feed.** The CVE feed is monitored
    daily. A HIGH CVE with a patch available
    triggers a P1 incident.
 8. **Quarterly red team.** The red team
-   exercises the auth + marketplace surfaces.
-   The report is filed.
+   exercises the auth + marketplace surfaces
+   + the asset-pipeline + the AI authority
+   boundary. The report is filed.
 9. **Annual compliance review.** The
    compliance report is filed per
    jurisdiction.
@@ -133,10 +185,22 @@ trail).
 - Every quarter has a red team report.
 - Every year has a compliance review.
 - The auth audit log is append-only.
-- The secrets are never in the repo.
+- The secrets are never in the repo, the
+  config, the assets, the build artifacts, or
+  the application package. The CI scans every
+  PR + every build for known secret patterns.
 - The rate limiting is in place.
 - The encryption is in place (at rest + in
   transit).
+- The AI authority boundary is enforced at
+  the application layer. A model never
+  directly mutates authoritative financial or
+  engineering state (per `.ai/AGENTS.md`
+  section 8 and `.ai/STANDARDS.md` section 5).
+- The asset pipeline is the trust boundary
+  for imported 3D data. Untrusted assets are
+  rejected. The pipeline never executes
+  user-supplied code embedded in assets.
 
 ## 8. Failure modes
 
@@ -174,9 +238,13 @@ trail).
 
 - **"We'll add auth later".** A feature that
   ships without auth is a contract violation.
-- **Hard-coded secrets.** A secret in the code
-  is a contract violation. The secrets are
-  in the vault.
+- **Hard-coded secrets.** A secret in the code,
+  the config, the assets, the build artifacts,
+  or the application package is a contract
+  violation. The secrets are in the vault +
+  the secure enclave + the KMS. The CI
+  enforces this — a positive match is a hard
+  build failure.
 - **Anonymous access.** An action that does
   not require auth is a contract violation.
   Every action requires auth.
@@ -196,6 +264,34 @@ trail).
 - **"We'll do a security review later".** A PR
   that ships without a security review is a
   contract violation.
+- **Letting an LLM directly mutate
+  authoritative state.** A model that
+  writes to the database, the catalog, the
+  audit trail, the royalty engine, the
+  regulatory submission, the settlement
+  service, or the safety gate is a contract
+  violation. The model produces a draft; the
+  deterministic engine + a human review
+  apply the draft (per `.ai/AGENTS.md`
+  section 8 and `.ai/STANDARDS.md` section 5).
+- **Trusting imported 3D assets.** An
+  unvalidated asset is a contract violation.
+  Every asset is validated (manifold + units
+  + coordinate system + file size + no-
+  embedded-scripts + provenance coverage)
+  before it enters the canonical store
+  (per skill 06). A glTF with a script, a
+  STEP with macros, a USD with a custom
+  schema that runs code: rejected at the
+  parse step.
+- **Secrets in the application package.** A
+  secret in the binary, the assets, the
+  config, or the build artifacts is a P0
+  incident. The mobile app MUST NOT embed
+  any credential, token, key, or URL with
+  embedded credentials. The CI scans every
+  build artifact for known secret patterns.
+  A positive match is a hard build failure.
 
 ## 11. The security model in the Elysium
 Automotive Foundry

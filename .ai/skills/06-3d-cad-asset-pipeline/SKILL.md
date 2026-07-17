@@ -73,6 +73,16 @@ its own concern.
 - The ontology types (skill 03) — what type of
   asset is this? (A `BatteryPack` is rendered
   differently from a `Chassis`).
+- The `VehicleRepresentationLevel` from the
+  spec the asset is associated with. The
+  level constrains the validation suite
+  (a `VISUAL_ONLY` asset has different OEM
+  checks than an `OEM_EXACT` asset).
+- The `EngineeringFact<T>` provenance for
+  every OEM-sourced dimension / tolerance /
+  material. A fact that is `AI_INFERRED`
+  cannot enter the canonical store for an
+  `OEM_EXACT` or `OEM_PARTIAL` spec.
 - The user's brand + project context.
 
 ## 5. Outputs
@@ -107,16 +117,42 @@ catalog (skill 09).
    `Material`, `Texture`, `Light`, `Camera`
    nodes).
 4. **Validate.** Run the validation suite:
-   - Units are SI (reject files in inches /
-     feet / custom units).
-   - Coordinate system is right-handed Y-up.
-   - Meshes are manifold (no T-junctions, no
-     non-manifold edges).
-   - Materials are PBR (no legacy Phong, no
-     non-PBR workflows).
-   - File size is within the documented budget
-     (default: 100 MB per asset, configurable
-     per project).
+   - **Units are SI** (reject files in inches
+     / feet / custom units).
+   - **Coordinate system is right-handed
+     Y-up.**
+   - **Meshes are manifold** (no T-junctions,
+     no non-manifold edges). The manifold
+     check is a deterministic, total function
+     with a documented test fixture.
+   - **Materials are PBR** (no legacy Phong,
+     no non-PBR workflows).
+   - **File size is within the documented
+     budget** (default: 100 MB per asset,
+     configurable per project).
+   - **No embedded scripts.** A glTF with a
+     script, a STEP with macros, a USD with
+     a custom schema that runs code: rejected
+     at this step. The pipeline never executes
+     user-supplied code.
+   - **Provenance coverage.** Every OEM-sourced
+     dimension / tolerance / material MUST
+     have a corresponding `EngineeringFact<T>`
+     in the spec (per skill 04). A fact with
+     `verificationStatus = AI_INFERRED` is
+     rejected for an `OEM_EXACT` or
+     `OEM_PARTIAL` spec; a fact with
+     `verificationStatus = UNKNOWN` is
+     rejected for any spec above
+     `CONCEPTUAL`.
+   - **Visual-mesh-is-not-mechanical-
+     compatibility.** A mesh that visually
+     matches a part is NOT a declaration of
+     mechanical compatibility. The
+     compatibility check is the fault model
+     (skill 07) + engineering review, not
+     the 3D viewer. The manifest records the
+     distinction.
 5. **Normalize.** Convert the scene graph to
    glTF 2.0. Apply Draco mesh compression. Apply
    KTX2 texture compression. Use basis
@@ -132,24 +168,40 @@ catalog (skill 09).
    lighting the mobile renderer uses, so the
    preview is representative).
 9. **Sign.** Sign the canonical artifact +
-   the manifest + the provenance.
+   the manifest + the provenance. The
+   provenance is signed with the same Ed25519
+   key as the rest of the artifact (per
+   `.ai/AGENTS.md` section 12).
 10. **Store.** Land the artifacts in the
     content-addressed store. Land the metadata
     + provenance in the catalog.
 11. **Report.** Emit the processing report to
-    the user.
+    the user. The report includes the asset's
+    `VehicleRepresentationLevel` (inherited
+    from the spec) and the verification status
+    of every OEM-sourced fact.
 
 ## 7. Quality gates
 
 - The original file is well-formed.
 - The original file passes the validation
-  suite.
+  suite (manifold + units + coordinate system
+  + materials + size + no-embedded-scripts
+  + provenance coverage).
 - The canonical artifact is generated.
 - The 4 LODs are generated.
 - The bounds are computed.
 - The 8 previews are generated.
 - The metadata is signed.
-- The provenance is signed.
+- The provenance is signed. Every OEM-sourced
+  fact in the manifest carries a non-empty
+  `EngineeringFact<T>` with all required
+  fields (per skill 03).
+- The asset's `VehicleRepresentationLevel` is
+  recorded in the manifest. A `VISUAL_ONLY` or
+  `CONCEPTUAL` asset is flagged in the catalog
+  as ineligible for marketplace / royalty /
+  regulatory / field diagnostic reference.
 - The artifacts are stored in the content-
   addressed store.
 - The metadata is in the catalog.
@@ -217,6 +269,29 @@ not produce a half-baked artifact.
 - **Skipping the validation suite.** The
   validation suite is the safety net. A
   pipeline that skips the suite is a violation.
+- **Trusting imported 3D assets.** An
+  unvalidated asset is a contract violation.
+  Every asset is validated (manifold + units
+  + coordinate system + file size + no-
+  embedded-scripts + provenance coverage)
+  before it enters the canonical store.
+- **Executing scripts embedded in uploaded
+  assets.** A glTF with a script, a STEP with
+  macros, a USD with a custom schema that runs
+  code: rejected at the parse step. The
+  pipeline never executes user-supplied code.
+- **Visual-mesh compatibility declared as
+  mechanical compatibility.** A mesh that
+  visually matches a part is not mechanically
+  compatible. The manifest records the
+  distinction; the compatibility check lives
+  in skill 07, not in the 3D pipeline.
+- **Promoting an AI-generated mesh to
+  `OEM_EXACT` or `OEM_PARTIAL`.** A generated
+  mesh is `PARAMETRIC_FUNCTIONAL` or
+  `CONCEPTUAL`. Promoting it is a contract
+  violation (per `.ai/AGENTS.md` section 5.1
+  and `.ai/STANDARDS.md` section 2.1).
 
 ## 11. The pipeline in the Elysium Automotive
 Foundry

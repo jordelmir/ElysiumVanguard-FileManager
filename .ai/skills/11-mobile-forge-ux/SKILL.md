@@ -43,6 +43,18 @@ invisible.
 - The on-device security (the biometric unlock,
   the secure enclave for keys, the
   certificate-based auth).
+- **The `VehicleRepresentationLevel` UI
+  surface.** Every vehicle card, vehicle
+  detail page, and spec view MUST display
+  the level prominently. A `VISUAL_ONLY` or
+  `CONCEPTUAL` vehicle MUST include a
+  "this is not validated" warning. An
+  `OEM_PARTIAL` vehicle MUST show which
+  parts are OEM-sourced and which are not.
+  The UI MUST NOT allow a `VISUAL_ONLY` or
+  `CONCEPTUAL` vehicle to be listed in the
+  marketplace, settled for royalties, or
+  submitted for regulatory approval.
 
 ## 3. Out-of-scope
 
@@ -155,6 +167,33 @@ offline support to a new surface).
 - The biometric unlock is fallible (a wrong
   fingerprint falls back to a PIN, not to
   bypass).
+- **The `VehicleRepresentationLevel` badge is
+  visible on every vehicle card.** A snapshot
+  test asserts the badge is rendered for every
+  level. A test asserts the badge is removed
+  — the test fails — when the level is
+  removed from the data class (i.e. the level
+  is required, not optional).
+- **A `VISUAL_ONLY` or `CONCEPTUAL` vehicle
+  shows the "not validated" warning.** A
+  snapshot test asserts the warning is
+  rendered. The warning is in every supported
+  locale.
+- **A `VISUAL_ONLY` or `CONCEPTUAL` vehicle
+  cannot be listed in the marketplace,
+  settled for royalties, or submitted for
+  regulatory approval from the UI.** A
+  Compose UI test asserts the corresponding
+  buttons are disabled or hidden.
+- **An `OEM_PARTIAL` vehicle shows a per-part
+  provenance breakdown.** A snapshot test
+  asserts the breakdown is rendered.
+- **The Android main thread is never blocked
+  by model loading, decoding, or network
+  work.** Every heavy operation is on
+  `Dispatchers.IO`. The Compose render path
+  is non-blocking. A `StrictMode` test asserts
+  no main-thread disk or network.
 
 ## 8. Failure modes
 
@@ -214,6 +253,28 @@ offline support to a new surface).
   "light theme" + a "high contrast theme" + a
   "compact theme" is a design system. Pick
   one + the platform's theme.
+- **Hiding the `VehicleRepresentationLevel`.**
+  A vehicle card without the level badge is
+  a contract violation. The level is not a
+  tooltip; the level is a first-class field
+  on the card.
+- **Presenting a `VISUAL_ONLY` or `CONCEPTUAL`
+  vehicle as production-ready.** A UI that
+  shows the "not validated" warning as a
+  dismissible toast is a violation. The
+  warning is a persistent badge + a
+  per-action confirmation dialog.
+- **Blocking the Android main thread.** A
+  model load, a decode, or a network call on
+  the main thread is a contract violation
+  (per `.ai/AGENTS.md` section 5.4). Every
+  heavy operation is on `Dispatchers.IO`.
+- **Storing secrets in the app package.** A
+  secret in the binary, the assets, the
+  config, or the build artifacts is a P0
+  incident (per `.ai/AGENTS.md` section 5.5
+  and skill 12). Secrets live in the vault
+  + the secure enclave.
 
 ## 11. The mobile UX in the Elysium Automotive
 Foundry
