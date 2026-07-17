@@ -61,14 +61,20 @@ data class Workspace(
 
 sealed class WorkspaceState {
     /** The workspace is open; sessions can be launched. */
-    object Active : WorkspaceState()
+    object Active : WorkspaceState() {
+        override fun toString(): String = "Active"
+    }
 
     /** The workspace is suspended; sessions are paused but
      *  state is preserved. A follow-up Active restores. */
-    object Paused : WorkspaceState()
+    object Paused : WorkspaceState() {
+        override fun toString(): String = "Paused"
+    }
 
     /** The workspace is closed; the user explicitly retired
      *  it. A follow-up Active re-opens with a fresh
      *  state. */
-    object Closed : WorkspaceState()
+    object Closed : WorkspaceState() {
+        override fun toString(): String = "Closed"
+    }
 }
