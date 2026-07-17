@@ -19,9 +19,222 @@ from a phone" surface. Without it, the platform is
 a desktop-only tool. Without offline-first, the
 field mechanic is stranded when the connection
 drops. Without the renderer, the 3D asset is
-invisible.
+invisible. Without the
+`VehicleRepresentationLevel` displayed
+prominently, a `VISUAL_ONLY` vehicle is
+mistaken for production-ready. The mobile UX
+is the platform's surface for the field, the
+designer, the mechanic, the buyer, and the
+reviewer.
 
-## 2. In-scope
+## 2. Main navigation — FORGE
+
+The mobile app exposes a **primary area** named
+**FORGE**. The FORGE area is the platform's
+"build a vehicle from a phone" surface. The
+**8 primary actions** are:
+
+- **Create brand.** Start a new brand
+  (the legal entity that owns the
+  vehicle program).
+- **Create vehicle.** Start a new
+  vehicle (a `VehicleDefinition`).
+- **Continue project.** Resume a
+  project the user is already
+  working on.
+- **Join project.** Join a project
+  the user is invited to.
+- **Explore licensed projects.**
+  Browse the marketplace (per skill
+  10) for projects the user is
+  authorized to see.
+- **Talk to AI Council.** Open the
+  AI council (per skill 05) for a
+  deliberation.
+- **Review engineering findings.**
+  Open the engineering review (the
+  compatibility constraints, the
+  diagnostic findings, the
+  validation results).
+- **Review commercial status.**
+  Open the commercial status (the
+  royalty settlement, the contract
+  version, the marketplace listing).
+
+The FORGE area is **the only area** the
+designer needs for day-to-day work. The
+other areas (the diagnostics, the
+marketplace, the catalog) are accessible
+from the project workspace (per section
+3) but are not in the FORGE primary
+navigation.
+
+## 3. Project workspace
+
+The project workspace is the **14-section
+contextual view** for a project. Every
+section is a dedicated screen; the user
+navigates between sections via the bottom
+navigation bar (iOS / Android standard).
+
+The 14 sections are:
+
+1. **Overview.** The project
+   summary (the vehicle + the
+   brand + the team + the
+   status).
+2. **Requirements.** The PRD
+   + the requirements hierarchy
+   (per skill 02).
+3. **Vehicle architecture.** The
+   `Spec.Artifact` (per skill 04)
+   + the `SceneManifest` (per
+   skill 04) + the
+   compatibility constraints.
+4. **3D digital twin.** The
+   interactive 3D scene (per
+   skill 06) + the
+   `VehicleRepresentationLevel`
+   badge (per `.ai/STANDARDS.md`
+   section 4) + the asset
+   picker.
+5. **Components.** The
+   `PartDefinition`s + the
+   `PartInstance`s + the
+   compatibility solver (per
+   skill 04).
+6. **AI Council.** The
+   deliberation UI (per skill 05)
+   + the proposals + the
+   evidence per proposal.
+7. **Simulations.** The
+   simulation results (per
+   skill 07) + the digital twin
+   state.
+8. **Diagnostics.** The
+   diagnostic graph (per skill
+   07) + the active DTCs + the
+   repair actions.
+9. **Repairability.** The
+   `Procedure`s + the
+   `RepairAction`s + the
+   `Tool`s.
+10. **Manufacturing.** The
+    11 manufacturing readiness
+    gates (per skill 10) + the
+    supplier network + the
+    controlled disclosure.
+11. **IP and contributions.**
+    The `AuthorshipClaim`s (per
+    skill 09) + the contribution
+    graph + the AI assistance
+    metadata.
+12. **Contracts.** The
+    `RoyaltyContract`s (per
+    skill 09) + the versions +
+    the migration policies.
+13. **Marketplace.** The
+    listings (per skill 10) +
+    the offers + the RFQs.
+14. **Release history.** The
+    per-release artifacts (per
+    `.ai/AGENTS.md` section 9
+    + section 21) + the
+    changelogs.
+
+A project workspace without all 14
+sections is a contract violation; the
+verifier (skill 14) rejects the release.
+
+## 4. Mobile interaction model
+
+The mobile UX uses a **10-element
+interaction model**. The model is the
+discipline that prevents the viewport
+from being crowded with controls.
+
+- **Full-screen 3D viewport.** The
+  3D scene takes the full screen;
+  the controls are hidden until
+  requested.
+- **Bottom sheet inspector.** The
+  per-selection details (a
+  `PartInstance`'s properties +
+  the diagnostic findings + the
+  repair actions) are in a
+  bottom sheet that the user
+  can expand / collapse.
+- **Search command palette.** A
+  global command palette (the
+  user types "battery" + the
+  palette shows the matching
+  `PartInstance`s + the
+  matching `Procedure`s +
+  the matching suppliers).
+- **Contextual actions.** The
+  per-screen actions (the
+  "Save" + the "Validate" + the
+  "Publish") are in a
+  contextual action bar.
+- **Gesture-safe camera
+  controls.** The 3D camera
+  supports single-finger pan +
+  two-finger pinch + two-finger
+  rotate; a gesture that
+  conflicts with a system
+  gesture is disabled.
+- **Selection breadcrumbs.** A
+  breadcrumb trail of the
+  current selection (e.g. "Project
+  > Vehicle > Powertrain >
+  Battery pack") so the user
+  never gets lost.
+- **Accessible list equivalent.**
+  Every 3D scene has a list view
+  (per `.ai/STANDARDS.md` section
+  2.2 + per skill 11's i18n bundle)
+  for blind + low-vision users.
+- **Loading progress by
+  subsystem.** A loading
+  indicator per subsystem (per
+  skill 06's streaming priority
+  — vehicle shell first, then
+  active subsystem, then
+  details on selection); a
+  user never sees a blank
+  scene.
+- **Explicit representation
+  level.** Every vehicle card
+  + every vehicle detail page
+  + every spec view displays
+  the `VehicleRepresentationLevel`
+  prominently. A `VISUAL_ONLY`
+  or `CONCEPTUAL` vehicle's
+  UI includes a "this is not
+  validated" warning.
+- **Explicit data confidence.**
+  Every fact the user sees has
+  the `verificationStatus`
+  (per `.ai/STANDARDS.md` section
+  3) + the confidence + the
+  source. A fact that is
+  `AI_INFERRED` is flagged; a
+  fact that is `UNKNOWN` is
+  refused.
+- **Do not crowd the viewport
+  with all controls
+  simultaneously.** A 3D
+  scene that shows 20 floating
+  buttons is a usability
+  failure. The controls are
+  curated; the user requests a
+  control when needed.
+
+A mobile UX that violates the 10
+elements is a contract violation; the
+verifier (skill 14) rejects the release.
+
+## 5. In-scope
 
 - The mobile UX (Jetpack Compose / SwiftUI).
 - The mobile renderer (Filament for Android/iOS,
@@ -56,7 +269,7 @@ invisible.
   marketplace, settled for royalties, or
   submitted for regulatory approval.
 
-## 3. Out-of-scope
+## 6. Out-of-scope
 
 - The backend (skill 08).
 - The 3D pipeline (skill 06).
@@ -70,7 +283,7 @@ diagnostic (skill 07), the marketplace (skill 10).
 The mobile renders the 3D (skill 06). Each is its
 own concern.
 
-## 4. Inputs
+## 7. Inputs
 
 - The user (a designer, a mechanic, a buyer, a
   project owner, a supplier).
@@ -84,7 +297,7 @@ own concern.
 - The user's preferences (language, theme,
   accessibility settings).
 
-## 5. Outputs
+## 8. Outputs
 
 - The mobile app (the binary the user installs).
 - The mobile renderer (the 3D + 2D rendering
@@ -107,7 +320,7 @@ renderer). The offline-first engine is a
 reusable library (any skill can use it to add
 offline support to a new surface).
 
-## 6. Workflow
+## 9. Workflow
 
 1. **Receive the user.** A user opens the app.
    The app:
@@ -150,7 +363,7 @@ offline support to a new surface).
    + Play Store + sideload. The release is
    signed + notarized + reproducible.
 
-## 7. Quality gates
+## 10. Quality gates
 
 - The app is offline-first.
 - The app is accessible (TalkBack, large
@@ -195,7 +408,7 @@ offline support to a new surface).
   is non-blocking. A `StrictMode` test asserts
   no main-thread disk or network.
 
-## 8. Failure modes
+## 11. Failure modes
 
 - **The user is offline.** The app continues to
   work; the sync uploads when the connection
@@ -216,7 +429,7 @@ offline support to a new surface).
   user's data is in the cloud, signed +
   encrypted + recoverable.
 
-## 9. Coordination contract
+## 12. Coordination contract
 
 - **Input from**: skill 04 (spec), skill 06
   (3D), skill 07 (diagnostic), skill 10
@@ -226,7 +439,7 @@ offline support to a new surface).
 - **Triggered by**: every user interaction.
 - **Frequency**: continuous.
 
-## 10. Forbidden patterns
+## 13. Forbidden patterns
 
 - **Online-only.** An app that requires a
   network is a contract violation. The field
@@ -276,7 +489,7 @@ offline support to a new surface).
   and skill 12). Secrets live in the vault
   + the secure enclave.
 
-## 11. The mobile UX in the Elysium Automotive
+## 14. The mobile UX in the Elysium Automotive
 Foundry
 
 The mobile UX is the platform's "I can do this
@@ -291,7 +504,7 @@ in the field.
 The mobile UX is the platform's "we meet the
 user where they are" answer.
 
-## 12. Working with this skill
+## 15. Working with this skill
 
 When invoked, this skill:
 

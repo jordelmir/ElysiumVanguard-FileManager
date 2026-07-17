@@ -579,6 +579,66 @@ A failing test is a P0 incident;
 the orchestrator blocks the
 release.
 
+### 10.1. Top-level guarantees (8 proofs)
+
+The IP/provenance/royalty engine
+MUST also satisfy the following
+**8 top-level guarantees**. A
+guarantee that fails is a P0
+incident.
+
+- **No contract means no
+  royalty.** A test asserts
+  no settlement is generated
+  when there is no signed
+  agreement.
+- **An inactive contract
+  cannot generate charges.**
+  A test asserts a
+  `RoyaltyContract` whose
+  status is not `ACTIVE`
+  produces no settlement.
+- **Historical events use
+  historical contract
+  versions.** A test asserts
+  a sale that occurred
+  between v1 and v2 is
+  calculated under v1 (per
+  the migration policy).
+- **Duplicate sale events do
+  not duplicate royalties.** A
+  test asserts the same
+  `eventId` produces the same
+  settlement; the state is
+  unchanged.
+- **Reversals produce
+  balanced ledger entries.**
+  A test asserts a `Reversal`
+  event produces a
+  `Settlement` that nullifies
+  the original without
+  mutating it; the ledger
+  remains balanced.
+- **Unauthorized users cannot
+  alter agreements.** A
+  test asserts a user without
+  the role receives a typed
+  `UnauthorizedProjectAccess`
+  error.
+- **Floating-point arithmetic
+  is absent.** A test asserts
+  a `Double` / `Float` / `f64`
+  in the calculation path is
+  a CI failure.
+- **Every statement can be
+  reproduced from immutable
+  inputs.** A test asserts a
+  statement can be replayed
+  from the audit trail (the
+  revenue events + the
+  contract versions + the
+  engine version).
+
 ## 11. Quality gates
 
 - Every contract has all 14

@@ -1,247 +1,637 @@
 ---
 name: marketplace-manufacturing
-description: The marketplace, the escrow, the supplier / engineer / lab / manufacturer integration, the order lifecycle, the fulfillment chain. The "you can buy a vehicle design (or a part, or a service) here" surface.
+description: Implements project licensing, supplier discovery, RFQs, manufacturing qualification and controlled collaboration.
 ---
 
-# Skill 10 — Marketplace + Manufacturing
+# Skill 10 — Marketplace and Manufacturing Network
 
 ## 1. Mission
 
-Build and maintain the **marketplace** where users
-discover, evaluate, purchase, and receive vehicle
-designs (or parts, or services). Build and maintain
-the **supplier / engineer / lab / manufacturer
-integration** that turns a purchase into a
-fulfillable, shippable product.
+**Connect qualified projects with engineers,
+suppliers, laboratories, manufacturers and
+licensees without exposing confidential
+engineering data unnecessarily.**
 
-The marketplace is the platform's "you can buy a
-vehicle design (or a part, or a service) here"
-surface. The supplier integration is the
-platform's "the supplier can fulfill the order"
-back office.
+The marketplace is the **controlled
+disclosure** surface. A `VISUAL_ONLY` or
+`CONCEPTUAL` vehicle (per `.ai/STANDARDS.md`
+section 4) is **NOT** eligible for listing.
+A `PARAMETRIC_FUNCTIONAL` vehicle is
+eligible for design-stage engagement (a
+design partner, a tooling supplier). An
+`OEM_PARTIAL` or `OEM_EXACT` vehicle is
+eligible for full commercial engagement.
 
-## 2. In-scope
+The marketplace is **not** a free-for-all
+bazaar. The platform enforces the
+manufacturing readiness gates (per
+section 6) before a project is marketed
+as manufacturing-ready. The platform is
+the **gate** between "the engineering works"
+and "the engineering ships".
 
-- The marketplace catalog (browse, search, filter,
-  compare, save).
-- The listing (a saleable artifact, with price,
-  license, royalty contract, delivery method).
-- The order (a buyer's intent to purchase).
-- The escrow (the holding of the payment until
-  the order is fulfilled).
-- The fulfillment (the chain from order to
-  delivery: design delivery, manufacturing,
-  shipping, installation).
-- The supplier integration (the API the
-  suppliers, engineers, labs, and manufacturers
-  use to fulfill orders).
-- The reviews (the buyer's feedback on the
-  order, the supplier, the product).
-- The disputes (the buyer's claim that the order
-  is not as described; the supplier's claim that
-  the buyer is in breach).
-- The refunds (the resolution of a dispute).
+## 2. Marketplace categories
 
-## 3. Out-of-scope
+The marketplace supports **11
+categories**. A category that is not in
+this list is a contract violation.
 
-- The royalty calculation (skill 09).
-- The 3D asset (skill 06).
-- The diagnostic (skill 07).
-- The mobile UX (skill 11).
-- The payment provider (a third-party SaaS — this
-  skill is the integration layer).
+- **Vehicle projects.** A
+  `VehicleDefinition` + the
+  supporting `Spec.Artifact`s.
+- **Component designs.** A
+  `PartDefinition` + the
+  supporting `GeometryAsset`s.
+- **Technology licenses.** A
+  patent, a trademark, a
+  trade secret, a piece of
+  software.
+- **Engineering services.** A
+  service (a "design review",
+  a "thermal simulation", a
+  "FEA study").
+- **Simulation services.** A
+  simulation service (a
+  crash simulation, a CFD
+  run, an EMC test).
+- **Prototyping.** A
+  prototyping service (a
+  3D print, a CNC part, a
+  hand-built prototype).
+- **Testing laboratories.** A
+  test service (a dyno test,
+  a salt-spray test, an EMC
+  chamber).
+- **Tooling.** A tooling
+  service (a mold, a die, a
+  jig, a fixture).
+- **Manufacturing.** A
+  manufacturing service (a
+  small-batch production,
+  a large-batch production,
+  a specialized process).
+- **Software modules.** A
+  software module (a
+  diagnostic plugin, a
+  simulation plugin, an
+  analysis tool).
+- **Diagnostic content.** A
+  diagnostic content (a
+  `Procedure`, a `DiagnosticTarget`,
+  a `FaultCode` set, a
+  `RepairAction`).
 
-The marketplace lists the asset. The settlement
-engine (skill 09) pays the royalty. The diagnostic
-(skill 07) provides the field data. Each is its
-own concern.
+A new category is added via an ADR + a
+vote in the AI council (skill 05).
 
-## 4. Inputs
+## 3. Commercial workflow
 
-- A `Listing` (a saleable artifact, with the
-  catalog reference, the price, the license, the
-  royalty contract).
-- A `Buyer` (a user with intent to purchase).
-- A `Supplier` (a user with intent to fulfill
-  the order).
-- An `Order` (a buyer's intent to purchase a
-  listing).
-- A `Fulfillment` (a supplier's progress on the
-  order).
-- A `Review` (a buyer's feedback).
-- A `Dispute` (a buyer's or supplier's claim).
-- A `Refund` (the resolution of a dispute).
+The marketplace implements a **14-step
+commercial workflow**. Every step is
+recorded in the audit trail (per skill
+09) + the outbox (per skill 08).
 
-## 5. Outputs
+1. **Project eligibility review.**
+   The platform checks the project's
+   `VehicleRepresentationLevel`
+   (per `.ai/STANDARDS.md` section 4)
+   + the manufacturing readiness
+   gates (per section 6). A project
+   that fails the gates is rejected
+   at this step.
+2. **Public teaser.** A public
+   teaser (the public
+   `representationLevel`, the
+   key features, the public
+   preview images) is published.
+   The teaser does NOT include
+   confidential engineering
+   data.
+3. **Confidentiality agreement
+   (CDA / NDA).** The buyer /
+   supplier signs a CDA / NDA
+   before any confidential data
+   is shared. The CDA / NDA is
+   a typed `RoyaltyContract` (per
+   skill 09) with a `TERRITORY` +
+   a `FIELD OF USE` + an
+   `EXPIRATION`.
+4. **Controlled data-room access.**
+   The buyer / supplier gets
+   access to the confidential
+   data room (per section 4).
+   The access is per-buyer +
+   per-artifact + time-bounded.
+5. **Buyer or supplier
+   qualification.** The buyer /
+   supplier is qualified (per
+   section 5). An unqualified
+   party is rejected at this
+   step.
+6. **Request for information
+   (RFI).** The buyer / supplier
+   may submit an RFI. The RFI is
+   a typed artifact; the
+   response is a typed artifact.
+7. **Request for Quote (RFQ).**
+   The buyer / supplier may
+   submit an RFQ. The RFQ is a
+   typed artifact; the offer is
+   a typed artifact; both are
+   content-addressed + signed.
+8. **Offer.** The supplier
+   responds to the RFQ with an
+   offer. The offer is bound to
+   the RFQ; the offer is
+   content-addressed + signed;
+   the offer's money is
+   `BigDecimal`.
+9. **Negotiation.** The
+   parties negotiate the offer.
+   Each negotiation round is a
+   typed artifact. The accepted
+   offer is signed.
+10. **Contract.** The accepted
+    offer becomes a
+    `RoyaltyContract` (per skill
+    09). The contract is signed
+    + content-addressed. The
+    contract is immutable.
+11. **Milestones.** The
+    contract has N milestones.
+    Each milestone is a typed
+    event; the milestone payment
+    is in `BigDecimal`.
+12. **Delivery acceptance.** The
+    buyer accepts the delivery.
+    The acceptance is a typed
+    event + a signed artifact.
+13. **Dispute process.** A
+    dispute is filed + a
+    resolution is attempted.
+    The dispute is in the audit
+    trail. A dispute that is
+    not resolved in the SLA
+    (default: 30 days) is
+    escalated.
+14. **Settlement.** The
+    settlement is computed by
+    the royalty engine (per
+    skill 09). The settlement is
+    in `BigDecimal`. The
+    settlement is filed in the
+    audit trail.
 
-- The marketplace catalog (browse, search,
-  filter, compare, save).
-- The listing page (the buyer's view of a
-  listing).
-- The order (a signed contract between the
-  buyer and the supplier, with the escrow
-  state).
-- The fulfillment status (the supplier's
-  progress on the order).
-- The review (the buyer's feedback).
-- The dispute resolution (the platform's
-  decision on a dispute).
-- The settlement (the per-user amounts from
-  skill 09, the per-order fees, the per-
-  marketplace fees).
+## 4. Controlled disclosure
 
-The marketplace emits the events (skill 08) that
-trigger the settlements (skill 09). The
-marketplace consumes the catalog (skill 09) to
-know what to list.
+The platform enforces **9 controlled
+disclosure practices**. A disclosure
+that bypasses a practice is a P0
+incident.
 
-## 6. Workflow
+- **Project-level access.** A
+  party may access only the
+  projects they are authorized
+  for. A party without
+  authorization receives a
+  typed `UnauthorizedProjectAccess`
+  error.
+- **Artifact-level access.** A
+  party may access only the
+  artifacts they are authorized
+  for. A confidential
+  `GeometryAsset` is hidden
+  from an unauthorized party
+  even if the party is
+  authorized for the project.
+- **Expiring access.** A
+  party's access expires on
+  the contract's
+  `EFFECTIVE PERIOD` end. An
+  access after the expiration
+  is a P0 incident.
+- **Watermarking.** Every
+  artifact the party downloads
+  is watermarked with the
+  party's ID + the download
+  timestamp. The watermark
+  is per-download.
+- **Download restrictions.** A
+  confidential artifact has a
+  download cap (default: 5
+  downloads per party). A
+  download that exceeds the
+  cap is rejected.
+- **Export audit.** Every
+  download + every access +
+  every disclosure is logged
+  in the audit trail. The log
+  includes the party ID + the
+  artifact ID + the timestamp.
+- **Region restrictions.** A
+  party in a restricted
+  jurisdiction (per the
+  export controls + the
+  sanctions list) is rejected.
+- **Revocation.** A party that
+  is revoked (the CDA is
+  revoked, the contract is
+  terminated, the party is
+  sanctioned) loses access
+  **immediately**. The
+  revocation is recorded in the
+  audit trail.
+- **Least privilege.** A party
+  sees only the data the party
+  needs to do the work. A
+  supplier that is assigned to
+  the powertrain does NOT see
+  the chassis details. A
+  supplier that is assigned
+  to the chassis does NOT see
+  the powertrain details.
 
-1. **Receive a `Listing`.** A supplier (or a
-   project owner) creates a listing. The
-   marketplace validates:
-   - The asset exists in the catalog.
-   - The royalty contracts (skill 09) are
-     valid.
-   - The license is set.
-   - The price is set.
-   - The export controls (skill 09) are
-     honored.
-2. **List.** The listing is in the marketplace
-   catalog. The buyer can browse, search,
-   filter, compare, save.
-3. **Receive an `Order`.** A buyer places an
-   order. The marketplace:
-   - Reserves the escrow.
-   - Notifies the supplier.
-   - Emits a `Sale` event (skill 08) that
-     triggers the settlement (skill 09).
-4. **Fulfill.** The supplier (or the
-   manufacturer, or the lab) fulfills the
-   order. The marketplace tracks the
-   fulfillment status. The fulfillment is
-   digital (a download link), physical (a
-   shipped part), or service (a scheduled
-   appointment).
-5. **Release the escrow.** When the fulfillment
-   is complete + the buyer's review window has
-   passed, the marketplace releases the
-   escrow to the supplier.
-6. **Handle disputes.** A buyer or supplier
-   can file a dispute. The marketplace routes
-   the dispute to the AI council (skill 05)
-   for arbitration. The council's decision is
-   binding.
-7. **Issue refunds.** If the dispute is
-   resolved in the buyer's favor, the
-   marketplace issues a refund.
-8. **Pay the supplier.** The settlement (skill
-   09) pays the supplier, the royalty
-   recipients, the platform fees.
+**A supplier should see only what is
+required to quote or manufacture its
+assigned subsystem.** A supplier that
+sees more is a contract violation; the
+verifier (skill 14) rejects the
+disclosure.
 
-## 7. Quality gates
+## 5. Supplier qualification
 
-- Every listing is in the catalog.
-- Every order has a signed contract.
-- Every escrow is reserved before fulfillment
-  starts.
-- Every fulfillment is tracked.
-- Every dispute is arbitrated.
-- Every refund is signed.
-- Every settlement is in the audit trail.
-- The marketplace's SLOs are met (browse
-  latency < 200ms p99; order placement < 1s
-  p99; settlement cycle < 24h).
+The platform stores **13 fields** per
+supplier. A supplier without all 13
+fields is a contract violation.
 
-## 8. Failure modes
+- **Legal entity.** The legal
+  name + the registration
+  number + the tax ID.
+- **Jurisdictions.** The
+  countries the supplier is
+  registered in.
+- **Certifications.** The
+  certifications (ISO 9001,
+  IATF 16949, AS9100, ISO
+  14001).
+- **Capabilities.** The
+  capabilities (the
+  manufacturing processes the
+  supplier supports, the
+  materials, the tolerances).
+- **Processes.** The
+  per-process documentation
+  (the process flow, the
+  control plan, the FMEA).
+- **Materials.** The materials
+  the supplier can source
+  (steel, aluminum, composites,
+  plastics).
+- **Capacity.** The per-month
+  production capacity.
+- **Quality history.** The
+  historical quality metrics
+  (the defect rate, the
+  on-time delivery rate, the
+  customer satisfaction).
+- **Cybersecurity posture.**
+  The cybersecurity posture
+  (per the security model +
+  the regulatory requirements
+  for the supply chain).
+- **Insurance.** The
+  insurance coverage
+  (general liability,
+  product liability, cyber
+  liability).
+- **Audit status.** The
+  most recent audit (the
+  audit date, the auditor, the
+  findings, the remediation).
+- **Sanctions screening
+  status.** The OFAC / EU /
+  UN sanctions screening
+  status.
+- **Expiration dates.** The
+  per-field expiration date
+  (a certification expires on
+  2027-01-01, an insurance
+  policy expires on 2027-06-01,
+  etc.).
 
-- **A listing is invalid.** The marketplace
-  rejects the listing. The supplier is
-  informed.
-- **A buyer fails the KYC check.** The
-  marketplace blocks the order. The buyer is
-  informed.
-- **A supplier fails the fulfillment SLA.** The
-  marketplace refunds the buyer. The supplier
+**Do not** mark a supplier as verified
+solely from self-declared information.
+A "the supplier self-declared ISO
+9001" without an audit record is a
+`HYPOTHESIS`, not a fact. A supplier
+verification requires an external
+audit + a regulatory record + a
+documented evidence.
+
+## 6. Manufacturing readiness gates
+
+A project **cannot be marketed as
+manufacturing-ready** unless it has
+**11 items**. A project missing an
+item is a contract violation; the
+verifier (skill 14) rejects the
+marketing.
+
+- **Frozen revision.** The
+  `VehicleRevision` is in
+  `ENGINEERING_FREEZE` (per
+  skill 03). A draft revision
+  is NOT manufacturing-ready.
+- **Valid BOM.** A `BOM` is
+  generated by skill 04's
+  compiler. The BOM lists every
+  `PartInstance` + the
+  quantity + the cost (in
+  `BigDecimal`).
+- **Material definitions.**
+  Every `PartInstance` has a
+  material declaration (the
+  alloy + the grade + the
+  heat-treatment).
+- **Tolerances.** Every
+  dimension has a tolerance
+  (the ISO 2768 medium, the
+  custom ±0.05 mm, etc.).
+- **Process assumptions.**
+  The manufacturing process
+  assumptions (the machining
+  + the joining + the surface
+  treatment + the assembly).
+- **Interface control
+  documents.** The
+  mechanical + electrical +
+  thermal + data interfaces
+  are documented.
+- **Inspection plan.** The
+  per-`PartInstance` inspection
+  plan (the CMM, the visual,
+  the functional test).
+- **Known critical
+  characteristics.** The
+  KCCs (key product
+  characteristics + key
+  process characteristics)
+  are identified.
+- **Change-control policy.**
+  A documented change-control
+  policy (who may change what,
+  when, how; per skill 04
+  section 7).
+- **Evidence status.** The
+  evidence status per
+  `EngineeringFact<T>` (per
+  `.ai/STANDARDS.md` section 3).
+- **Responsible engineering
+  sign-off.** A human
+  engineer has signed off
+  the manufacturing
+  readiness. The sign-off is
+  `ENGINEER_REVIEWED` +
+  `LAB_VERIFIED` (where
+  applicable) +
+  `REGULATORY_VERIFIED` (where
+  applicable).
+
+## 7. Workflow
+
+1. **Receive a project.** The
+   marketplace receives a
+   project from the design
+   stage.
+2. **Run the 11 manufacturing
+   readiness gates.** Per
+   section 6. A gate that fails
+   is reported to the project
+   owner.
+3. **Apply the 9 controlled
+   disclosure practices.** Per
+   section 4.
+4. **Run the 14-step commercial
+   workflow.** Per section 3.
+
+## 8. Definition of done
+
+The marketplace is accepted only
+when **every** proof below passes.
+
+- **Confidential artifacts
+  cannot be accessed before
+  authorization.** A test
+  asserts a party without a
+  CDA receives a typed
+  `UnauthorizedProjectAccess`
+  error.
+- **Revoked users lose access
+  immediately.** A test
+  asserts a revoked party
+  cannot access the data room
+  on the next request.
+- **RFQ revisions remain
+  traceable.** A test asserts
+  every RFQ revision is in
+  the audit trail + is bound
+  to the original RFQ.
+- **Offers cannot silently
+  change after acceptance.**
+  A test asserts an accepted
+  offer is immutable; a
+  modification attempt is
+  rejected.
+- **Supplier claims have
+  evidence and expiry.** A
+  test asserts a supplier's
+  certification claim has
+  an audit record + an
+  expiration date; an
+  expired claim is flagged.
+- **Commercial status never
+  implies regulatory
+  approval.** A test asserts
+  the marketplace listing
+  does NOT carry a
+  `REGULATORY_VERIFIED` flag
+  (the regulatory posture is
+  per skill 13, NOT per the
+  marketplace).
+
+## 9. Quality gates
+
+- Every project that is
+  marketed as manufacturing-
+  ready passes the 11
+  manufacturing readiness
+  gates.
+- Every party in the
+  marketplace has a CDA / NDA
+  + a 13-field supplier
+  qualification.
+- Every disclosure is
+  governed by the 9
+  controlled disclosure
+  practices.
+- Every RFQ + every offer is
+  content-addressed + signed.
+- Every accepted offer is
+  immutable.
+- Every settlement is in
+  `BigDecimal`.
+- Every party revocation
+  takes effect immediately.
+- `VISUAL_ONLY` and
+  `CONCEPTUAL` vehicles are
+  NOT listed (per
+  `.ai/STANDARDS.md` section
+  4).
+
+## 10. Failure modes
+
+- **A project fails the 11
+  manufacturing readiness
+  gates.** The project is
+  not marketed. The owner
   is informed.
-- **A dispute is unresolved.** The marketplace
-  escalates to the AI council.
-- **A settlement fails.** The marketplace
-  retries. The supplier is informed.
-- **The platform is breached.** The marketplace
-  freezes all orders. The platform's incident
-  response (skill 00) is invoked.
+- **A supplier is unqualified.**
+  The supplier is rejected
+  with a typed
+  `UnauthorizedProjectAccess`
+  error.
+- **A party is revoked.** The
+  revocation takes effect
+  immediately; a party that
+  tries to access the data
+  room receives a typed
+  error.
+- **A deduction is not in the
+  contract.** The settlement
+  is rejected (per skill 09).
+- **A `VISUAL_ONLY` or
+  `CONCEPTUAL` vehicle is
+  listed.** The listing is
+  rejected with a typed
+  `ContractNotActive` error
+  (per skill 09).
 
-## 9. Coordination contract
+## 11. Coordination contract
 
-- **Input from**: skill 09 (catalog), skill 11
-  (mobile), the user, the supplier.
-- **Output to**: skill 08 (events), skill 09
-  (settlements), skill 11 (mobile).
-- **Triggered by**: every listing, every order,
-  every fulfillment, every review, every
-  dispute.
+- **Input from**: the project
+  (the design stage), the
+  supplier (the quote), the
+  buyer (the order), the
+  catalog (skill 09) for the
+  royalty contract.
+- **Output to**: the project
+  owner (the listing), the
+  catalog (skill 09) for the
+  royalty engine, the
+  security skill (skill 12)
+  for the controlled
+  disclosure.
+- **Triggered by**: every
+  project + every supplier +
+  every buyer + every RFQ +
+  every offer.
 - **Frequency**: continuous.
 
-## 10. Forbidden patterns
+## 12. Forbidden patterns
 
-- **Off-platform orders.** A supplier that
-  encourages the buyer to pay outside the
-  platform is a contract violation. The
-  supplier is delisted.
-- **Untracked settlements.** A sale without a
-  settlement is unpaid royalty. The marketplace
-  is the trigger; skill 09 is the engine.
-- **Mutable reviews.** A review that the
-  supplier can delete is a contract violation.
-  Reviews are append-only.
-- **Faked ratings.** A rating that the platform
-  inserts to manipulate the marketplace is a
-  contract violation. Ratings come from real
-  orders.
-- **"We'll verify the supplier later".** A
-  supplier that is not KYC'd + vetted is a
-  contract violation. The supplier is gated
-  before the listing is live.
-- **Hidden fees.** A fee that the buyer does
-  not see at checkout is a contract violation.
-  Every fee is in the order's itemized
-  breakdown.
-- **Undisclosed conflicts of interest.** A
-  supplier that is also a platform employee is
-  a contract violation. The conflict is
-  disclosed in the listing.
+- **A `VISUAL_ONLY` /
+  `CONCEPTUAL` vehicle
+  listed.** Per
+  `.ai/STANDARDS.md` section
+  4. The listing is rejected.
+- **A supplier verified solely
+  from self-declared
+  information.** A supplier
+  without an external audit
+  is a `HYPOTHESIS`, not a
+  fact.
+- **A deduction not in the
+  contract.** A deduction
+  silently applied is a
+  contract violation.
+- **A disclosure that bypasses
+  the 9 controlled disclosure
+  practices.** A leak is a P0
+  incident.
+- **A commercial status that
+  implies regulatory
+  approval.** The marketplace
+  does NOT carry a
+  `REGULATORY_VERIFIED` flag.
+- **A mutation of an accepted
+  offer.** An accepted offer
+  is immutable.
+- **A "we'll fix the supplier
+  qualification later"
+  pattern.** A supplier
+  without all 13 fields is
+  not eligible.
+- **A "we'll just give the
+  party everything" pattern.**
+  A party sees only what the
+  party needs.
 
-## 11. The marketplace in the Elysium Automotive
-Foundry
-
-The marketplace is the platform's "you can buy a
-vehicle design (or a part, or a service) here"
-surface. A user lists a vehicle design (or a
-part, or a service) → another user buys it →
-the supplier fulfills it → the royalty engine
-pays the contributors → the audit trail records
-the full chain.
-
-The marketplace is the platform's "we know who
-bought what, and we know who got paid" answer.
-
-## 12. Working with this skill
+## 13. Working with this skill
 
 When invoked, this skill:
 
-1. Receives the listing / order / fulfillment /
-   review / dispute.
-2. Validates it.
-3. Persists it (in the catalog, in the event
-   store).
-4. Triggers the next step (the supplier, the
-   settlement, the AI council).
-5. Returns the result to the orchestrator (or
-   to the calling skill directly).
+1. Receives the project + the
+   supplier + the buyer.
+2. Runs the 11 manufacturing
+   readiness gates.
+3. Qualifies the supplier + the
+   buyer.
+4. Runs the 14-step commercial
+   workflow.
+5. Applies the 9 controlled
+   disclosure practices.
+6. Settles the order (per skill
+   09).
+7. Files the audit trail.
 
-The skill does not render the marketplace UI
-(skill 11). The skill does not calculate the
-royalty (skill 09). The skill does not enforce
-the KYC (skill 12). The skill is the **market
-logic** that makes the transactions flow.
+The skill does **not** list a
+project that is not
+manufacturing-ready. The skill
+does **not** disclose a
+confidential artifact without
+authorization. The skill does
+**not** settle a `VISUAL_ONLY`
+or `CONCEPTUAL` project.
+
+## 14. Cross-references
+
+- **Vehicle representation
+  levels:** `.ai/STANDARDS.md`
+  section 4.
+- **Required error model:**
+  `.ai/AGENTS.md` section 10 +
+  `.ai/STANDARDS.md` section 7.
+- **Money type (BigDecimal):**
+  `.ai/STANDARDS.md` section 2.2.
+- **Orchestrator (skill 00):**
+  `.ai/skills/00-program-orchestrator/SKILL.md`.
+- **DSL compiler (skill 04):**
+  `.ai/skills/04-vehicle-dsl-compiler/SKILL.md`.
+- **IP / provenance / royalties
+  (skill 09):**
+  `.ai/skills/09-ip-provenance-royalties/SKILL.md`.
+- **Mobile UX (skill 11):**
+  `.ai/skills/11-mobile-forge-ux/SKILL.md`.
+- **Security (skill 12):**
+  `.ai/skills/12-security-zero-trust/SKILL.md`.
+- **Regulatory (skill 13):**
+  `.ai/skills/13-functional-safety-regulatory/SKILL.md`.
+- **Quality (skill 14):**
+  `.ai/skills/14-quality-verification/SKILL.md`.
+- **AI council (skill 05):**
+  `.ai/skills/05-ai-engineering-council/SKILL.md`.
+- **Backend event platform
+  (skill 08):**
+  `.ai/skills/08-backend-event-platform/SKILL.md`.
+- **Digital twin (skill 07):**
+  `.ai/skills/07-digital-twin-diagnostics/SKILL.md`.
