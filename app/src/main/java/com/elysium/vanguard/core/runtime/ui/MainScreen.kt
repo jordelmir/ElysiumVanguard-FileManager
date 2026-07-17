@@ -294,6 +294,18 @@ fun MainScreen(
                                         }
                                     }
                                 }
+                            },
+                            // Phase 46 — the bulk start/stop
+                            // actions. The ViewModel iterates
+                            // per session and delegates to the
+                            // per-session start/stop methods;
+                            // the menu is the single entry
+                            // point.
+                            onStartAll = {
+                                workspacesViewModel.startAllSessions(workspace.id)
+                            },
+                            onStopAll = {
+                                workspacesViewModel.stopAllSessions(workspace.id)
                             }
                         )
                     }
@@ -401,7 +413,9 @@ private fun WorkspaceCard(
     onActivate: () -> Unit,
     onClose: () -> Unit,
     onRemoveSession: (String) -> Unit,
-    onOpenSession: (WorkspaceSession) -> Unit
+    onOpenSession: (WorkspaceSession) -> Unit,
+    onStartAll: () -> Unit,
+    onStopAll: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -449,6 +463,42 @@ private fun WorkspaceCard(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
+                        // Phase 46 — Start all / Stop all
+                        // actions. The menu exposes the
+                        // bulk operation alongside the
+                        // per-session Start / Stop so
+                        // the user can power-cycle a
+                        // whole workspace in one tap.
+                        // The items render regardless of
+                        // workspace state — the per-
+                        // session startability check
+                        // happens in the ViewModel.
+                        DropdownMenuItem(
+                            text = { Text("Start all") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onStartAll()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Stop all") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Stop,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onStopAll()
+                            }
+                        )
                         if (workspace.state is WorkspaceState.Active) {
                             DropdownMenuItem(
                                 text = { Text("Pause") },

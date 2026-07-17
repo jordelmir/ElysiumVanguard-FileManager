@@ -374,6 +374,103 @@ class WorkspacesViewModelTest {
         assertEquals(SessionState.Running(pid = 5000, startedAtMs = 1L), state)
     }
 
+    // --- Phase 46: bulk start / stop ---
+
+    @Test
+    fun `startAllSessions starts every startable session in the workspace`() {
+        val ws = manager.createWorkspace(
+            name = "Work",
+            sessions = listOf(
+                linuxSession("s-1"),
+                linuxSession("s-2"),
+                linuxSession("s-3")
+            ),
+            nowMs = 1L
+        ).getOrThrow()
+        val started = viewModel.startAllSessions(ws.id)
+        assertEquals(3, started)
+        // The runner received 3 start calls.
+        assertEquals(3, runner.startCalls.size)
+    }
+
+    @Test
+    fun `startAllSessions skips sessions that are already Running`() {
+        val ws = manager.createWorkspace(
+            name = "Work",
+            sessions = listOf(linuxSession("s-1"), linuxSession("s-2")),
+            nowMs = 1L
+        ).getOrThrow()
+        // Pre-mark s-1 as Running on the runner.
+        runner.activeSessions += ActiveSession(
+            workspaceId = ws.id,
+            sessionId = "s-1",
+            kind = WorkspaceSession.SessionKind.LINUX_PROOT,
+            state = SessionState.Running(pid = 100, startedAtMs = 0L),
+            launcherKind = "fake"
+        )
+        val started = viewModel.startAllSessions(ws.id)
+        // Only s-2 was startable.
+        assertEquals(1, started)
+        assertEquals(1, runner.startCalls.size)
+        assertEquals("s-2", runner.startCalls.single().id)
+    }
+
+    @Test
+    fun `startAllSessions on a non-existent workspace returns 0`() {
+        val started = viewModel.startAllSessions("does-not-exist")
+        assertEquals(0, started)
+        assertEquals(0, runner.startCalls.size)
+    }
+
+    @Test
+    fun `stopAllSessions stops every stoppable session in the workspace`() {
+        val ws = manager.createWorkspace(
+            name = "Work",
+            sessions = listOf(linuxSession("s-1"), linuxSession("s-2")),
+            nowMs = 1L
+        ).getOrThrow()
+        // Pre-mark both sessions as Running.
+        runner.activeSessions += ActiveSession(
+            workspaceId = ws.id,
+            sessionId = "s-1",
+            kind = WorkspaceSession.SessionKind.LINUX_PROOT,
+            state = SessionState.Running(pid = 100, startedAtMs = 0L),
+            launcherKind = "fake"
+        )
+        runner.activeSessions += ActiveSession(
+            workspaceId = ws.id,
+            sessionId = "s-2",
+            kind = WorkspaceSession.SessionKind.LINUX_PROOT,
+            state = SessionState.Running(pid = 200, startedAtMs = 0L),
+            launcherKind = "fake"
+        )
+        val stopped = viewModel.stopAllSessions(ws.id)
+        assertEquals(2, stopped)
+        assertEquals(2, runner.stopCalls.size)
+    }
+
+    @Test
+    fun `stopAllSessions skips sessions that are not stoppable`() {
+        val ws = manager.createWorkspace(
+            name = "Work",
+            sessions = listOf(linuxSession("s-1"), linuxSession("s-2")),
+            nowMs = 1L
+        ).getOrThrow()
+        // Pre-mark only s-1 as Running; s-2 stays Idle.
+        runner.activeSessions += ActiveSession(
+            workspaceId = ws.id,
+            sessionId = "s-1",
+            kind = WorkspaceSession.SessionKind.LINUX_PROOT,
+            state = SessionState.Running(pid = 100, startedAtMs = 0L),
+            launcherKind = "fake"
+        )
+        val stopped = viewModel.stopAllSessions(ws.id)
+        // Only s-1 was stoppable.
+        assertEquals(1, stopped)
+        assertEquals(1, runner.stopCalls.size)
+        assertEquals("s-1", runner.stopCalls.single().id)
+    }
+
     // --- helpers ---
 
     private fun linuxSession(id: String): WorkspaceSession.LinuxProot =

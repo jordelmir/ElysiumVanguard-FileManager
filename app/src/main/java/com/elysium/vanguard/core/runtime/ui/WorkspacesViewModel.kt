@@ -223,6 +223,71 @@ class WorkspacesViewModel @Inject constructor(
         return result
     }
 
+    // --- bulk actions (Phase 46) ---
+
+    /**
+     * Phase 46 — start every session in the workspace
+     * whose current state is startable
+     * (Idle / Stopped / Error). The runner's
+     * [SessionState.isStartable] is the source of
+     * truth for what counts as "startable". A
+     * session that is already Starting / Running /
+     * Stopping is left alone.
+     *
+     * The method iterates synchronously and
+     * delegates to [startSession] per session. The
+     * runner publishes a [RuntimeEvent.SessionStartedEvent]
+     * for every successful start; the bus subscriber
+     * re-reads the runner's state via
+     * [refreshSessionStates] after the loop
+     * (or after every individual call, depending
+     * on the test / user path).
+     *
+     * The method returns the number of sessions
+     * actually started (0 when all are already
+     * live). The number is informational; the
+     * UI does not need to act on it.
+     */
+    fun startAllSessions(workspaceId: String): Int {
+        val workspace = workspaceManager.getWorkspace(workspaceId) ?: return 0
+        var started = 0
+        for (session in workspace.sessions) {
+            val currentState = sessionRunner.state(workspaceId, session.id)
+            if (currentState.isStartable()) {
+                val result = startSession(workspace, session)
+                if (result.isSuccess) started++
+            }
+        }
+        // Final refresh so the UI sees the runner's
+        // authoritative state after the loop.
+        refreshSessionStates()
+        return started
+    }
+
+    /**
+     * Phase 46 — stop every session in the workspace
+     * whose current state is stoppable
+     * (Starting / Running). A session that is
+     * already Stopped / Idle / Stopping is left
+     * alone.
+     *
+     * Mirror of [startAllSessions]. Returns the
+     * number of sessions actually stopped.
+     */
+    fun stopAllSessions(workspaceId: String): Int {
+        val workspace = workspaceManager.getWorkspace(workspaceId) ?: return 0
+        var stopped = 0
+        for (session in workspace.sessions) {
+            val currentState = sessionRunner.state(workspaceId, session.id)
+            if (currentState.isStoppable()) {
+                val result = stopSession(workspace, session)
+                if (result.isSuccess) stopped++
+            }
+        }
+        refreshSessionStates()
+        return stopped
+    }
+
     // --- internals ---
 
     /**
