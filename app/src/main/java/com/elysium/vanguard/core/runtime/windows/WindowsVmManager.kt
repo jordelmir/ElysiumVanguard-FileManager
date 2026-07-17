@@ -44,7 +44,7 @@ class WindowsVmManager(
     private val baseDir: File,
     private val backend: WindowsVmBackend,
     private val catalog: WindowsVmCatalog = WindowsVmCatalog.official()
-) {
+) : com.elysium.vanguard.core.runtime.runner.WindowsVmSessionBackend {
     private val states: java.util.concurrent.ConcurrentHashMap<String, WindowsVmState> =
         java.util.concurrent.ConcurrentHashMap()
 
@@ -54,7 +54,7 @@ class WindowsVmManager(
      * [WindowsVmState], failure carries a typed
      * [WindowsVmError].
      */
-    fun startVm(specId: String): Result<WindowsVmState> {
+    override fun startVm(specId: String): Result<WindowsVmState> {
         val spec = catalog.find(specId)
             ?: return Result.failure(WindowsVmError.UnknownSpec(specId))
         // The manager persists the initial state. The
@@ -69,7 +69,7 @@ class WindowsVmManager(
      * Stop the VM. Idempotent: stopping a stopped VM is
      * a no-op success.
      */
-    fun stopVm(specId: String): Result<WindowsVmState> {
+    override fun stopVm(specId: String): Result<WindowsVmState> {
         val spec = catalog.find(specId)
             ?: return Result.failure(WindowsVmError.UnknownSpec(specId))
         val current = states[specId] ?: WindowsVmState.Stopped
@@ -194,7 +194,7 @@ class WindowsVmManager(
     }
 
     /** Look up the manager's view of a VM's state. */
-    fun getState(specId: String): WindowsVmState = states[specId] ?: WindowsVmState.Stopped
+    override fun getState(specId: String): WindowsVmState = states[specId] ?: WindowsVmState.Stopped
 
     /** List the catalog ids the runtime ships. */
     fun listSpecIds(): List<String> = catalog.all.map { it.id }
