@@ -526,3 +526,260 @@ The skill does not implement the backend
 implement the royalty (skill 09). The skill is
 the **user-facing surface** that turns the
 platform's capabilities into a tool.
+
+## 16. Vehicle creation flow
+
+The mobile UX walks the user through
+a **11-step vehicle creation flow**.
+Every step is recorded in the
+project memory (per skill 05
+section 7) + the audit trail (per
+skill 09).
+
+1. **Project ownership and
+   collaboration model.** Who
+   owns the project + the
+   collaboration roles +
+   the visibility model
+   (per skill 09).
+2. **Market and vehicle purpose.**
+   The target market (per
+   skill 03 section 18) + the
+   vehicle purpose (a
+   commuter, a sport, a
+   commercial).
+3. **Body and packaging.** The
+   body architecture (per
+   skill 03 section 13.2) +
+   the seating + the
+   cargo.
+4. **Propulsion and driveline.**
+   The powertrain (per skill
+   03 section 13.1) + the
+   driveline (FWD, RWD, AWD).
+5. **Chassis and suspension.**
+   The chassis + the
+   suspension + the steering
+   + the brake system.
+6. **Electrical/electronic
+   architecture.** The
+   electrical architecture +
+   the network bus + the
+   ECUs + the sensors.
+7. **Cost, repairability and
+   sustainability targets.**
+   The bill-of-materials
+   target + the repair
+   rating + the CO2 target.
+8. **AI-generated proposal.**
+   The AI council (per skill
+   05) produces a typed
+   proposal (per skill 05
+   section 4) that the user
+   reviews.
+9. **Constraint conflicts.**
+   The conflict engine (per
+   skill 02 section 6) flags
+   every conflict; the user
+   resolves each one.
+10. **Human approval.** The
+    user signs off the proposal
+    (per skill 05 section 6);
+    a regulated surface
+    requires a human counter-
+    signature (per
+    `.ai/AGENTS.md` section 8).
+11. **Digital-twin compilation.**
+    The DSL compiler (per skill
+    04) emits the `Spec.Artifact`
+    + the `SceneManifest`; the
+    digital twin (per skill 07)
+    simulates; the diagnostic
+    (per skill 07) is generated.
+
+A user that skips a step is
+warned; a user that skips a
+`MUST` step is rejected (per
+skill 02 section 9).
+
+## 17. AI chat behavior
+
+The AI chat (per skill 05) is
+the user's primary interface
+for the AI council. The chat
+answers **MUST** link to:
+
+- **Requirement IDs.** The
+  `REQ-...` per skill 02.
+- **Part IDs.** The
+  `PartDefinitionId` per
+  skill 03 section 14.
+- **Revision IDs.** The
+  `RevisionId` per skill 03
+  section 13.
+- **Findings.** The diagnostic
+  findings (per skill 07
+  section 3).
+- **Evidence.** The
+  `EngineeringFact<T>` source
+  (per `.ai/STANDARDS.md`
+  section 3).
+- **Proposed changes.** The
+  typed proposal (per skill
+  05 section 4) + the diff
+  against the current
+  revision.
+
+A chat answer that **cannot be
+traced to project state** MUST
+remain **advisory**. An
+advisory answer is a draft; a
+traceable answer is a proposal.
+The model is not an authority
+(per `.ai/AGENTS.md` section 8
++ `.ai/STANDARDS.md` section
+5).
+
+## 18. Visual truth (badges)
+
+The mobile UX displays **8
+badges** on every vehicle card
++ every vehicle detail page +
+every spec view:
+
+- **Conceptual.** A
+  `CONCEPTUAL` vehicle.
+- **Visual only.** A
+  `VISUAL_ONLY` vehicle.
+- **Functional parametric.** A
+  `PARAMETRIC_FUNCTIONAL`
+  vehicle.
+- **OEM partial.** An
+  `OEM_PARTIAL` vehicle.
+- **Engineer reviewed.** A
+  vehicle that has been signed
+  off by an engineer.
+- **Safety review required.**
+  A vehicle with a `SafetyGoal`
+  that is not yet
+  `REGULATORY_VERIFIED` +
+  `ENGINEER_REVIEWED` +
+  counter-signed.
+- **Manufacturing readiness.**
+  A vehicle that has passed the
+  11 manufacturing readiness
+  gates (per skill 10).
+- **Regulatory status.** The
+  per-market regulatory status
+  (per skill 13).
+
+**Never allow visual polish to
+imply engineering validity.** A
+beautiful 3D scene is not a
+sign that the engineering
+works. The badges are the
+truth.
+
+## 19. Offline behavior
+
+The mobile UX supports **6
+offline features**. A user
+who is offline is not
+stranded; the user continues
+to work, and the work syncs
+when the connection is back.
+
+- **Cached project summaries.**
+  The most-recent project
+  summary is in the local DB.
+  A user who opens the app
+  offline sees the cached
+  summary.
+- **Cached low-LOD scenes.**
+  The lowest-LOD scene per
+  project is cached. A user
+  who opens a project offline
+  sees the low-LOD scene.
+- **Draft requirement edits.**
+  The user may edit
+  requirements offline. The
+  edits are queued.
+- **Queued commands with
+  idempotency keys.** Every
+  command is queued with an
+  `idempotencyKey` (per skill
+  08 section 4). A duplicate
+  command is a no-op.
+- **Conflict resolution after
+  reconnect.** When the user
+  reconnects, the queued
+  commands are replayed;
+  conflicts (per the optimistic
+  concurrency) are surfaced
+  for the user to resolve.
+- **Never silently overwrite
+  server revisions after
+  offline editing.** A server
+  revision that is newer than
+  the local revision produces
+  a `RevisionConflict` (per
+  skill 08 section 4); the
+  user merges + retries.
+
+## 20. Definition of done
+
+The mobile UX is accepted only
+when **every** test below
+passes.
+
+- **Low-memory device behavior.**
+  A test asserts the app
+  behaves correctly on a
+  1 GB RAM device (the lowest
+  supported configuration).
+- **Process death
+  restoration.** A test
+  asserts the app restores
+  state after the process is
+  killed by the OS.
+- **Rotation and foldable
+  layouts.** A test asserts
+  the layout adapts to
+  rotation + to foldable
+  hinge states.
+- **Accessibility.** A test
+  asserts the app satisfies
+  the platform's accessibility
+  standard (TalkBack on
+  Android, VoiceOver on iOS).
+- **Screen-reader equivalents.**
+  A test asserts every 3D
+  scene has a list-view
+  equivalent (per section 4).
+- **Large font scaling.** A
+  test asserts the layout
+  adapts to the largest font
+  scale the platform supports
+  (200% on iOS, 200% on
+  Android).
+- **Offline changes.** A test
+  asserts an offline edit is
+  queued + replayed on
+  reconnect.
+- **Revision conflicts.** A
+  test asserts a server
+  revision that is newer than
+  the local revision produces
+  a `RevisionConflict` + the
+  user is given the option to
+  merge.
+- **Cancellation during asset
+  loading.** A test asserts a
+  user who cancels an asset
+  load mid-stream does not
+  leak GPU resources + does
+  not block the main thread.
+
+A failing test is a contract
+violation; the verifier (skill
+14) blocks the release.
