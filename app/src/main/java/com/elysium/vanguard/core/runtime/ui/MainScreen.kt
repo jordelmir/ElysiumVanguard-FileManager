@@ -19,26 +19,36 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.elysium.vanguard.core.runtime.runner.SessionState
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceState
@@ -100,6 +110,21 @@ fun MainScreen(
 ) {
     val mainState by mainViewModel.state.collectAsState()
     val workspacesState by workspacesViewModel.state.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Phase 38 — surface the last action's result on
+    // a snackbar so the user sees "session start
+    // failed: Distro not installed" or similar. The
+    // ViewModel writes `lastActionResult` on every
+    // action; the Snackbar shows it once and clears.
+    val lastResult = workspacesState.lastActionResult
+    LaunchedEffect(lastResult) {
+        val result = lastResult ?: return@LaunchedEffect
+        if (result.isFailure) {
+            val message = result.exceptionOrNull()?.message ?: "Action failed"
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -114,7 +139,8 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -180,7 +206,16 @@ fun MainScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(workspacesState.workspaces, key = { it.id }) { workspace ->
-                        WorkspaceCard(workspace = workspace)
+                        WorkspaceCard(
+                            workspace = workspace,
+                            sessionStates = workspacesState.sessionStates,
+                            onStartSession = { session ->
+                                workspacesViewModel.startSession(workspace, session)
+                            },
+                            onStopSession = { session ->
+                                workspacesViewModel.stopSession(workspace, session)
+                            }
+                        )
                     }
                 }
             }
@@ -239,12 +274,19 @@ private fun StatusCard(
 
 /**
  * A single workspace card. Shows the workspace
- * name, its state, and a one-line summary of its
- * sessions (total + per-kind breakdown). The
- * "Start / Stop" buttons are Phase 38.
+ * name, its state, and a per-session row with
+ * a Start / Stop button. Phase 38 — the
+ * "Start / Stop" buttons are wired to
+ * [WorkspacesViewModel.startSession] /
+ * [WorkspacesViewModel.stopSession].
  */
 @Composable
-private fun WorkspaceCard(workspace: Workspace) {
+private fun WorkspaceCard(
+    workspace: Workspace,
+    sessionStates: Map<WorkspacesViewModel.SessionKey, SessionState>,
+    onStartSession: (WorkspaceSession) -> Unit,
+    onStopSession: (WorkspaceSession) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -255,8 +297,9 @@ private fun WorkspaceCard(workspace: Workspace) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // --- Header: name + state chip ---
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Filled.Computer,
@@ -273,12 +316,178 @@ private fun WorkspaceCard(workspace: Workspace) {
                 Spacer(modifier = Modifier.weight(1f))
                 StateChip(state = workspace.state)
             }
+
+            // --- Per-session rows ---
+            if (workspace.sessions.isEmpty()) {
+                Text(
+                    text = "No sessions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                workspace.sessions.forEach { session ->
+                    SessionRow(
+                        session = session,
+                        state = sessionStates[
+                            WorkspacesViewModel.SessionKey(
+                                workspaceId = workspace.id,
+                                sessionId = session.id
+                            )
+                        ] ?: SessionState.Idle,
+                        onStart = { onStartSession(session) },
+                        onStop = { onStopSession(session) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A single session row inside a [WorkspaceCard].
+ * Shows the session's display name + kind, a
+ * [SessionStateBadge], and a Start / Stop button
+ * that delegates to the parent [WorkspaceCard]'s
+ * callbacks.
+ */
+@Composable
+private fun SessionRow(
+    session: WorkspaceSession,
+    state: SessionState,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = when (session) {
+                is WorkspaceSession.LinuxProot -> Icons.Filled.Terminal
+                is WorkspaceSession.WindowsVm -> Icons.Filled.DesktopWindows
+            },
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = sessionSummary(workspace),
+                text = session.displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = sessionSubtitle(session),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        Spacer(modifier = Modifier.width(8.dp))
+        SessionStateBadge(state = state)
+        Spacer(modifier = Modifier.width(8.dp))
+        SessionActionButton(
+            state = state,
+            onStart = onStart,
+            onStop = onStop
+        )
+    }
+}
+
+private fun sessionSubtitle(session: WorkspaceSession): String = when (session) {
+    is WorkspaceSession.LinuxProot -> "${session.distroId} • ${session.profileId}"
+    is WorkspaceSession.WindowsVm -> "spec: ${session.windowsSpecId}"
+}
+
+/**
+ * The Start / Stop button for a single session. The
+ * button shows the action that the user CAN take
+ * right now (not the current state):
+ *
+ *   - Idle / Stopped / Error → "Start" (the runner
+ *     accepts a start).
+ *   - Starting / Running → "Stop" (the runner
+ *     accepts a stop).
+ *   - Stopping → disabled (the runner is already
+ *     tearing down; wait for the transition to
+ *     finish before allowing a retry).
+ */
+@Composable
+private fun SessionActionButton(
+    state: SessionState,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    when (state) {
+        is SessionState.Idle, is SessionState.Stopped, is SessionState.Error -> {
+            Button(
+                onClick = onStart,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = "Start",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Start", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        is SessionState.Starting, is SessionState.Running -> {
+            Button(
+                onClick = onStop,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Icon(
+                    Icons.Filled.Stop,
+                    contentDescription = "Stop",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Stop", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        is SessionState.Stopping -> {
+            OutlinedButton(
+                onClick = {},
+                enabled = false,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text("Stopping…", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+/**
+ * A small pill that shows the [SessionState] name
+ * (Idle / Starting / Running / Stopping / Stopped /
+ * Error). The pill is informational — the action
+ * button next to it is the user-facing affordance.
+ */
+@Composable
+private fun SessionStateBadge(state: SessionState) {
+    val (label, color) = when (state) {
+        is SessionState.Idle -> "Idle" to MaterialTheme.colorScheme.onSurfaceVariant
+        is SessionState.Starting -> "Starting" to MaterialTheme.colorScheme.tertiary
+        is SessionState.Running -> "Running" to MaterialTheme.colorScheme.primary
+        is SessionState.Stopping -> "Stopping" to MaterialTheme.colorScheme.tertiary
+        is SessionState.Stopped -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
+        is SessionState.Error -> "Error" to MaterialTheme.colorScheme.error
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.15f))
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
     }
 }
 
