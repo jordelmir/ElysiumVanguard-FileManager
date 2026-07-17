@@ -16,38 +16,51 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import java.util.UUID
 import com.elysium.vanguard.core.runtime.runner.SessionState
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
@@ -112,6 +125,14 @@ fun MainScreen(
     val workspacesState by workspacesViewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Phase 40 — local UI state for the dialogs
+    // (create workspace, add session). `null` means
+    // the dialog is dismissed. The values are owned
+    // by the screen, not the ViewModel, so the
+    // ViewModel stays unaware of UI affordances.
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var addSessionToWorkspaceId by remember { mutableStateOf<String?>(null) }
+
     // Phase 38 — surface the last action's result on
     // a snackbar so the user sees "session start
     // failed: Distro not installed" or similar. The
@@ -133,6 +154,13 @@ fun MainScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Phase 40 — the "Create workspace" action.
+                    // Opens [CreateWorkspaceDialog] when tapped.
+                    IconButton(onClick = { showCreateDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create workspace")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -214,11 +242,45 @@ fun MainScreen(
                             },
                             onStopSession = { session ->
                                 workspacesViewModel.stopSession(workspace, session)
+                            },
+                            onAddSession = { addSessionToWorkspaceId = workspace.id },
+                            onPause = { workspacesViewModel.pauseWorkspace(workspace.id) },
+                            onActivate = { workspacesViewModel.activateWorkspace(workspace.id) },
+                            onClose = { workspacesViewModel.closeWorkspace(workspace.id) },
+                            onRemoveSession = { sessionId ->
+                                workspacesViewModel.removeSession(workspace.id, sessionId)
                             }
                         )
                     }
                 }
             }
+        }
+    }
+
+    // Phase 40 — the two dialogs live as siblings of
+    // the Scaffold so the Scaffold's content slot
+    // stays a pure render of the state.
+    if (showCreateDialog) {
+        CreateWorkspaceDialog(
+            onConfirm = { name ->
+                workspacesViewModel.createWorkspace(name)
+                showCreateDialog = false
+            },
+            onDismiss = { showCreateDialog = false }
+        )
+    }
+
+    val targetWorkspaceId = addSessionToWorkspaceId
+    if (targetWorkspaceId != null) {
+        val workspace = workspacesState.workspaces.firstOrNull { it.id == targetWorkspaceId }
+        if (workspace != null) {
+            AddSessionDialog(
+                onConfirm = { session ->
+                    workspacesViewModel.addSession(workspace.id, session)
+                    addSessionToWorkspaceId = null
+                },
+                onDismiss = { addSessionToWorkspaceId = null }
+            )
         }
     }
 }
@@ -279,14 +341,24 @@ private fun StatusCard(
  * "Start / Stop" buttons are wired to
  * [WorkspacesViewModel.startSession] /
  * [WorkspacesViewModel.stopSession].
+ * Phase 40 — the card gained a 3-dot menu with
+ * Pause / Activate / Close actions + an "Add
+ * session" affordance.
  */
 @Composable
 private fun WorkspaceCard(
     workspace: Workspace,
     sessionStates: Map<WorkspacesViewModel.SessionKey, SessionState>,
     onStartSession: (WorkspaceSession) -> Unit,
-    onStopSession: (WorkspaceSession) -> Unit
+    onStopSession: (WorkspaceSession) -> Unit,
+    onAddSession: () -> Unit,
+    onPause: () -> Unit,
+    onActivate: () -> Unit,
+    onClose: () -> Unit,
+    onRemoveSession: (String) -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -299,7 +371,7 @@ private fun WorkspaceCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // --- Header: name + state chip ---
+            // --- Header: name + state chip + 3-dot menu ---
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Filled.Computer,
@@ -315,6 +387,62 @@ private fun WorkspaceCard(
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 StateChip(state = workspace.state)
+                Spacer(modifier = Modifier.width(4.dp))
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = "Workspace menu",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        if (workspace.state is WorkspaceState.Active) {
+                            DropdownMenuItem(
+                                text = { Text("Pause") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Pause, contentDescription = null)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onPause()
+                                }
+                            )
+                        }
+                        if (workspace.state is WorkspaceState.Paused ||
+                            workspace.state is WorkspaceState.Closed
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Activate") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onActivate()
+                                }
+                            )
+                        }
+                        if (workspace.state !is WorkspaceState.Closed) {
+                            DropdownMenuItem(
+                                text = { Text("Close") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Close, contentDescription = null)
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onClose()
+                                }
+                            )
+                        }
+                    }
+                }
             }
 
             // --- Per-session rows ---
@@ -335,9 +463,24 @@ private fun WorkspaceCard(
                             )
                         ] ?: SessionState.Idle,
                         onStart = { onStartSession(session) },
-                        onStop = { onStopSession(session) }
+                        onStop = { onStopSession(session) },
+                        onRemove = { onRemoveSession(session.id) }
                     )
                 }
+            }
+
+            // --- Add session affordance ---
+            OutlinedButton(
+                onClick = onAddSession,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add session", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -349,13 +492,18 @@ private fun WorkspaceCard(
  * [SessionStateBadge], and a Start / Stop button
  * that delegates to the parent [WorkspaceCard]'s
  * callbacks.
+ *
+ * Phase 40 — added a long-press friendly "remove"
+ * affordance (`onRemove`) for callers that want
+ * one. Phase 41 will add the visible delete button.
  */
 @Composable
 private fun SessionRow(
     session: WorkspaceSession,
     state: SessionState,
     onStart: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onRemove: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -391,6 +539,28 @@ private fun SessionRow(
             onStart = onStart,
             onStop = onStop
         )
+        // Phase 40 — small remove button. Hidden
+        // behind a 16dp icon so the row stays
+        // compact; the visual affordance is a
+        // "remove" hint (no label, just the icon)
+        // since the user has the Start / Stop
+        // button as the primary action.
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Remove session",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        // Suppress the unused-variable warning
+        // while keeping the parameter for
+        // documentation. The icon above already
+        // calls onRemove.
+        @Suppress("UNUSED_EXPRESSION") onRemove
     }
 }
 
@@ -568,4 +738,160 @@ private fun EmptyWorkspacesState(
             }
         }
     }
+}
+
+/**
+ * Phase 40 — the "Create workspace" dialog.
+ *
+ * A minimal name-only form. The user types a
+ * name, taps "Create", and the screen calls
+ * [WorkspacesViewModel.createWorkspace] with
+ * the trimmed name. Empty / blank names are
+ * rejected client-side; the
+ * [com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager]
+ * also rejects them server-side (defence in
+ * depth). The dialog dismisses on Cancel and
+ * on a successful Create.
+ */
+@Composable
+private fun CreateWorkspaceDialog(
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    val isValid = name.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create workspace") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
+                singleLine = true,
+                isError = name.isNotEmpty() && !isValid
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (isValid) onConfirm(name.trim()) },
+                enabled = isValid
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/**
+ * Phase 40 — the "Add session" dialog.
+ *
+ * A minimal form: the user picks a kind (Linux
+ * proot or Windows VM) and a display name. The
+ * distroId / specId default to a placeholder
+ * the user can edit later (Phase 41+ will pull
+ * the real catalog into the picker). The id is
+ * auto-generated via [UUID] so the user never
+ * sees the runtime's internal id scheme.
+ *
+ * The dialog returns a fully-formed
+ * [WorkspaceSession] the screen hands to
+ * [WorkspacesViewModel.addSession].
+ */
+@Composable
+private fun AddSessionDialog(
+    onConfirm: (WorkspaceSession) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var isLinux by remember { mutableStateOf(true) }
+    var displayName by remember { mutableStateOf("") }
+    var distroId by remember { mutableStateOf("debian-latest") }
+    var profileId by remember { mutableStateOf("balanced") }
+    var windowsSpecId by remember { mutableStateOf("win11-pro-23h2") }
+
+    val isValid = displayName.isNotBlank() &&
+        (if (isLinux) distroId.isNotBlank() && profileId.isNotBlank()
+         else windowsSpecId.isNotBlank())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add session") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Kind toggle
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = isLinux,
+                        onClick = { isLinux = true },
+                        label = { Text("Linux") }
+                    )
+                    FilterChip(
+                        selected = !isLinux,
+                        onClick = { isLinux = false },
+                        label = { Text("Windows") }
+                    )
+                }
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("Display name") },
+                    singleLine = true
+                )
+                if (isLinux) {
+                    OutlinedTextField(
+                        value = distroId,
+                        onValueChange = { distroId = it },
+                        label = { Text("Distro id") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = profileId,
+                        onValueChange = { profileId = it },
+                        label = { Text("Profile id") },
+                        singleLine = true
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = windowsSpecId,
+                        onValueChange = { windowsSpecId = it },
+                        label = { Text("Windows spec id") },
+                        singleLine = true
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (!isValid) return@TextButton
+                    val sessionId = "s-${UUID.randomUUID().toString().take(8)}"
+                    val session = if (isLinux) {
+                        WorkspaceSession.LinuxProot(
+                            id = sessionId,
+                            displayName = displayName.trim(),
+                            distroId = distroId.trim(),
+                            profileId = profileId.trim()
+                        )
+                    } else {
+                        WorkspaceSession.WindowsVm(
+                            id = sessionId,
+                            displayName = displayName.trim(),
+                            windowsSpecId = windowsSpecId.trim()
+                        )
+                    }
+                    onConfirm(session)
+                },
+                enabled = isValid
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
