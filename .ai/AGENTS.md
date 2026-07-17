@@ -812,5 +812,389 @@ posture).
 
 ---
 
+## 21. Completion Standard
+
+A feature is **not** complete because it
+compiles. A feature is complete only when
+**every** item on the following list is true.
+The orchestrator's verifier (skill 14) checks
+the list on every release. A failing item is
+a blocker, not a warning.
+
+1. **The business invariant is enforced.** The
+   invariant is in the ontology (skill 03)
+   and tested at every boundary. A feature
+   that bypasses the invariant is a contract
+   violation.
+2. **Unauthorized access is rejected.** Every
+   action has an auth check (skill 12). A
+   feature without an auth check is a
+   contract violation.
+3. **Concurrent execution is safe.** Every
+   aggregate has optimistic concurrency
+   control (a `revision` field + a conflict
+   check). A feature that allows silent
+   overwrites is a contract violation.
+4. **Retries are idempotent.** Every command
+   is safely re-runnable with the same ID.
+   A command whose retry produces a different
+   result is a contract violation.
+5. **Failure states are observable.** Every
+   failure path emits a trace, a metric, a
+   log, and (when the failure is
+   commerce-relevant) an audit-trail event.
+   A silent failure is a contract violation.
+6. **Data is migrated safely.** Every schema
+   change has a deterministic + idempotent
+   migration + a rollback. A migration that
+   loses data without an explicit user
+   opt-in is a contract violation.
+7. **Tests prove primary AND adversarial
+   paths.** The unit tests cover the happy
+   path; the integration tests cover the
+   cross-skill contracts; the fuzz tests
+   cover the input surface; the property
+   tests cover the invariants. A feature
+   without adversarial tests is a contract
+   violation.
+8. **Documentation matches the
+   implementation.** The PRD, the ADR, the
+   API doc, the runbook, the test report,
+   the user-facing docs — every document
+   that names the feature matches the
+   shipped code. A drift between docs and
+   code is a contract violation.
+
+The full list, the rationale, and the
+recovery patterns are in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section
+10 (the "Completion standard" cross-reference).
+
+---
+
+## 22. Required Project Gates (G0–G10)
+
+The Foundry has **11 project gates** that map
+directly to the execution phases defined in
+skill 00 (program-orchestrator). **No gate is
+skipped.** A gate that cannot be green is an
+ADR + a risk-register entry, not a bypass.
+
+| Gate | What it proves | Owner |
+|---|---|---|
+| **G0** — Repository understood | The six `docs/foundry/` artifacts exist + are signed (current-state-audit, target-architecture, domain-ownership, implementation-roadmap, risk-register, dependency-map) | skill 00 |
+| **G1** — Domain model approved | The ontology is documented, versioned, signed, and the invariant tests pass | skill 03 |
+| **G2** — Persistence and versioning proven | Schema migrations are deterministic, idempotent, and content-addressed; the outbox is reliable | skill 08 |
+| **G3** — Vehicle compiler deterministic | The parser + resolver + type-checker are total; the spec output is content-addressed + signed; the golden tests pass | skill 04 |
+| **G4** — 3D digital twin integrated | The 3D pipeline + the digital twin share the same canonical artifact; the manifest is signed; the LODs are present; the asset-validation suite passes | skill 06 + 07 |
+| **G5** — AI constrained by structured tools | The LLM produces typed proposals; the model cannot mutate the database, the catalog, the audit trail, the royalty engine, the regulatory submission, or the safety gate | skill 05 |
+| **G6** — IP and provenance ledger operational | Authorship + provenance + audit trail are signed, content-addressed, append-only; `AI_INFERRED` cannot silently become `VERIFIED` | skill 09 |
+| **G7** — Royalty engine contract-driven | The royalty engine is deterministic; money is `BigDecimal`; settlements are auditable; the engine is bound to an `ACTIVE` `RoyaltyContract` | skill 09 |
+| **G8** — Marketplace and supplier workflow | Listings, escrow, supplier integration, and settlement are end-to-end; `VISUAL_ONLY` and `CONCEPTUAL` vehicles are not eligible | skill 10 |
+| **G9** — Safety and regulatory evidence model | ISO 26262, UN R155/R156, ISO 21434, GDPR/CCPA/LGPD are documented + evidenced; the `SafetyGateNotSatisfied` error is the gate | skill 13 |
+| **G10** — Production hardening | Threat model, SLOs, on-call, runbooks, red team, CVE SLA, observability are all in place | skill 12 + 15 |
+
+### Evidence required for each gate
+
+A gate is green only when its evidence is
+filed. The evidence is the **verifier's
+report** (per skill 14) + the gate-specific
+artifacts.
+
+| Gate | Required evidence |
+|---|---|
+| G0 | The six `docs/foundry/` artifacts + a signed `current-state-audit.md` |
+| G1 | The ontology's `docs/ontology/<version>/` set + the invariant tests + the version picker |
+| G2 | The migration is idempotent (tested by re-running); the outbox is reliable (tested by crash-recovery scenarios) |
+| G3 | Golden tests (parser + resolver + type-checker) + the artifact contract (content-addressed + signed) |
+| G4 | The 3D pipeline's manifest is signed; the digital twin consumes the same canonical artifact; the asset-validation suite passes |
+| G5 | The AI council produces typed proposals; the deterministic engine applies them; the human review is recorded; the LLM has no path to the database / catalog / audit trail / royalty engine / regulatory submission / safety gate |
+| G6 | The catalog is queryable + reproducible; the audit trail is append-only; the `AI_INFERRED → VERIFIED` transition is a signed event |
+| G7 | The royalty engine is deterministic (tested with a fixture); the contract is `ACTIVE`; the settlement envelope is typed |
+| G8 | The marketplace end-to-end test (listing → order → escrow → settlement) passes; the `VISUAL_ONLY` / `CONCEPTUAL` ineligibility is tested |
+| G9 | The regulatory change log is current; the SBOM is per release; the homologation package is in the catalog; the `SafetyGateNotSatisfied` error is the gate |
+| G10 | The threat model is current; the SLOs are met; the on-call rotation is in place; the runbooks cover the top-10 incidents; the red-team report is filed; the CVE feed is monitored; the OpenTelemetry traces are sampled |
+
+The full gate definitions, the evidence
+required, and the recovery patterns are in
+[`.ai/STANDARDS.md`](./STANDARDS.md) section
+10 (the "Project gates" cross-reference).
+
+---
+
+## 23. Required Documentation
+
+The Foundry maintains the following
+documentation. A release that ships without
+a current version of every required document
+is a contract violation. Documents are
+**living**: a stale document is a violation.
+
+### Repository root
+
+- `README.md` — the project's elevator
+  pitch, the build instructions, the
+  contribution guide.
+
+### Architecture
+
+- `docs/architecture/system-context.md` — the
+  system context diagram (C4 level 1) + the
+  actors + the external systems.
+- `docs/architecture/domain-map.md` — the
+  bounded contexts + the relationships
+  between them + the cross-context
+  contracts.
+- `docs/architecture/security-model.md` —
+  the trust boundaries + the auth model +
+  the secret management + the threat model
+  summary.
+- `docs/architecture/data-classification.md`
+  — the data classes (public, internal,
+  confidential, regulated) + the handling
+  rules per class.
+- `docs/architecture/ai-authority-boundaries.md`
+  — what the AI may do, what the AI may
+  not do, the authoritative workflow, and
+  the recovery patterns (refs `.ai/STANDARDS.md`
+  section 5).
+
+### Decisions
+
+- `docs/adr/` — the architecture decision
+  records. One ADR per decision. The
+  filename pattern is `NNNN-title.md`.
+
+### API
+
+- `docs/api/` — the API contract (OpenAPI
+  per service) + the changelog.
+
+### Testing
+
+- `docs/testing/` — the test strategy +
+  the coverage report + the mutation
+  report + the fuzz report.
+
+### Threat model
+
+- `docs/threat-model/` — the threat model
+  (STRIDE per surface) + the trust
+  boundaries + the mitigations + the
+  residual-risk register.
+
+### Runbooks
+
+- `docs/runbooks/` — the on-call runbooks
+  per top-10 incident (one per incident,
+  one per recovery procedure).
+
+### Roadmap
+
+- `docs/roadmap/` — the public roadmap +
+  the per-quarter themes + the per-quarter
+  outcomes + the risk register.
+
+### Foundry (orchestrator's mandatory outputs)
+
+- `docs/foundry/current-state-audit.md` — the
+  current state of the repository.
+- `docs/foundry/target-architecture.md` —
+  the target state + the bridges + the
+  cut-overs.
+- `docs/foundry/domain-ownership.md` —
+  which skill owns which aggregate.
+- `docs/foundry/implementation-roadmap.md`
+  — the dependency-ordered sequence of
+  increments.
+- `docs/foundry/risk-register.md` — every
+  identified risk, with an owner, a
+  likelihood, an impact, and a mitigation.
+- `docs/foundry/dependency-map.md` — every
+  cross-skill edge, with the data shape,
+  the schema version, and the auth
+  requirement.
+
+A document is **current** when it has been
+updated within the last 30 days OR it is
+explicitly marked as "stable" in its
+front-matter. A stale document is a
+contract violation; the orchestrator blocks
+release.
+
+---
+
+## 24. Cross-cutting Concerns
+
+These four concerns apply to **every** code
+path, **every** skill, **every** release. A
+path that does not honor them is a contract
+violation.
+
+### 24.1 Stable machine-readable code
+
+Every code path returns a **typed**
+machine-readable value. The value is:
+
+- A typed domain object (Kotlin data class,
+  Rust struct, TypeScript interface, etc.).
+- A typed `Result` / `Either` (success
+  payload + typed error) at the application
+  boundary.
+- A typed JSON envelope (code, message,
+  field, reason, provenance) at the
+  infrastructure boundary.
+- A typed `FoundryError` envelope (per
+  `.ai/STANDARDS.md` section 7) at the
+  error boundary.
+
+A free-form string is never the value. A
+`Map<String, Any>` is never the value. A
+`null` is never the value where a typed
+value is required.
+
+### 24.2 Safe user-facing message
+
+Every error path produces a **safe
+user-facing message**. The message is:
+
+- **Short** (one sentence, ≤ 140 characters).
+- **Actionable** (the user knows what to do
+  next, e.g. "Fix the spec at the indicated
+  field" vs "Error 500").
+- **Free of internal jargon** (no stack
+  traces, no internal class names, no
+  internal URLs).
+- **Free of secrets** (no API keys, no
+  tokens, no credentials, no internal host
+  names).
+- **Localized** (every supported locale has
+  a translation; the platform falls back to
+  the canonical English).
+
+The user-facing message is the **outer
+envelope** of the error. The typed
+machine-readable code (per 24.1) is the
+**inner envelope**. The full error is
+serialized as:
+
+```json
+{
+  "code": "VEHICLE_DEFINITION_INVALID",
+  "userMessage": {
+    "en": "Fix the spec at the indicated field.",
+    "es": "Corrige la especificación en el campo indicado.",
+    "ja": "指定されたフィールドで仕様を修正してください。"
+  },
+  "machineDetails": {
+    "field": "powertrain.battery.capacity",
+    "reason": "capacity must be positive",
+    "provenance": { ... }
+  }
+}
+```
+
+### 24.3 Correlation ID
+
+Every request carries a **correlation ID**.
+The ID is:
+
+- Generated at the entry point (the API
+  gateway / the UI / the CLI).
+- Propagated through every downstream call
+  (via the `X-Correlation-Id` header in HTTP,
+  via a context in coroutines, via a
+  thread-local in synchronous code, via a
+  span attribute in OpenTelemetry).
+- Logged at every hop (the log entry
+  includes the correlation ID).
+- Included in every audit-trail event.
+- Returned to the user (in the response
+  headers + in the error envelope).
+
+A request that cannot be correlated is a
+contract violation. The platform cannot
+debug, audit, or support a request that
+has no correlation ID.
+
+### 24.4 Retry classification
+
+Every error has a **retry classification**.
+The classification is one of:
+
+- `retryable_immediate` — the client MAY
+  retry the same request immediately
+  (e.g. a transient lock).
+- `retryable_backoff` — the client MAY
+  retry the same request after an
+  exponential backoff (e.g. a 503 from a
+  downstream service).
+- `retryable_idempotent_only` — the client
+  MAY retry the same request only if the
+  request is idempotent (e.g. a network
+  timeout where the request may or may not
+  have been processed).
+- `non_retryable` — the client MUST NOT
+  retry (e.g. a 4xx validation error).
+
+The classification is part of the typed
+error envelope. The client SDK uses the
+classification to decide whether to retry
++ how long to wait. A retry that does not
+honor the classification is a contract
+violation.
+
+### 24.5 No leak of internal stack traces or secrets
+
+A response that includes:
+
+- A raw stack trace
+- An internal class name
+- An internal URL or host name
+- A secret (API key, token, credential,
+  private key)
+
+is a **P0 incident**. The platform
+**strips** these from every user-facing
+response. The full stack trace + the
+internal context are in the server-side
+log (correlated by the correlation ID, per
+24.3); the user sees only the safe
+user-facing message (per 24.2).
+
+The CI enforces this: a positive match of
+a known stack-trace pattern + a known
+secret pattern in a response is a hard
+build failure.
+
+### 24.6 Relevant structured metadata
+
+Every event in the audit trail + every log
+entry + every metric + every trace carries
+**relevant structured metadata**. The
+metadata is the union of:
+
+- `correlationId` (per 24.3).
+- `tenantId` (the org / project the
+  request belongs to).
+- `userId` (the authenticated user; the
+  audit-trail row uses the user ID, not
+  the user PII).
+- `vehicleId` / `revisionId` (when the
+  request is vehicle-scoped).
+- `vehicleRepresentationLevel` (the level
+  of the vehicle the request touches).
+- `verificationStatus` (the level of the
+  fact the request touches).
+- `source` / `sourceType` (the provenance
+  of the data the request touches).
+
+A log entry without the relevant metadata
+is a contract violation. The platform
+cannot debug, audit, or support an event
+that has no metadata.
+
+---
+
 > "No skill is an island. The platform is the
 > composition."

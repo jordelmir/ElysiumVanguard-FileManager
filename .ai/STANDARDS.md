@@ -580,6 +580,78 @@ violation. The standards are enforced by:
 A standard is a hard contract. A deviation is
 an ADR + a vote in the AI council (skill 05).
 
+### 8.1 Project gates (G0–G10)
+
+The standards are the **technical specifics**.
+The project gates (per `.ai/AGENTS.md` section
+22) are the **milestones** that prove the
+standards are honored at scale.
+
+| Gate | Standards it proves |
+|---|---|
+| G0 — Repository understood | The orchestrator's six mandatory outputs are signed |
+| G1 — Domain model approved | Section 3 (truth model) + section 4 (vehicle representation levels) are enforced in the ontology |
+| G2 — Persistence and versioning proven | Section 3 (truth model) + the artifact contract (`AGENTS.md` section 12) are honored in the schema |
+| G3 — Vehicle compiler deterministic | Section 2.1 (data integrity) + section 7 (error model) are honored in the compiler |
+| G4 — 3D digital twin integrated | Section 2.1 (data integrity) + section 2.5 (trust) are honored in the 3D pipeline |
+| G5 — AI constrained by structured tools | Section 5 (AI authority boundary) is enforced at the application layer |
+| G6 — IP and provenance ledger operational | Section 2.1 (data integrity) + section 2.2 (commercial integrity) + section 3 (truth model) are honored in the catalog |
+| G7 — Royalty engine contract-driven | Section 2.2 (commercial integrity) + section 7 (error model) are honored in the engine |
+| G8 — Marketplace and supplier workflow | Section 2.2 (commercial integrity) + section 4 (vehicle representation levels) are honored in the marketplace |
+| G9 — Safety and regulatory evidence model | Section 2.1 (data integrity) + section 5 (AI authority boundary) are honored in the regulatory surface |
+| G10 — Production hardening | All sections are honored in production |
+
+The full gate definitions + the evidence
+required per gate are in `.ai/AGENTS.md`
+section 22.
+
+### 8.2 Completion standard
+
+A feature is complete only when **every** item
+on the completion standard (per `.ai/AGENTS.md`
+section 21) is true. The standard is the
+definition of "done" for the platform.
+
+The 8 items are:
+
+1. The business invariant is enforced.
+2. Unauthorized access is rejected.
+3. Concurrent execution is safe.
+4. Retries are idempotent.
+5. Failure states are observable.
+6. Data is migrated safely.
+7. Tests prove primary AND adversarial paths.
+8. Documentation matches the implementation.
+
+A feature that bypasses any item is a contract
+violation; the verifier (skill 14) blocks the
+release.
+
+### 8.3 Cross-cutting concerns
+
+Every code path honors the four cross-cutting
+concerns (per `.ai/AGENTS.md` section 24):
+
+- **Stable machine-readable code** — typed
+  values at every boundary, never a free-form
+  string or a `Map<String, Any>`.
+- **Safe user-facing message** — short,
+  actionable, jargon-free, secret-free,
+  localized.
+- **Correlation ID** — every request carries a
+  correlation ID propagated through every
+  downstream call + logged at every hop +
+  included in every audit-trail event.
+- **Retry classification** — every error has
+  one of `retryable_immediate` /
+  `retryable_backoff` /
+  `retryable_idempotent_only` /
+  `non_retryable`.
+
+A path that does not honor the concerns is a
+contract violation; the verifier blocks the
+release.
+
 ---
 
 ## 9. Working with this document
