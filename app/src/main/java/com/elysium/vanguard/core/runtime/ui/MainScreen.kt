@@ -14,12 +14,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -60,6 +65,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.elysium.vanguard.core.runtime.distros.Distro
+import com.elysium.vanguard.core.runtime.distros.DistroCatalog
+import com.elysium.vanguard.core.runtime.distros.profile.ElysiumProfile
+import com.elysium.vanguard.core.runtime.windows.WindowsVmCatalog
+import com.elysium.vanguard.core.runtime.windows.WindowsVmSpec
 import java.util.UUID
 import com.elysium.vanguard.core.runtime.runner.SessionState
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
@@ -788,15 +798,12 @@ private fun CreateWorkspaceDialog(
 }
 
 /**
- * Phase 40 — the "Add session" dialog.
- *
- * A minimal form: the user picks a kind (Linux
- * proot or Windows VM) and a display name. The
- * distroId / specId default to a placeholder
- * the user can edit later (Phase 41+ will pull
- * the real catalog into the picker). The id is
- * auto-generated via [UUID] so the user never
- * sees the runtime's internal id scheme.
+ * Phase 41 — the catalog-driven "Add session"
+ * dialog. The user picks a kind (Linux proot or
+ * Windows VM) and a display name; the distroId /
+ * profileId / windowsSpecId come from dropdowns
+ * backed by the real [DistroCatalog] /
+ * [ElysiumProfile] / [WindowsVmCatalog] data.
  *
  * The dialog returns a fully-formed
  * [WorkspaceSession] the screen hands to
@@ -809,13 +816,20 @@ private fun AddSessionDialog(
 ) {
     var isLinux by remember { mutableStateOf(true) }
     var displayName by remember { mutableStateOf("") }
-    var distroId by remember { mutableStateOf("debian-latest") }
-    var profileId by remember { mutableStateOf("balanced") }
-    var windowsSpecId by remember { mutableStateOf("win11-pro-23h2") }
+    // Phase 41 — the selected objects, not strings.
+    // Initial: the first distro / first profile /
+    // first Windows spec. A real distro/profile/spec
+    // is always present (the catalogs are hand-
+    // curated with at least one entry each).
+    val distros = remember { DistroCatalog.ALL }
+    val profiles = remember { ElysiumProfile.entries.toList() }
+    val windowsSpecs = remember { WindowsVmCatalog.official().all }
+    var selectedDistro by remember { mutableStateOf(distros.first()) }
+    var selectedProfile by remember { mutableStateOf(profiles.first()) }
+    var selectedWindowsSpec by remember { mutableStateOf(windowsSpecs.first()) }
 
     val isValid = displayName.isNotBlank() &&
-        (if (isLinux) distroId.isNotBlank() && profileId.isNotBlank()
-         else windowsSpecId.isNotBlank())
+        (if (isLinux) true else true) // catalogs are non-empty
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -842,24 +856,33 @@ private fun AddSessionDialog(
                     singleLine = true
                 )
                 if (isLinux) {
-                    OutlinedTextField(
-                        value = distroId,
-                        onValueChange = { distroId = it },
-                        label = { Text("Distro id") },
-                        singleLine = true
+                    // --- Distro picker ---
+                    DropdownPicker(
+                        label = "Distro",
+                        options = distros,
+                        selected = selectedDistro,
+                        onSelected = { selectedDistro = it },
+                        optionLabel = { it.displayName },
+                        optionId = { it.id }
                     )
-                    OutlinedTextField(
-                        value = profileId,
-                        onValueChange = { profileId = it },
-                        label = { Text("Profile id") },
-                        singleLine = true
+                    // --- Profile picker ---
+                    DropdownPicker(
+                        label = "Profile",
+                        options = profiles,
+                        selected = selectedProfile,
+                        onSelected = { selectedProfile = it },
+                        optionLabel = { it.displayName },
+                        optionId = { it.id }
                     )
                 } else {
-                    OutlinedTextField(
-                        value = windowsSpecId,
-                        onValueChange = { windowsSpecId = it },
-                        label = { Text("Windows spec id") },
-                        singleLine = true
+                    // --- Windows spec picker ---
+                    DropdownPicker(
+                        label = "Windows spec",
+                        options = windowsSpecs,
+                        selected = selectedWindowsSpec,
+                        onSelected = { selectedWindowsSpec = it },
+                        optionLabel = { it.displayName },
+                        optionId = { it.id }
                     )
                 }
             }
@@ -873,14 +896,14 @@ private fun AddSessionDialog(
                         WorkspaceSession.LinuxProot(
                             id = sessionId,
                             displayName = displayName.trim(),
-                            distroId = distroId.trim(),
-                            profileId = profileId.trim()
+                            distroId = selectedDistro.id,
+                            profileId = selectedProfile.id
                         )
                     } else {
                         WorkspaceSession.WindowsVm(
                             id = sessionId,
                             displayName = displayName.trim(),
-                            windowsSpecId = windowsSpecId.trim()
+                            windowsSpecId = selectedWindowsSpec.id
                         )
                     }
                     onConfirm(session)
@@ -894,4 +917,64 @@ private fun AddSessionDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+/**
+ * Phase 41 — a generic dropdown picker composable
+ * shared by the three "Add session" pickers
+ * (Distro, Profile, Windows spec). The picker
+ * shows the selected option's [optionLabel] and
+ * expands into a list of every [options] entry
+ * on click. The selection is a value-typed
+ * object (not a string), so the caller gets
+ * type-safe access to the underlying data.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> DropdownPicker(
+    label: String,
+    options: List<T>,
+    selected: T,
+    onSelected: (T) -> Unit,
+    optionLabel: (T) -> String,
+    optionId: (T) -> String
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedTextField(
+            value = optionLabel(selected),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        if (expanded) Icons.Filled.KeyboardArrowUp
+                        else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "Toggle $label"
+                    )
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    onClick = {
+                        onSelected(option)
+                        expanded = false
+                    },
+                    modifier = Modifier.semantics {
+                        contentDescription = "Select ${optionId(option)}"
+                    }
+                )
+            }
+        }
+    }
 }
