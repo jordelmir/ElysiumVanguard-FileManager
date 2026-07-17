@@ -217,6 +217,17 @@ class MainActivity : ComponentActivity() {
                             onBack = { navController.popBackStack() }
                         )
                     }
+                    // PHASE 37 — the new sovereign runtime home screen.
+                    // Status bar (runningSessionCount + distros +
+                    // windows VMs) + workspace list. Phase 38 adds
+                    // the per-session Start / Stop actions.
+                    composable("runtime_main") {
+                        com.elysium.vanguard.core.runtime.ui.MainScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenRuntime = { navController.navigate("runtime") },
+                            onOpenTerminal = { navController.navigate("terminal") }
+                        )
+                    }
                     // Linux workspace: a capability-accurate graphical route
                     // that never substitutes a fake VNC bitmap for Linux.
                     composable(
