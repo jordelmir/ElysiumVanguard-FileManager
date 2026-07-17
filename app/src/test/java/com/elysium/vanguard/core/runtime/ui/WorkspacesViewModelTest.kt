@@ -2,6 +2,10 @@ package com.elysium.vanguard.core.runtime.ui
 
 import com.elysium.vanguard.core.runtime.observability.RecordingEventBus
 import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
+import com.elysium.vanguard.core.runtime.runner.ActiveSession
+import com.elysium.vanguard.core.runtime.runner.SessionRunner
+import com.elysium.vanguard.core.runtime.runner.SessionRunnerError
+import com.elysium.vanguard.core.runtime.runner.SessionState
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceError
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
@@ -39,6 +43,10 @@ import java.util.concurrent.atomic.AtomicLong
  *     / `toState` strings.
  *   - `addSession` / `removeSession` publish the
  *     per-session events and refresh.
+ *   - `startSession` / `stopSession` delegate to the
+ *     runner; the runner's events flow back through
+ *     the bus and the ViewModel re-reads the
+ *     session states.
  *   - The ViewModel re-reads state on every workspace
  *     or session event from the bus.
  *   - Thread-safety under 4 × 20 concurrent
@@ -50,7 +58,8 @@ class WorkspacesViewModelTest {
     private val manager = WorkspaceManager(store)
     private val bus = RecordingEventBus()
     private val clock = AtomicLong(0L)
-    private val viewModel = WorkspacesViewModel(manager, bus, clock = clock::get)
+    private val runner = FakeSessionRunner()
+    private val viewModel = WorkspacesViewModel(manager, bus, runner, clock = clock::get)
 
     // --- initial state ---
 
@@ -254,6 +263,7 @@ class WorkspacesViewModelTest {
         val localVm = WorkspacesViewModel(
             workspaceManager = WorkspaceManager(InMemoryWorkspaceStore()),
             eventBus = RecordingEventBus(),
+            sessionRunner = FakeSessionRunner(),
             clock = { 0L }
         )
         val start = CountDownLatch(1)
@@ -277,6 +287,85 @@ class WorkspacesViewModelTest {
         assertEquals(80, localVm.state.value.workspaces.size)
     }
 
+    // --- session runner (Phase 33) ---
+
+    @Test
+    fun `startSession delegates to the runner and refreshes session states on success`() {
+        val ws = viewModel.createWorkspace("Work").getOrThrow()
+        val session = linuxSession("s-1")
+        viewModel.addSession(ws.id, session)
+        // Stage a successful start on the fake runner.
+        runner.startResultFor[session.id] = Result.success(SessionState.Running(pid = 9000, startedAtMs = 0L))
+
+        val result = viewModel.startSession(ws, session)
+
+        assertTrue(result.isSuccess)
+        assertEquals(SessionState.Running(pid = 9000, startedAtMs = 0L), result.getOrThrow())
+        // The session appears in the ViewModel's sessionStates map.
+        val state = viewModel.state.value
+            .sessionStates[WorkspacesViewModel.SessionKey(ws.id, "s-1")]
+        assertEquals(SessionState.Running(pid = 9000, startedAtMs = 0L), state)
+    }
+
+    @Test
+    fun `startSession records a failure on lastActionResult when the runner fails`() {
+        val ws = viewModel.createWorkspace("Work").getOrThrow()
+        val session = linuxSession("s-1")
+        viewModel.addSession(ws.id, session)
+        runner.startResultFor[session.id] = Result.failure(
+            SessionRunnerError.SessionAlreadyRunning(ws.id, "s-1", SessionState.Running(pid = 1, startedAtMs = 0L))
+        )
+
+        val result = viewModel.startSession(ws, session)
+
+        assertTrue(result.isFailure)
+        // The failure surfaces on the workspace-level lastActionResult.
+        assertTrue(viewModel.state.value.lastActionResult?.isFailure == true)
+    }
+
+    @Test
+    fun `stopSession delegates to the runner and refreshes session states on success`() {
+        val ws = viewModel.createWorkspace("Work").getOrThrow()
+        val session = linuxSession("s-1")
+        viewModel.addSession(ws.id, session)
+        runner.stopResultFor[session.id] = Result.success(SessionState.Stopped)
+
+        val result = viewModel.stopSession(ws, session)
+
+        assertTrue(result.isSuccess)
+        // The runner's stop was called.
+        assertEquals(1, runner.stopCalls.size)
+    }
+
+    @Test
+    fun `external SessionStartedEvent from the bus triggers refreshSessionStates`() {
+        val ws = viewModel.createWorkspace("Work").getOrThrow()
+        val session = linuxSession("s-1")
+        viewModel.addSession(ws.id, session)
+        // Stage the runner with an active session.
+        runner.activeSessions.clear()
+        runner.activeSessions.add(
+            ActiveSession(ws.id, "s-1", WorkspaceSession.SessionKind.LINUX_PROOT,
+                SessionState.Running(pid = 5000, startedAtMs = 1L), "JAILED")
+        )
+
+        // Publish a SessionStartedEvent as if the runner did it.
+        bus.publish(
+            RuntimeEvent.SessionStartedEvent(
+                atMs = 1L,
+                workspaceId = ws.id,
+                sessionId = "s-1",
+                kind = "LINUX_PROOT",
+                launcherKind = "JAILED_SHELL",
+                pid = 5000
+            )
+        )
+
+        val state = viewModel.state.value
+            .sessionStates[WorkspacesViewModel.SessionKey(ws.id, "s-1")]
+        assertEquals(SessionState.Running(pid = 5000, startedAtMs = 1L), state)
+    }
+
     // --- helpers ---
 
     private fun linuxSession(id: String): WorkspaceSession.LinuxProot =
@@ -286,4 +375,47 @@ class WorkspacesViewModelTest {
             distroId = "debian-latest",
             profileId = "balanced"
         )
+
+    /**
+     * A hand-rolled [SessionRunner] for tests. Records
+     * every start / stop call. The test stages
+     * `startResultFor[sessionId]` and
+     * `stopResultFor[sessionId]` to control what each
+     * call returns; the default is
+     * `Result.success(SessionState.Idle)`.
+     */
+    private class FakeSessionRunner : SessionRunner {
+        val startCalls = mutableListOf<WorkspaceSession>()
+        val stopCalls = mutableListOf<WorkspaceSession>()
+        val startResultFor = mutableMapOf<String, Result<SessionState>>()
+        val stopResultFor = mutableMapOf<String, Result<SessionState>>()
+        val activeSessions = mutableListOf<ActiveSession>()
+
+        override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+            startCalls += session
+            val result = startResultFor[session.id] ?: Result.success(SessionState.Idle)
+            if (result.getOrNull() is SessionState.Running) {
+                activeSessions += ActiveSession(
+                    workspaceId = workspace.id,
+                    sessionId = session.id,
+                    kind = session.kind,
+                    state = result.getOrThrow(),
+                    launcherKind = "fake"
+                )
+            }
+            return result
+        }
+
+        override fun stop(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+            stopCalls += session
+            activeSessions.removeAll { it.sessionId == session.id }
+            return stopResultFor[session.id] ?: Result.success(SessionState.Stopped)
+        }
+
+        override fun state(workspaceId: String, sessionId: String): SessionState =
+            activeSessions.firstOrNull { it.workspaceId == workspaceId && it.sessionId == sessionId }?.state
+                ?: SessionState.Idle
+
+        override fun listActive(): List<ActiveSession> = activeSessions.toList()
+    }
 }

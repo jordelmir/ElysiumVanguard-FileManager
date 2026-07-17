@@ -2,6 +2,8 @@ package com.elysium.vanguard.core.runtime.ui
 
 import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
+import com.elysium.vanguard.core.runtime.runner.SessionRunner
+import com.elysium.vanguard.core.runtime.runner.SessionState
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceError
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
@@ -17,26 +19,39 @@ import kotlinx.coroutines.flow.asStateFlow
  * The [WorkspacesViewModel] is the JVM-testable seam the
  * Compose UI calls when the user taps "create
  * workspace", "pause", "activate", "close", "add
- * session", or "remove session". The ViewModel:
+ * session", "remove session", "start session", or
+ * "stop session". The ViewModel:
  *
  *   - delegates every action to the [WorkspaceManager]
  *     (Phase 24) — the same manager the data layer
  *     uses; no second source of truth,
+ *   - delegates session start / stop to the
+ *     [SessionRunner] (Phase 32 registry) — the
+ *     runner dispatches by [WorkspaceSession.kind]
+ *     and publishes its own runtime events,
  *   - publishes a [RuntimeEvent] to the [RuntimeEventBus]
- *     (Phase 25) when an action succeeds — the
- *     observability bus + the [MainScreenViewModel]
- *     pick the event up,
+ *     (Phase 25) when a workspace action succeeds —
+ *     the observability bus + the
+ *     [MainScreenViewModel] pick the event up,
  *   - exposes a [StateFlow] of the current workspace
- *     list + the last action's typed result.
+ *     list, the live session-state map, and the last
+ *     action's typed result.
  *
  * The ViewModel is `AndroidViewModel`-free. A future
  * Compose-side adapter wires the `StateFlow` to the
  * Compose state and the action methods to the UI's
  * click handlers.
+ *
+ * Phase 33 — added `startSession` / `stopSession`
+ * methods that delegate to the [SessionRunner]; the
+ * [WorkspacesState] gained a `sessionStates` map the
+ * UI uses to render the start / stop / running badge
+ * per session.
  */
 class WorkspacesViewModel(
     private val workspaceManager: WorkspaceManager,
     private val eventBus: RuntimeEventBus,
+    private val sessionRunner: SessionRunner,
     private val clock: () -> Long = System::currentTimeMillis
 ) : AutoCloseable {
 
@@ -48,11 +63,16 @@ class WorkspacesViewModel(
             event is RuntimeEvent.SessionAddedEvent ||
             event is RuntimeEvent.SessionRemovedEvent) {
             refresh()
+        } else if (event is RuntimeEvent.SessionStartedEvent ||
+            event is RuntimeEvent.SessionStoppedEvent ||
+            event is RuntimeEvent.SessionStartFailedEvent) {
+            refreshSessionStates()
         }
     }
 
     init {
         refresh()
+        refreshSessionStates()
     }
 
     // --- read ---
@@ -62,6 +82,21 @@ class WorkspacesViewModel(
             workspaces = workspaceManager.listWorkspaces(),
             lastActionResult = null
         )
+    }
+
+    /**
+     * Re-read the live session states from the
+     * runner. The runner is the source of truth for
+     * "is this session running?"; the ViewModel
+     * projects the runner's `listActive()` onto a
+     * per-`(workspaceId, sessionId)` map the UI
+     * can render.
+     */
+    fun refreshSessionStates() {
+        val states = sessionRunner.listActive().associate { active ->
+            SessionKey(active.workspaceId, active.sessionId) to active.state
+        }
+        _state.value = _state.value.copy(sessionStates = states)
     }
 
     // --- create ---
@@ -150,6 +185,55 @@ class WorkspacesViewModel(
         return result
     }
 
+    // --- session runner (Phase 33) ---
+
+    /**
+     * Start a session via the [SessionRunner].
+     * Delegates to the runner, which dispatches by
+     * [WorkspaceSession.kind] (Phase 32). The
+     * runner's own [RuntimeEvent.SessionStartedEvent] /
+     * `SessionStartFailedEvent` flows back through
+     * the bus; the subscriber re-reads the runner's
+     * state via [refreshSessionStates].
+     */
+    fun startSession(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+        val result = sessionRunner.start(workspace, session)
+        if (result.isFailure) {
+            // Record the failure on the workspace-
+            // level lastActionResult so the UI can
+            // show a snackbar.
+            @Suppress("UNCHECKED_CAST")
+            val wrapped: Result<Workspace> = Result.failure(
+                result.exceptionOrNull() ?: IllegalStateException("session start failed")
+            )
+            _state.value = _state.value.copy(lastActionResult = wrapped)
+        } else {
+            refreshSessionStates()
+        }
+        return result
+    }
+
+    /**
+     * Stop a session via the [SessionRunner]. The
+     * runner's [RuntimeEvent.SessionStoppedEvent]
+     * flows back through the bus; the subscriber
+     * re-reads the runner's state via
+     * [refreshSessionStates].
+     */
+    fun stopSession(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+        val result = sessionRunner.stop(workspace, session)
+        if (result.isFailure) {
+            @Suppress("UNCHECKED_CAST")
+            val wrapped: Result<Workspace> = Result.failure(
+                result.exceptionOrNull() ?: IllegalStateException("session stop failed")
+            )
+            _state.value = _state.value.copy(lastActionResult = wrapped)
+        } else {
+            refreshSessionStates()
+        }
+        return result
+    }
+
     // --- internals ---
 
     private inline fun transitionAndPublish(
@@ -179,18 +263,29 @@ class WorkspacesViewModel(
     override fun close() {
         subscription.close()
     }
+
+    /**
+     * The (workspaceId, sessionId) pair used as a
+     * map key for the live session states. Lives
+     * here so the test can construct one without
+     * depending on the runner's internal key type.
+     */
+    data class SessionKey(val workspaceId: String, val sessionId: String)
 }
 
 /**
  * The state object the Compose UI consumes. The
  * [workspaces] list is the source of truth (hydrated
- * from the manager on every refresh); [lastActionResult]
+ * from the manager on every refresh); [sessionStates]
+ * is the live per-session state map (hydrated from
+ * the runner on every refresh); [lastActionResult]
  * is the result of the most recent action, so the UI
  * can show a snackbar / error banner without polling
  * the manager.
  */
 data class WorkspacesState(
     val workspaces: List<Workspace> = emptyList(),
+    val sessionStates: Map<WorkspacesViewModel.SessionKey, SessionState> = emptyMap(),
     val lastActionResult: Result<Workspace>? = null
 ) {
     companion object {

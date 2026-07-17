@@ -9,6 +9,7 @@ import org.junit.Test
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Phase 32 — tests for [SessionRunnerRegistry].
@@ -181,8 +182,9 @@ class SessionRunnerRegistryTest {
         }
         start.countDown()
         assertTrue(done.await(15, TimeUnit.SECONDS))
-        // 4 × 20 = 80 total starts, split across both runners.
-        assertEquals(80, linux.startCalls.size + windows.startCalls.size)
+        // 4 × 20 = 80 total starts, split across both runners. The
+        // counter is an AtomicInteger so the read is race-free.
+        assertEquals(80, linux.startCount.get() + windows.startCount.get())
         // All starts went somewhere; the merged active list is the same size.
         assertEquals(80, registry.listActive().size)
     }
@@ -226,12 +228,14 @@ class SessionRunnerRegistryTest {
      * can stage "this runner has N active sessions".
      */
     private class RecordingRunner(private val stateForStart: SessionState) : SessionRunner {
-        val startCalls = mutableListOf<Pair<Workspace, WorkspaceSession>>()
-        val stopCalls = mutableListOf<Pair<Workspace, WorkspaceSession>>()
+        val startCalls = java.util.Collections.synchronizedList(mutableListOf<Pair<Workspace, WorkspaceSession>>())
+        val stopCalls = java.util.Collections.synchronizedList(mutableListOf<Pair<Workspace, WorkspaceSession>>())
+        val startCount = AtomicInteger(0)
         val stateMap = ConcurrentHashMap<String, SessionState>()
-        val activeSessions = mutableListOf<ActiveSession>()
+        val activeSessions = java.util.Collections.synchronizedList(mutableListOf<ActiveSession>())
 
         override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+            startCount.incrementAndGet()
             startCalls += workspace to session
             stateMap[session.id] = stateForStart
             if (stateForStart.isLive()) {
