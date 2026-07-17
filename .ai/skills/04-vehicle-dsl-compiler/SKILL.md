@@ -623,7 +623,243 @@ it (skill 07). The skill produces
 the typed spec; the next skills
 produce the visual + the simulation.
 
-## 22. Cross-references
+## 22. Constraint severity
+
+The constraint engine (per section 12)
+emits a typed `Severity` per
+violation. The severity is one of:
+
+| Severity | Behavior |
+|---|---|
+| **`HARD`** | Compilation fails. The `Spec.Artifact` is **not** emitted. The user must fix the spec. |
+| **`SAFETY_CRITICAL`** | Compilation fails AND a `SafetyFinding` is filed in the audit trail (per skill 09). The `SafetyFinding` is a P1 incident. The spec is blocked until a human engineer reviews the finding + signs off. |
+| **`REGULATORY`** | Compilation is blocked for the affected market (the `VehicleDefinition` declares the market; the constraint declares the market; the block is per-market). The spec is emitted for other markets. |
+| **`SOFT`** | Compilation succeeds. The `CompilationReport` includes a warning. The user is informed; the spec is usable. |
+| **`OPTIMIZATION`** | The candidate is ranked (e.g. by cost, by mass, by efficiency) but not rejected. The user picks from the ranked candidates. |
+
+A constraint that does not declare a
+severity defaults to `HARD`. A
+`SAFETY_CRITICAL` constraint that the
+compiler cannot evaluate fails as
+`HARD` (the conservative fallback).
+
+A constraint engine that conflates
+`HARD` + `SAFETY_CRITICAL` +
+`REGULATORY` is a contract violation;
+the verifier (skill 14) rejects the
+engine.
+
+## 23. Example failure (typed error envelope)
+
+```json
+{
+  "code": "VCOMP-INTERFACE-004",
+  "severity": "HARD",
+  "message": "Selected transmission input interface is incompatible with the engine output interface.",
+  "paths": [
+    "$.propulsion.engine",
+    "$.driveline.transmission"
+  ],
+  "candidates": [
+    "TRANSMISSION-A4-TRANSVERSE-01",
+    "TRANSMISSION-CVT-TRANSVERSE-03"
+  ]
+}
+```
+
+The envelope is the typed
+`FoundryError` shape (per
+`.ai/AGENTS.md` section 10 +
+`.ai/STANDARDS.md` section 7):
+
+- **`code`.** The canonical error
+  code (e.g. `VCOMP-INTERFACE-004`
+  = Vehicle Compiler, Interface
+  constraint, case 4). The
+  catalog of codes is owned by
+  the compiler.
+- **`severity`.** Per section 22.
+- **`message`.** The user-facing
+  message in the user's locale
+  (per skill 11's i18n bundle).
+- **`paths`.** The JSON paths in
+  the spec that the violation
+  refers to. The user can
+  navigate to the violation.
+- **`candidates`.** The candidate
+  resolutions (when the
+  constraint is solvable). The
+  user picks one; the compiler
+  re-runs.
+
+A free-form string error is a
+contract violation. A
+`Map<String, Any>` error is a
+contract violation. The envelope
+is a typed value.
+
+## 24. Incremental compilation
+
+The compiler supports **incremental
+compilation**. A recompilation of
+a `paint material` MUST NOT
+rebuild the `powertrain`.
+
+The compiler tracks per-subsystem
+hashes:
+
+- A subsystem's hash is a content
+  hash of the subsystem's spec
+  + the subsystem's dependencies
+  (per skill 03 section 13.4).
+- A recompilation of a subsystem
+  produces a new hash.
+- A subsystem whose hash is
+  unchanged reuses the previous
+  compilation's output.
+
+The cache is content-addressed
+(SHA-256 of the subsystem hash).
+The cache is signed. A tampered
+cache entry is rejected with a
+typed `ArtifactIntegrityFailure`
+error (per `.ai/STANDARDS.md`
+section 7).
+
+A compiler that rebuilds the
+entire spec on every recompilation
+is a contract violation. The
+performance baseline is "incremental
+compilation of a single subsystem
+finishes in < 100ms P99".
+
+## 25. Security
+
+The compiler is the **trust boundary**
+for the DSL. The compiler rejects:
+
+- **Recursive structures
+  exceeding depth limits.** A
+  spec whose JSON tree depth
+  exceeds the configured limit
+  (default: 32) is rejected with
+  a typed `VehicleDefinitionInvalid`
+  error.
+- **Excessive arrays.** An array
+  with > the configured size
+  limit (default: 10,000
+  elements) is rejected.
+- **Unsupported units.** A value
+  with a unit that the units
+  library does not recognize is
+  rejected with a typed
+  `UnitUnknown` error.
+- **NaN or infinite numeric
+  values.** A value that is
+  `NaN` or `±Infinity` is
+  rejected. The compiler
+  normalizes numeric values to
+  the canonical representation;
+  a non-finite value is
+  rejected.
+- **Unknown executable
+  expressions.** A string field
+  that contains an executable
+  expression (a JS function, a
+  Python lambda, a shell command)
+  is rejected. The DSL is
+  declarative; it does not
+  execute.
+- **External references not
+  allowlisted.** A spec that
+  references an external URL /
+  a file path / a database
+  connection is rejected unless
+  the reference is in the
+  allowlist. The allowlist is
+  owned by the security skill
+  (skill 12).
+- **Catalog references without
+  authorization.** A spec that
+  references a catalog entry
+  that the user is not authorized
+  to use is rejected with a
+  typed `UnauthorizedProjectAccess`
+  error.
+- **Oversized payloads.** A
+  spec whose serialized size
+  exceeds the configured limit
+  (default: 1 MB) is rejected.
+
+**The DSL is declarative. It must
+never execute arbitrary code.**
+The compiler is a parser + a
+validator; the spec is data; the
+compiler does not interpret
+executable semantics.
+
+A compiler that executes user-
+supplied code is a contract
+violation; the security skill
+(skill 12) escalates the
+incident as P0.
+
+## 26. Definition of done
+
+The compiler is accepted only when
+**every** test below passes:
+
+- **Golden-file tests.** A test
+  asserts the per-step output
+  is byte-identical to the
+  golden file (per section 9).
+- **Property-based tests.** A
+  test asserts the compiler
+  preserves the invariants
+  (the BOM's `BigDecimal`
+  total, the manifest's LOD
+  list, the artifact's content
+  hash) under arbitrary
+  spec mutations.
+- **Fuzzing.** A test asserts
+  the compiler does not panic
+  on arbitrary input; the
+  worst case is a typed
+  `FoundryError`.
+- **Determinism tests.** A test
+  asserts the compiler output
+  is byte-identical across
+  two runs on the same input.
+- **Invalid-constraint tests.**
+  A test asserts every
+  constraint type (mechanical
+  + electrical + thermal +
+  regulatory) rejects an
+  invalid spec.
+- **Version-migration tests.**
+  A test asserts every
+  `apiVersion` migration is
+  covered by a golden test.
+- **Concurrent-compilation
+  tests.** A test asserts the
+  compiler is thread-safe; N
+  concurrent compilations
+  produce N correct outputs.
+- **Malicious-input tests.** A
+  test asserts the security
+  gates (per section 25)
+  reject every known attack
+  vector (recursion, NaN,
+  executable strings,
+  unauthorized references,
+  oversized payloads).
+
+A test that is missing is a
+contract violation. The verifier
+(skill 14) runs all 9 tests on
+every release.
+
+## 27. Cross-references
 
 - **Ontology (skill 03):**
   `.ai/skills/03-vehicle-domain-ontology/SKILL.md`.
