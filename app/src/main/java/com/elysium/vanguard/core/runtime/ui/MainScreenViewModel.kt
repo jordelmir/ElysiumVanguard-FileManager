@@ -3,6 +3,7 @@ package com.elysium.vanguard.core.runtime.ui
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
+import com.elysium.vanguard.core.runtime.runner.SessionRunner
 import com.elysium.vanguard.core.runtime.windows.WindowsVmManager
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *     state (Phase 17).
  *   - [WindowsVmManager] — the source of Windows VM
  *     state (Phase 22).
+ *   - [SessionRunner] — the source of the live-session
+ *     count (Phase 32 registry).
  *   - [RuntimeEventBus] — the observability bus the
  *     ViewModel subscribes to (Phase 25).
  *
@@ -38,11 +41,18 @@ import kotlinx.coroutines.flow.asStateFlow
  * `androidx.lifecycle` API. A future Compose-side
  * adapter wires the StateFlow to a
  * `viewModelScope.launch { state.collect { ... } }`.
+ *
+ * Phase 34 — added [SessionRunner] as a fifth
+ * collaborator; [MainScreenState] gained a
+ * [MainScreenState.runningSessionCount] field that
+ * reflects the runner's `activeCount()` (live
+ * Linux + Windows sessions, any kind).
  */
 class MainScreenViewModel(
     private val workspaceManager: WorkspaceManager,
     private val distroManager: DistroManager,
     private val windowsVmManager: WindowsVmManager,
+    private val sessionRunner: SessionRunner,
     private val eventBus: RuntimeEventBus,
     private val recentEventsCapacity: Int = 20
 ) : AutoCloseable {
@@ -70,20 +80,37 @@ class MainScreenViewModel(
             workspaces = workspaceManager.listWorkspaces().map { it.toSummary() },
             linuxDistrosInstalled = distroManager.installed.value.size,
             linuxDistrosInstalling = distroManager.installing.value.size,
-            windowsVmsRunning = windowsVmManager.listRunning().size
+            windowsVmsRunning = windowsVmManager.listRunning().size,
+            runningSessionCount = sessionRunner.activeCount()
         )
     }
 
     /**
      * Append [event] to the recent-events buffer; trim to
      * [recentEventsCapacity]. The buffer is the UI's
-     * "what just happened" feed.
+     * "what just happened" feed. A session lifecycle
+     * event also triggers a full refresh so the
+     * [MainScreenState.runningSessionCount] stays in
+     * sync with the runner.
      */
     private fun handleEvent(event: RuntimeEvent) {
         val current = _state.value
         val updatedEvents = (current.recentEvents + event)
             .takeLast(recentEventsCapacity)
-        _state.value = current.copy(recentEvents = updatedEvents)
+        val updated = current.copy(recentEvents = updatedEvents)
+        when (event) {
+            is RuntimeEvent.SessionStartedEvent,
+            is RuntimeEvent.SessionStoppedEvent,
+            is RuntimeEvent.SessionStartFailedEvent -> {
+                // Re-read the runner's active count.
+                _state.value = updated.copy(
+                    runningSessionCount = sessionRunner.activeCount()
+                )
+            }
+            else -> {
+                _state.value = updated
+            }
+        }
     }
 
     /**
@@ -117,12 +144,18 @@ class MainScreenViewModel(
  * field is a value type (no `LiveData`, no `Context`);
  * the UI subscribes via [MainScreenViewModel.state] and
  * re-renders on each new value.
+ *
+ * Phase 34 — `runningSessionCount` is the runner's
+ * `activeCount()` (live Linux + Windows sessions, any
+ * kind). The UI status bar uses this to render "N
+ * sessions running".
  */
 data class MainScreenState(
     val workspaces: List<WorkspaceSummary> = emptyList(),
     val linuxDistrosInstalled: Int = 0,
     val linuxDistrosInstalling: Int = 0,
     val windowsVmsRunning: Int = 0,
+    val runningSessionCount: Int = 0,
     val recentEvents: List<RuntimeEvent> = emptyList()
 ) {
     companion object {

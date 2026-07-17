@@ -54,6 +54,7 @@ class MainScreenViewModelTest {
         backend = windowsVmBackend
     )
     private val eventBus: RuntimeEventBus = RecordingEventBus()
+    private val sessionRunner = FakeSessionRunner()
 
     // --- initial state ---
 
@@ -64,6 +65,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         ).use { vm ->
             val state = vm.state.value
@@ -88,6 +90,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         ).use { vm ->
             vm.refresh()
@@ -109,6 +112,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         ).use { vm ->
             assertEquals(0, vm.state.value.workspaces.size)
@@ -130,6 +134,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         ).use { vm ->
             val recorder = eventBus as RecordingEventBus
@@ -155,6 +160,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 3
         ).use { vm ->
             val recorder = eventBus as RecordingEventBus
@@ -180,6 +186,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = recorder,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         )
         assertEquals(1, recorder.subscriberCount())
@@ -197,6 +204,7 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = recorder,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 50
         ).use { vm ->
             val start = CountDownLatch(1)
@@ -256,12 +264,100 @@ class MainScreenViewModelTest {
             distroManager = distroManager,
             windowsVmManager = windowsVmManager,
             eventBus = eventBus,
+            sessionRunner = sessionRunner,
             recentEventsCapacity = 5
         ).use { vm ->
             val summary = vm.state.value.workspaces.single()
             assertEquals(5, summary.sessionCount)
             assertEquals(3, summary.linuxProotCount)
             assertEquals(2, summary.windowsVmCount)
+        }
+    }
+
+    // --- session runner count (Phase 34) ---
+
+    @Test
+    fun `runningSessionCount hydrates from the runner on construction`() {
+        sessionRunner.activeCount = 4
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            assertEquals(4, vm.state.value.runningSessionCount)
+        }
+    }
+
+    @Test
+    fun `runningSessionCount updates when the runner count changes`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            assertEquals(0, vm.state.value.runningSessionCount)
+            sessionRunner.activeCount = 7
+            vm.refresh()
+            assertEquals(7, vm.state.value.runningSessionCount)
+        }
+    }
+
+    @Test
+    fun `SessionStartedEvent from the bus refreshes runningSessionCount without a manual refresh`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            assertEquals(0, vm.state.value.runningSessionCount)
+            // The bus subscriber re-reads activeCount().
+            sessionRunner.activeCount = 2
+            (eventBus as RecordingEventBus).publish(
+                RuntimeEvent.SessionStartedEvent(
+                    atMs = 1L,
+                    workspaceId = "ws-1",
+                    sessionId = "s-1",
+                    kind = "LINUX_PROOT",
+                    launcherKind = "JAILED",
+                    pid = 100
+                )
+            )
+            assertEquals(2, vm.state.value.runningSessionCount)
+        }
+    }
+
+    @Test
+    fun `SessionStoppedEvent from the bus refreshes runningSessionCount`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            sessionRunner.activeCount = 5
+            vm.refresh()
+            assertEquals(5, vm.state.value.runningSessionCount)
+            sessionRunner.activeCount = 1
+            (eventBus as RecordingEventBus).publish(
+                RuntimeEvent.SessionStoppedEvent(
+                    atMs = 1L,
+                    workspaceId = "ws-1",
+                    sessionId = "s-1",
+                    exitCode = 0
+                )
+            )
+            assertEquals(1, vm.state.value.runningSessionCount)
         }
     }
 
@@ -274,4 +370,26 @@ class MainScreenViewModelTest {
             fromState = "Active",
             toState = "Paused"
         )
+
+    /**
+     * A hand-rolled [SessionRunner] for tests. The
+     * test sets `activeCount` directly to control what
+     * `activeCount()` returns. The other methods are
+     * no-ops returning the bare minimum to compile.
+     */
+    private class FakeSessionRunner : com.elysium.vanguard.core.runtime.runner.SessionRunner {
+        var activeCount: Int = 0
+        override fun start(workspace: Workspace, session: WorkspaceSession): Result<com.elysium.vanguard.core.runtime.runner.SessionState> {
+            activeCount++
+            return Result.success(com.elysium.vanguard.core.runtime.runner.SessionState.Running(pid = 0, startedAtMs = 0L))
+        }
+        override fun stop(workspace: Workspace, session: WorkspaceSession): Result<com.elysium.vanguard.core.runtime.runner.SessionState> {
+            if (activeCount > 0) activeCount--
+            return Result.success(com.elysium.vanguard.core.runtime.runner.SessionState.Stopped)
+        }
+        override fun state(workspaceId: String, sessionId: String): com.elysium.vanguard.core.runtime.runner.SessionState =
+            com.elysium.vanguard.core.runtime.runner.SessionState.Idle
+        override fun listActive(): List<com.elysium.vanguard.core.runtime.runner.ActiveSession> = emptyList()
+        override fun activeCount(): Int = activeCount
+    }
 }
