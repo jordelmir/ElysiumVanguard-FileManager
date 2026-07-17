@@ -4,10 +4,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.Rule
 import java.io.File
+import java.io.IOException
 
 /**
  * PHASE 9.6.6 — Tests for the SSH host + connection stub.
@@ -168,5 +170,115 @@ class SshConnectionTest {
         val display = X11Display("localhost:10.0", "00", 6010)
         val fwd = X11Forwarding("AB", display, "00")
         assertTrue(fwd.debugTag.startsWith("ab"))
+    }
+
+    // --- Phase 49: SshClient + InMemorySshClient ---
+
+    @Test
+    fun `InMemorySshClient connect returns a session on success`() {
+        val client = InMemorySshClient()
+        val host = SshHost(
+            id = "local",
+            displayName = "Local",
+            host = "localhost",
+            port = 22,
+            user = "root"
+        )
+        val result = client.connect(host)
+        assertTrue(result.isSuccess)
+        assertEquals(host, result.getOrThrow().host)
+    }
+
+    @Test
+    fun `InMemorySshClient start succeeds and unlocks sendLine`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        val start = session.start()
+        assertTrue(start.isSuccess)
+        // sendLine echoes back via the default
+        // responder.
+        session.sendLine("ls")
+        val out = session.readAvailable(timeoutMs = 0)
+        assertEquals("ls\n", out)
+    }
+
+    @Test
+    fun `InMemorySshClient sendLine echoes via the responder`() {
+        val client = InMemorySshClient()
+        client.responder = { line -> "PONG: $line\n" }
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        session.sendLine("ping")
+        val out = session.readAvailable(timeoutMs = 0)
+        assertEquals("PONG: ping\n", out)
+    }
+
+    @Test
+    fun `InMemorySshClient pushOutput injects response without a sendLine`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        client.pushOutput("hello from the remote\n")
+        val out = session.readAvailable(timeoutMs = 0)
+        assertEquals("hello from the remote\n", out)
+    }
+
+    @Test
+    fun `InMemorySshClient readAvailable returns empty when no output`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        val out = session.readAvailable(timeoutMs = 0)
+        assertEquals("", out)
+    }
+
+    @Test
+    fun `InMemorySshClient close is idempotent`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        session.close()
+        session.close()  // second call must not throw
+    }
+
+    @Test
+    fun `InMemorySshClient sendLine after close throws IOException`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        session.close()
+        try {
+            session.sendLine("after close")
+            fail("expected IOException")
+        } catch (expected: IOException) { /* */ }
+    }
+
+    @Test
+    fun `InMemorySshClient readAvailable drains the buffer (single read consumes all)`() {
+        val client = InMemorySshClient()
+        val session = client.connect(SshHost(
+            id = "local", displayName = "Local", host = "localhost", port = 22, user = "root"
+        )).getOrThrow()
+        session.start()
+        session.sendLine("a")
+        session.sendLine("b")
+        session.sendLine("c")
+        val first = session.readAvailable(timeoutMs = 0)
+        assertEquals("a\nb\nc\n", first)
+        // Second read returns empty (drained).
+        val second = session.readAvailable(timeoutMs = 0)
+        assertEquals("", second)
     }
 }
