@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        PHASE 44 — debug-only manifest for the Compose UI test runner.
+
+        Compose UI tests need a `debuggable="true"` activity to
+        launch. The main manifest's `MainActivity` is already
+        launchable from the launcher; the test runner just
+        needs the activity to be reachable with a debug build.
+
+        This manifest is a "merge in" manifest: when the
+        `debug` build type is assembled, this file is merged
+        with the main manifest. The single difference is
+        `android:debuggable="true"` on the application + activity,
+        which the test runner requires.
+    -->
+    <application
+        android:debuggable="true"
+        android:name="com.elysium.vanguard.TitanApp">
+        <activity
+            android:name="com.elysium.vanguard.MainActivity"
+            android:debuggable="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

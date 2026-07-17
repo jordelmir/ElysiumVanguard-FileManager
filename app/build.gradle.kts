@@ -22,7 +22,7 @@ android {
         versionCode = 1
         versionName = "1.0.0-TITAN"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.elysium.vanguard.HiltTestRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -279,4 +279,23 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    // PHASE 44 — Compose UI test + Hilt test. Lets the
+    // androidTest/ source set drive the Compose UI
+    // (assertions, click actions) and inject a Hilt
+    // graph (HiltAndroidRule + HiltTestApplication).
+    // The Compose UI test brings the full runtime
+    // collector; the Hilt test wires the production
+    // graph from the @HiltViewModel-annotated
+    // ViewModels. Versions pulled from the Compose
+    // BOM (2024.02.02); the platform() call above
+    // resolves them.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.02.02"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("com.google.dagger:hilt-android-testing:2.48")
+    // Phase 44 — the Compose test rule needs a debug
+    // manifest (the test runner must declare
+    // `debuggable=true` and the activity must be
+    // launchable). ui-test-manifest provides a debug
+    // AndroidManifest.xml under src/debug/AndroidManifest.xml.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
