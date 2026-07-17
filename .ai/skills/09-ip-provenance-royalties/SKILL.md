@@ -1,385 +1,758 @@
 ---
 name: ip-provenance-royalties
-description: Authorship, contribution tracking, royalty contracts, settlement, and the audit trail. The "we know who built what, and we can prove it" skill. The catalog is the single source of truth.
+description: Implements contribution records, intellectual-property provenance, contracts, licensing and deterministic royalty calculations.
 ---
 
-# Skill 09 — IP / Provenance / Royalties
+# Skill 09 — IP, Provenance and Royalties
 
 ## 1. Mission
 
-Track **who built what** and **how the value flows**.
-Every artifact the platform produces has an
-authorship chain; every contribution has a royalty
-contract; every settlement has an audit trail. The
-catalog is the single source of truth.
+Create **enforceable technical records**
+supporting ownership and revenue
+distribution **without pretending that
+software alone creates legal rights**.
 
-The skill is the platform's "we know who built
-what, and we can prove it" answer. Without it, the
-marketplace (skill 10) cannot exist; without it,
-the royalty engine cannot run; without it, the
-regulatory submission (skill 13) cannot prove
-provenance.
+The application **records evidence** and
+**executes configured agreements**. It
+does **not** replace qualified legal
+counsel. A royalty settlement is a
+technical event; a royalty settlement
+is also a legal event. The platform
+records the former; the legal counsel
+drafts the latter. The platform never
+presumes to create legal rights by code.
 
-## 2. In-scope
+## 2. Critical correction (configurable participation)
 
-- The catalog (the typed index of every artifact
-  the platform has produced).
-- The authorship chain (who contributed what to
-  which artifact; the cryptographic signatures
-  that prove it).
-- The contribution graph (the DAG of every
-  contribution, with the timestamps, the role,
-  the evidence).
-- The royalty contracts (the smart-contract-like
-  rules that govern how a contribution's value
-  flows).
-- The settlement engine (the batched process that
-  calculates who gets paid for what).
-- The audit trail (the immutable log of every
-  settlement, every contract change, every
-  authorship claim).
-- The licensing (the per-artifact license under
-  which the artifact is published).
-- The export controls (UN, EU, US ITAR, etc.
-  restrictions on who can access what).
-- The GDPR / CCPA / LGPD compliance (right to
-  erasure, right to access, right to portability).
+**Do not** hardcode:
 
-## 3. Out-of-scope
+> "Elysium always owns 5% of every
+> vehicle created."
 
-- The 3D model (skill 06).
-- The diagnostics (skill 07).
-- The marketplace UX (skill 10).
-- The mobile UX (skill 11).
-- The royalty **calculation** (this skill
-  **executes** the contracts; the contract
-  grammar is in skill 02 / 04 / 05).
+That model would be **commercially
+hostile and legally weak**. The
+platform implements **configurable
+participation models**; a 5% royalty
+(or any other percentage) applies
+**only when an active signed agreement
+explicitly defines it**.
 
-The catalog says "this asset is built by user X
-and user Y, with contributions from user Z, under
-the MIT license, with a 5% royalty to user X for
-every unit sold". The marketplace sells the asset.
-The settlement engine pays the royalty. Each is
-its own concern.
+The platform's participation models
+are:
 
-## 4. Inputs
+- **`TOOL_ONLY`.** The platform
+  is a tool. Elysium has **no
+  ownership** in the
+  contribution + **no royalty**
+  on the commercial release. A
+  team that uses the platform
+  without a marketplace
+  agreement pays nothing.
+- **`MARKETPLACE_LICENSE`.** A
+  per-license fee (a flat fee
+  per active project + per
+  commercial release). The fee
+  is in the agreement; the
+  platform executes it.
+- **`ELYSIUM_VALIDATED`.** A
+  royalty on the validated
+  components only (the parts
+  the Elysium lab verified
+  + the engineering fact
+  templates the platform
+  authored). The royalty is
+  per the agreement; the
+  components are
+  Elysium-authored.
+- **`ELYSIUM_INCUBATED`.** A
+  royalty on the full
+  commercial release. The
+  release is incubated; the
+  team is supported; the
+  royalty is per the
+  agreement.
+- **`JOINT_VENTURE`.** A
+  revenue share + a
+  decision-making share. The
+  terms are in the agreement.
+- **`CUSTOM_AGREEMENT`.** A
+  bespoke agreement. The
+  terms are in the agreement;
+  the platform executes them
+  as configured.
 
-- An `AuthorshipClaim` (a signed claim that a
-  user contributed to an artifact). The claim
-  carries:
-  - The artifact ID.
-  - The user's ID.
-  - The role (`author` / `contributor` /
-    `reviewer` / `supplier` / `agent`).
-  - The evidence (a reference to a git
-    commit, a design document, a review, a
-    test).
-  - The timestamp.
-  - The royalty share (a percentage or a
-    formula).
-  - **The verification level of the
-    contribution.** An `AI_INFERRED`
-    contribution is signed by the agent
-    + counter-signed by a human reviewer
-    before it is `VERIFIED` (per skill 03).
-    The transition is a signed event in the
-    audit trail, not a silent state flip.
-- A `RoyaltyContract` (a smart-contract-like
-  rule that defines the royalty). The contract
-  is bound to the artifact's
-  `VehicleRepresentationLevel`. A
-  `VISUAL_ONLY` or `CONCEPTUAL` artifact is
-  not eligible for royalty settlement; the
-  contract is rejected at validation.
-- A `Sale` (a marketplace event that triggers
-  a settlement). A sale of a
-  `VISUAL_ONLY` or `CONCEPTUAL` artifact is
-  rejected; the marketplace (skill 10)
-  enforces this at listing time.
-- A `License` (the license under which the
-  artifact is published).
-- An `ExportControlDeclaration` (the export
-  controls the user agrees to).
-- A `GDPRRequest` (a user request to erase,
-  access, or port their data).
-- A `ProvenanceComplete` flag (a typed
-  boolean asserting that every engineering
-  fact in the artifact has all required
-  metadata). A `ProvenanceIncomplete`
-  artifact is rejected for royalty
+A 5% royalty applies only when an
+`ACTIVE` signed agreement (per
+section 4) explicitly defines it.
+A platform that hardcodes a 5%
+royalty is a contract violation;
+the verifier (skill 14) rejects
+the platform.
+
+## 3. Rights model
+
+The platform models **14 rights
+fields** per contract. A contract
+without all 14 is a contract
+violation.
+
+- **Party.** A legal entity
+  (a person, an organization)
+  bound by the contract.
+- **Contributor.** A person
+  (or an AI agent) who
+  contributed to the work
+  product.
+- **Organization.** A legal
+  entity the contributor is
+  associated with.
+- **Work product.** The
+  artifact the contract
+  governs (a `VehicleDefinition`,
+  a `PartDefinition`, a
+  `Procedure`).
+- **Background IP.** The IP
+  the party brought into the
+  project (a patent, a
+  trademark, a trade secret).
+- **Foreground IP.** The IP
+  the work product generates.
+- **Third-party IP.** The IP
+  the work product uses that
+  belongs to a third party
+  (a license, a royalty).
+- **License.** The license
+  the work product is
+  published under (MIT,
+  Apache-2.0, proprietary,
+  etc.).
+- **Territory.** The
+  geographic scope (the EU,
+  the US, the BR, the CN,
+  worldwide).
+- **Field of use.** The
+  business scope (the
+  passenger vehicles, the
+  commercial vehicles, the
+  racing).
+- **Exclusivity.** Whether
+  the license is exclusive
+  (only the licensee) or
+  non-exclusive (the licensor
+  may license others).
+- **Sublicensing rights.**
+  Whether the licensee may
+  sublicense the work product.
+- **Royalty rule.** The
+  per-contract royalty
+  formula (per section 7).
+- **Equity interest.** The
+  per-party equity share (for
+  a joint venture).
+- **Effective period.** The
+  start + the end dates of
+  the contract.
+- **Contract version.** The
+  signed version (per section
+  4).
+
+A contract without all 14 fields
+is a contract violation; the
+verifier rejects the contract.
+
+## 4. Contract immutability
+
+A signed contract version is
+**immutable**. An amendment
+creates a **new version** with:
+
+- **Effective date.** When
+  the new version takes
+  effect.
+- **Parties.** The legal
+  entities bound by the new
+  version.
+- **Superseded clauses.** The
+  clauses of the previous
+  version that the new
+  version supersedes.
+- **New signatures.** The
+  per-party signatures on the
+  new version.
+- **Migration policy.** The
+  per-`RevenueEvent` rule
+  for events between the old
+  version's effective date
+  and the new version's
+  effective date (e.g.
+  "events before 2029-04-01
+  are governed by v1;
+  events after 2029-04-01
+  are governed by v2").
+
+**Historical sales MUST be
+calculated under the contract
+version effective at the event
+time.** A settlement against the
+wrong version is a `RoyaltyCalculationRejected`
+error.
+
+A contract version that is mutated
+after signing is a contract
+violation; the audit trail
+records the mutation attempt +
+escalates to the security skill
+(skill 12) as a P0 incident.
+
+## 5. Contribution record
+
+Every **significant contribution**
+records **12 fields**. A contribution
+without all 12 is a contract
+violation.
+
+- **Actor.** The user (or the
+  AI agent) who authored the
+  contribution.
+- **Project.** The `ProjectId`
+  the contribution belongs to.
+- **Artifact.** The
+  `ArtifactId` the
+  contribution affects.
+- **Base revision.** The
+  `RevisionId` the
+  contribution is based on.
+- **Contribution type.** A
+  typed enum (`AUTHOR`,
+  `CONTRIBUTOR`, `REVIEWER`,
+  `SUPPLIER`, `AGENT`).
+- **Human-authored content.**
+  The bytes the human
+  authored (the human-
+  authored prose, the
+  human-authored code, the
+  human-authored diagram).
+- **AI assistance.** The
+  AI tool used + the
+  version + the prompt +
+  the temperature (per skill
+  05 section 5 — the
+  evidence policy).
+- **Dependencies.** The
+  dependencies the
+  contribution uses (the
+  libraries, the standards,
+  the other contributions).
+- **Timestamp.** The
+  ISO-8601 timestamp the
+  contribution was recorded.
+- **Hash.** The content hash
+  of the contribution.
+- **Acceptance.** The
+  acceptance state
+  (`PROPOSED`, `ACCEPTED`,
+  `REJECTED`).
+- **Ownership claim.** The
+  per-party ownership claim
+  (the percentage, the role).
+- **Review status.** The
+  review state (`PENDING`,
+  `REVIEWED`,
+  `COUNTER_SIGNED`).
+
+**Do not** infer ownership
+percentages automatically from
+commit count or token count. A
+"5 commits = 5% ownership" rule
+is a contract violation; the
+ownership is in the signed
+agreement.
+
+## 6. Royalty basis
+
+The platform supports
+**configurable royalty definitions**.
+A definition has:
+
+- **`Royalty Due = Royalty-Bearing
+  Net Sales × Contractual
+  Royalty Rate`**
+
+A more complex definition (a
+tiered rate, a minimum guarantee,
+a territory-specific rate) is
+configured per contract.
+
+**Permitted deductions MUST be
+explicitly modeled.** A deduction
+exists only when the contract
+explicitly allows it. A deduction
+field that exists in the schema
+but is not in the contract is a
+no-op. A deduction silently
+applied is a contract violation.
+
+### 6.1 Revenue event
+
+A revenue event is the input to
+the calculation engine. The
+shape is:
+
+```json
+{
+  "eventType": "VEHICLE_SALE",
+  "eventId": "SALE-001",
+  "projectId": "PROJECT-001",
+  "commercialReleaseId": "RELEASE-2029-01",
+  "occurredAt": "2029-04-02T14:10:00Z",
+  "territory": "CR",
+  "currency": "USD",
+  "grossAmount": "20000.00",
+  "claimedDeductions": [
+    {
+      "type": "INDIRECT_TAX",
+      "amount": "1800.00"
+    }
+  ]
+}
+```
+
+A revenue event without all
+required fields is rejected. A
+deduction that is not in the
+contract is rejected with a typed
+`RoyaltyCalculationRejected` error.
+
+## 7. Calculation engine
+
+The royalty calculation engine is
+the **authoritative** implementation
+of the contract's royalty rule.
+The engine MUST have **10
+properties**:
+
+- **Deterministic.** The same
+  inputs produce the same
+  outputs, byte-for-byte.
+- **Versioned.** The engine's
+  version is recorded in the
+  audit trail; a calculation
+  against a newer engine
+  version is flagged.
+- **Auditable.** Every step
+  of the calculation is
+  recorded in the audit trail
+  (the input + the contract
+  version + the rule applied
+  + the output + the engine
+  version).
+- **Decimal-safe.** The engine
+  uses `BigDecimal`
+  exclusively. A `Double` /
+  `Float` / `f64` is a
+  contract violation.
+- **Idempotent.** The same
+  `eventId` + the same engine
+  version produces the same
+  settlement. A duplicate
+  event is a no-op.
+- **Reproducible.** A
+  calculation can be replayed
+  from the audit trail.
+- **Capable of reversal and
+  adjustment events.** A
+  reversal is a typed
+  `Reversal` event; an
+  adjustment is a typed
+  `Adjustment` event; the
+  engine processes them as
+  such.
+- **Capable of multiple
+  beneficiaries.** A single
+  revenue event can produce
+  N settlements (per
+  contributor).
+- **Capable of tiered rates.**
+  A contract may define N
+  tiers (e.g. "0–1M units at
+  5%, 1–5M units at 3%,
+  5M+ at 1%").
+- **Capable of minimum
+  guarantees.** A contract
+  may define a minimum
+  guarantee (e.g. "the
+  licensor receives ≥ 100k
+  per year, regardless of
+  sales").
+- **Capable of territory-
+  specific rules.** A
+  contract may define per-
+  territory rates.
+- **Capable of related-party-
+  sale adjustments.** When
+  contractually defined, a
+  sale to a related party is
+  adjusted to fair market
+  value.
+
+**AI may explain a result. AI
+MUST NOT perform the authoritative
+calculation.** The model produces
+a draft; the deterministic engine
++ a human review apply. Per
+`.ai/AGENTS.md` section 8 +
+`.ai/STANDARDS.md` section 5.
+
+A calculation that does not have
+all 10 properties is a contract
+violation; the verifier rejects
+the engine.
+
+## 8. Ledger
+
+The platform uses **double-entry
+accounting concepts** for
+financial state. Every entry has
+a debit + a credit + a balance.
+
+**Do not** mutate an old payment
+or royalty record. A signed
+settlement is immutable.
+
+The platform creates:
+
+- **`Adjustment`.** A correction
+  to a previous settlement
+  (e.g. a sales-volume
+  recalculation).
+- **`Reversal`.** A full
+  reversal of a previous
+  settlement (e.g. a returned
+  sale).
+- **`Correction`.** A typo /
+  data fix on a previous
+  settlement.
+- **`Settlement`.** A new
   settlement.
 
-## 5. Outputs
+**Maintain full history.** The
+audit trail is append-only. A
+mutated settlement is a contract
+violation; the security skill
+(skill 12) escalates the incident
+as P0.
 
-- The catalog (a typed index, queryable by
-  artifact ID, by user, by project, by license,
-  by export control).
-- The authorship chain (a DAG, queryable by
-  artifact ID).
-- The royalty contracts (a registry, queryable
-  by asset ID, by user, by marketplace).
-- The settlement (a batched, signed artifact
-  per settlement cycle, with the per-user
-  amounts).
-- The audit trail (an append-only log, queryable
-  by event ID, by user, by artifact, by date
-  range).
-- The export controls (a per-artifact manifest,
-  queryable by jurisdiction).
+## 9. Anti-circumvention
 
-The catalog is **the** authoritative source. The
-3D pipeline reads the catalog to get the
-provenance of an asset. The marketplace reads the
-catalog to get the royalty contract. The mobile
-UX reads the catalog to get the asset's metadata.
+The platform models **contract
+clauses for**:
 
-## 6. Workflow
+- **Affiliates.** A sale to an
+  affiliate is governed per
+  the clause.
+- **Successor models.** A
+  successor model (a
+  redesigned successor to
+  the work product) is
+  governed per the clause.
+- **Sublicenses.** A
+  sublicense is governed per
+  the clause.
+- **Bundled products.** A
+  bundle (the work product +
+  another product) is
+  governed per the clause.
+- **Related-party transfers.**
+  A transfer to a related
+  party is governed per the
+  clause.
+- **Mergers.** A merger
+  involving a party is
+  governed per the clause.
+- **Assignments.** An
+  assignment of the contract
+  is governed per the clause.
+- **Territory changes.** A
+  change of territory (a
+  re-publication from the EU
+  to the US) is governed per
+  the clause.
+- **Product renaming.** A
+  rename of the work product
+  is governed per the clause
+  (the rename does NOT
+  reset the royalty
+  obligation).
 
-1. **Receive an `AuthorshipClaim`.** A user
-   claims to have contributed to an artifact.
-   The claim is signed (the user's key) and
-   includes:
-   - The artifact ID.
-   - The user's ID.
-   - The role (`author` / `contributor` /
-     `reviewer` / `supplier` / `agent`).
-   - The evidence (a reference to a git commit,
-     a design document, a review, a test).
-   - The timestamp.
-   - The royalty share (a percentage or a
-     formula).
-   - **The verification level of the
-     contribution** (`OEM_VERIFIED` /
-     `REGULATORY_VERIFIED` / `LAB_VERIFIED` /
-     `ENGINEER_REVIEWED` /
-     `COMMUNITY_CORROBORATED` / `AI_INFERRED`
-     / `UNKNOWN`).
-2. **Validate the claim.** The skill checks:
-   - The signature is valid.
-   - The user is authorized (the user has access
-     to the project the artifact is in).
-   - The evidence exists and is accessible.
-   - The claim does not conflict with a prior
-     claim.
-   - **The verification level is consistent
-     with the artifact's
-     `VehicleRepresentationLevel`.** A
-     `VISUAL_ONLY` or `CONCEPTUAL` artifact
-     cannot have an `OEM_VERIFIED`
-     contribution; an `OEM_EXACT` artifact
-     cannot have an `AI_INFERRED`
-     contribution without an explicit human
-     review counter-signature.
-   - **The verification transition (if any)
-     is signed.** An `AI_INFERRED → VERIFIED`
-     transition requires a signed event
-     from a human reviewer; a silent transition
-     in the data is a violation.
-3. **Record the claim.** The claim lands in the
-   catalog. The authorship chain is updated.
-   The verification level is part of the
-   recorded claim.
-4. **Receive a `RoyaltyContract`.** A user
-   defines a contract: "every unit of this asset
-   sold for $X pays user Y a 5% royalty". The
-   contract is signed by the user + the project
-   owner + any co-owners.
-5. **Validate the contract.** The skill checks:
-   - The signatures are valid.
-   - The contract does not conflict with a prior
-     contract.
-   - The royalty sums to ≤ 100% (a sanity check).
-   - The contract complies with the jurisdiction's
-     royalty caps (e.g. some jurisdictions cap
-     agent royalties at 30%).
-   - **The artifact is eligible for royalty.**
-     A `VISUAL_ONLY` or `CONCEPTUAL` artifact
-     is rejected with a `ContractNotActive`
-     error (the contract is malformed
-     because the asset is not commerce-grade).
-   - **The artifact's provenance is complete.**
-     An artifact with `ProvenanceIncomplete`
-     is rejected with a `ProvenanceIncomplete`
-     error.
-6. **Record the contract.** The contract lands in
-   the catalog.
-7. **Receive a `Sale`.** A marketplace event
-   triggers a settlement. A sale of a
-   `VISUAL_ONLY` or `CONCEPTUAL` artifact is
-   rejected with a `ContractNotActive` error
-   (the marketplace enforces this at listing
-   time; the settlement is the backstop).
-8. **Run the settlement.** The engine:
-   - Walks the asset's royalty contracts.
-   - Verifies the artifact's
-     `VehicleRepresentationLevel` is eligible
-     (rejects `VISUAL_ONLY` / `CONCEPTUAL`).
-   - Verifies the artifact's provenance is
-     complete.
-   - Calculates the per-user amounts using
-     `BigDecimal` (Kotlin / JVM) or
-     `rust_decimal::Decimal` (Rust). A
-     `Double` / `Float` / `f64` for money is
-     a contract violation (per
-     `.ai/STANDARDS.md` section 2.2).
-   - Produces a signed settlement artifact.
-9. **Pay the users.** The settlement is sent to
-   the payment provider. The payment provider
-   is out of scope (a third-party SaaS).
-10. **Archive the audit trail.** The full
-    settlement chain — the claim, the contract,
-    the level-check, the provenance-check, the
-    verification-level transitions, the
-    settlement itself — lands in the audit log.
-    The audit log is append-only.
+**The application evaluates only
+clauses explicitly present in the
+signed contract.** A clause
+invented by the application (a
+"we'll also apply anti-
+circumvention" rule without a
+contract clause) is a contract
+violation; the security skill
+(skill 12) escalates as P0.
 
-## 7. Quality gates
+## 10. Definition of done
 
-- Every authorship claim is signed.
-- Every royalty contract is signed.
-- The royalty sums to ≤ 100% per asset.
-- The settlement is signed + content-addressed.
-- The audit trail is append-only.
-- The export controls are enforced.
-- The GDPR / CCPA / LGPD requests are answered
-  within the regulatory deadline (30 days for
-  GDPR).
-- The catalog is queryable + reproducible.
-- **Every settlement is bound to a
-  `VehicleRepresentationLevel`.** A
-  settlement against a `VISUAL_ONLY` or
-  `CONCEPTUAL` artifact is rejected at the
-  gate.
-- **Every settlement is bound to a
-  `ProvenanceComplete` flag.** A settlement
-  against an artifact with `UNKNOWN` facts
-  in commerce-relevant fields is rejected
-  with a `ProvenanceIncomplete` error.
-- **Every AI-inferred contribution that
-  participated in a settlement has a
-  corresponding human-review event in the
-  audit trail.** A settlement that
-  references an `AI_INFERRED` claim
-  without a transition event is rejected
-  with a `ProvenanceIncomplete` error.
-- **Money is `BigDecimal` (or equivalent).**
-  A settlement that uses `Double` / `Float`
-  / `f64` is rejected at the gate.
-- **The settlement envelope is a typed
-  `FoundryError`-compatible JSON object**
-  when the settlement fails (per `.ai/AGENTS.md`
-  section 10 and `.ai/STANDARDS.md` section 7).
-  A free-form string error is a violation.
+The IP/provenance/royalty engine
+is accepted only when **every**
+test below proves.
 
-## 8. Failure modes
+- **A contract is signed**
+  with all 14 rights fields
+  (per section 3). A
+  contract without a field
+  is rejected.
+- **A signed contract is
+  immutable.** A test asserts
+  the audit trail rejects a
+  modification attempt on
+  a signed contract version.
+- **An amendment creates a
+  new version.** A test
+  asserts the amendment
+  produces a new version +
+  the supersession +
+  the migration policy.
+- **Historical sales are
+  calculated under the
+  version effective at the
+  event time.** A test asserts
+  a sale that occurred
+  between v1 and v2 is
+  calculated under v1 (per
+  the migration policy).
+- **A deduction not in the
+  contract is rejected.** A
+  test asserts the engine
+  rejects a deduction that
+  is not in the contract.
+- **The engine is
+  deterministic.** A test
+  asserts the same inputs
+  produce the same outputs
+  byte-for-byte.
+- **The engine uses
+  `BigDecimal` exclusively.**
+  A test asserts a `Double`
+  in the calculation path is
+  a CI failure.
+- **The engine is reversible.**
+  A test asserts a
+  `Reversal` event produces
+  a settlement that
+  nullifies the original
+  without mutating the
+  original.
+- **The engine supports
+  tiered rates + minimum
+  guarantees + territory-
+  specific rules.** A test
+  asserts each property with
+  a fixture.
+- **AI does not perform the
+  authoritative calculation.**
+  A test asserts the model
+  cannot write to the
+  settlement table; the
+  deterministic engine +
+  the human review are the
+  only path.
+- **The audit trail is
+  append-only.** A test
+  asserts no UPDATE or
+  DELETE in the standard
+  API.
+- **Anti-circumvention
+  clauses are evaluated
+  only when present in the
+  contract.** A test asserts
+  the engine rejects an
+  anti-circumvention
+  evaluation when the
+  clause is not in the
+  contract.
 
-- **A claim is invalid.** The skill rejects the
-  claim. The user is informed.
-- **A contract conflicts with a prior
-  contract.** The skill rejects the contract.
-  The user is informed. The user may file a
-  council request (skill 05).
-- **A settlement fails.** The settlement is
-  retried; if it still fails, it goes to a
-  manual review queue. A failed settlement is
-  a P1 incident.
-- **A user requests GDPR erasure.** The skill
-  erases the user's PII from the catalog
-  (preserving the audit trail, which is
-  append-only by design).
-- **An export control is violated.** The skill
-  blocks the access. A violation is a P0
-  incident.
+A failing test is a P0 incident;
+the orchestrator blocks the
+release.
 
-## 9. Coordination contract
+## 11. Quality gates
 
-- **Input from**: every other skill (the
-  authorship claims, the royalty contracts, the
-  sales events, the GDPR requests).
-- **Output to**: every other skill (the catalog
-  queries, the audit trail, the settlement
-  results).
-- **Triggered by**: every authorship claim, every
-  contract change, every sale, every regulatory
-  request.
+- Every contract has all 14
+  rights fields.
+- Every contract version is
+  signed + immutable.
+- Every amendment creates a
+  new version + a migration
+  policy.
+- Every contribution has all
+  12 record fields.
+- Every revenue event has
+  all required fields.
+- Every settlement uses
+  `BigDecimal`.
+- Every settlement has a
+  per-step audit trail.
+- Every reversal is a
+  separate event; the
+  original is unchanged.
+- AI is excluded from the
+  authoritative calculation
+  path.
+
+## 12. Failure modes
+
+- **A contract is missing a
+  field.** The contract is
+  rejected at the validation
+  step.
+- **A deduction is not in the
+  contract.** The deduction
+  is rejected with a typed
+  `RoyaltyCalculationRejected`
+  error.
+- **A calculation uses
+  `Double`.** The
+  calculation is rejected;
+  the field is flagged.
+- **A signed contract is
+  mutated.** The audit
+  trail records the
+  mutation attempt; the
+  security skill (skill 12)
+  escalates as P0.
+- **AI tries to write to
+  the settlement table.** The
+  write is rejected; the
+  AI-authority gate trips;
+  the orchestrator blocks
+  the release.
+
+## 13. Coordination contract
+
+- **Input from**: skill 04
+  (the spec), the user
+  (the contributor), the
+  marketplace (skill 10) (the
+  sales events).
+- **Output to**: the user (the
+  statement), the marketplace
+  (skill 10), the audit trail
+  (per skill 09 itself), the
+  security skill (skill 12) on
+  anomalies.
+- **Triggered by**: every
+  contract change, every
+  contribution, every
+  revenue event, every
+  settlement.
 - **Frequency**: continuous.
 
-## 10. Forbidden patterns
+## 14. Forbidden patterns
 
-- **Untracked contributions.** A contribution
-  without an `AuthorshipClaim` is a contract
-  violation. The next skill that consumes the
-  asset will fail.
-- **Untracked sales.** A sale without a settlement
-  is unpaid royalty; the user is uncompensated.
-  This is a legal issue, not just a technical
-  one.
-- **Mutable audit trail.** The audit trail is
-  append-only. A row that is updated is a
-  violation. A row that is deleted is a
+- **A hardcoded royalty.** A
+  5% royalty that is not in
+  the contract is a contract
   violation.
-- **PII in the audit trail.** The audit trail
-  has user IDs, not user PII. A row that
-  contains a user email is a violation.
-- **Off-ledger settlement.** A settlement that
-  is not on the audit trail is unpaid royalty.
-- **"We'll add the claim later".** A
-  contribution that ships without a claim is
-  untracked. The next skill that consumes the
-  asset cannot verify provenance.
-- **`AI_INFERRED` masquerading as `VERIFIED`
-  in a settlement.** A settlement that
-  references an `AI_INFERRED` claim without
-  a human-review transition event in the
-  audit trail is a contract violation.
-- **Royalty on a `VISUAL_ONLY` or
-  `CONCEPTUAL` artifact.** A settlement
-  against an ineligible level is rejected
-  with a `ContractNotActive` error.
-- **Float / Double for money.** A `Double`
-  / `Float` / `f64` for a royalty amount
-  is a contract violation. Money is
-  `BigDecimal` (or equivalent) — see
-  `.ai/STANDARDS.md` section 2.2.
-- **Free-form string errors.** A settlement
-  failure that returns a string instead of
-  a typed `FoundryError` is a contract
-  violation. The error envelope is typed
-  JSON (per `.ai/AGENTS.md` section 10).
+- **Inferred ownership.** A
+  "5 commits = 5% ownership"
+  rule is a contract
+  violation. The ownership
+  is in the contract.
+- **A deduction that is not
+  in the contract.** A
+  deduction silently applied
+  is a contract violation.
+- **A mutable signed
+  contract.** A contract
+  version that is mutated is
+  a contract violation.
+- **AI performing the
+  authoritative
+  calculation.** A model
+  that writes to the
+  settlement table is a
+  contract violation.
+- **`Double` for money.** A
+  `Double` in the calculation
+  path is a contract
+  violation.
+- **A `Float` / `f64` for
+  money.** Same.
+- **An anti-circumvention
+  clause invented by the
+  application.** A clause
+  not in the contract is a
+  contract violation.
+- **A payment or royalty
+  record that is mutated.**
+  A `Reversal` / `Adjustment`
+  / `Correction` /
+  `Settlement` is a separate
+  event; the original is
+  unchanged.
 
-## 11. The catalog in the Elysium Automotive
-Foundry
-
-The catalog is the platform's "what exists, who
-built it, who gets paid" answer. Every artifact
-the platform produces is in the catalog. Every
-contribution is in the catalog. Every contract is
-in the catalog. Every sale is in the catalog. Every
-settlement is in the catalog.
-
-The catalog is the platform's "we know what
-happened, and we can prove it" answer.
-
-The catalog is **content-addressed** + **signed**
-+ **append-only** + **queryable**. The catalog is
-the single source of truth for the platform's
-provenance graph.
-
-## 12. Working with this skill
+## 15. Working with this skill
 
 When invoked, this skill:
 
-1. Receives the claim / contract / sale /
-   request.
-2. Validates it.
-3. Records it in the catalog.
-4. Updates the audit trail.
-5. Returns the catalog query result to the
-   orchestrator (or to the calling skill
-   directly).
+1. Receives the contract
+   change / the contribution /
+   the revenue event.
+2. Validates the input (per
+   the schema).
+3. Applies the rule engine
+   (per section 7).
+4. Computes the settlement
+   (per the contract version
+   effective at the event
+   time).
+5. Files the audit trail.
+6. Returns the statement.
 
-The skill does not render the catalog (skill 11
-+ skill 10). The skill does not negotiate with
-the user (skill 02). The skill does not enforce
-the export controls in the UI (skill 11). The
-skill is the **back office** of the platform.
+The skill does **not** draft
+contracts. The skill does **not**
+provide legal advice. The skill
+**records evidence** + **executes
+agreements**.
+
+## 16. Cross-references
+
+- **Required error model:**
+  `.ai/AGENTS.md` section 10 +
+  `.ai/STANDARDS.md` section 7.
+- **AI authority boundary:**
+  `.ai/AGENTS.md` section 8 +
+  `.ai/STANDARDS.md` section 5.
+- **Money type (BigDecimal):**
+  `.ai/STANDARDS.md` section 2.2.
+- **Truth and confidence
+  model:** `.ai/STANDARDS.md`
+  section 3.
+- **Vehicle representation
+  levels:** `.ai/STANDARDS.md`
+  section 4.
+- **Artifact contract:**
+  `.ai/AGENTS.md` section 12.
+- **Orchestrator (skill 00):**
+  `.ai/skills/00-program-orchestrator/SKILL.md`.
+- **Ontology (skill 03):**
+  `.ai/skills/03-vehicle-domain-ontology/SKILL.md`.
+- **DSL compiler (skill 04):**
+  `.ai/skills/04-vehicle-dsl-compiler/SKILL.md`.
+- **Backend event platform
+  (skill 08):**
+  `.ai/skills/08-backend-event-platform/SKILL.md`.
+- **Marketplace (skill 10):**
+  `.ai/skills/10-marketplace-manufacturing/SKILL.md`.
+- **Security (skill 12):**
+  `.ai/skills/12-security-zero-trust/SKILL.md`.
+- **Regulatory (skill 13):**
+  `.ai/skills/13-functional-safety-regulatory/SKILL.md`.
+- **Quality (skill 14):**
+  `.ai/skills/14-quality-verification/SKILL.md`.
+- **AI council (skill 05):**
+  `.ai/skills/05-ai-engineering-council/SKILL.md`.

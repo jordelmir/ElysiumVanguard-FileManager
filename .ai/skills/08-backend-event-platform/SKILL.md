@@ -461,6 +461,58 @@ specifies is a typed
   are per `.ai/AGENTS.md`
   section 24.
 
+## 9.5. Definition of done
+
+The backend is accepted only when
+**every** proof below passes.
+
+- **Duplicate command delivery
+  is harmless.** A test
+  asserts the same
+  `idempotencyKey` produces
+  the same result; the
+  state is unchanged; the
+  audit trail records the
+  duplicate + the
+  no-op.
+- **Concurrent edits produce
+  explicit conflicts.** A
+  test asserts two
+  concurrent commands with
+  the same `AggregateId` +
+  different `expectedVersion`
+  produce two `RevisionConflict`
+  errors; the state is
+  unchanged.
+- **Outbox delivery survives
+  process failure.** A test
+  asserts a process crash
+  mid-publication does not
+  lose events; the events
+  are re-delivered on the
+  next worker boot.
+- **Artifact hashes are
+  verified.** A test asserts
+  the server recomputes the
+  hash on every write; a
+  mismatch is rejected with
+  a typed `ArtifactIntegrityFailure`.
+- **Unauthorized project
+  access is rejected.** A
+  test asserts a user
+  without access to the
+  project receives a typed
+  `UnauthorizedProjectAccess`
+  error.
+- **Audit events cannot be
+  modified through standard
+  application APIs.** A
+  test asserts the audit
+  trail has no UPDATE or
+  DELETE in the standard
+  API; a modification
+  attempt is rejected.
+
 ## 10. Failure modes
 
 - **The database is down.** The
