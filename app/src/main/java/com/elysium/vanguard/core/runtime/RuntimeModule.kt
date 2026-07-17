@@ -90,8 +90,15 @@ object RuntimeModule {
 
     @Provides
     @Singleton
-    fun provideWorkspaceManager(store: WorkspaceStore): WorkspaceManager =
-        WorkspaceManager(store)
+    fun provideWorkspaceManager(
+        store: WorkspaceStore,
+        eventBus: RuntimeEventBus,
+        @WallClock clock: () -> Long
+    ): WorkspaceManager = WorkspaceManager(
+        store = store,
+        eventBus = eventBus,
+        clock = clock
+    )
 
     // --- Windows VMs (Phase 22 + Phase 23) ---
 

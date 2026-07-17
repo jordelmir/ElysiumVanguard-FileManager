@@ -107,26 +107,21 @@ class WorkspacesViewModel @Inject constructor(
     // --- create ---
 
     /**
-     * Create a new workspace. Emits a
-     * [RuntimeEvent.WorkspaceStateChangedEvent] on
-     * success so the bus subscribers (the audit log,
-     * the main-screen ViewModel) re-read state.
+     * Create a new workspace.
+     *
+     * Phase 39 — the [WorkspaceManager] publishes
+     * its own [RuntimeEvent.WorkspaceStateChangedEvent]
+     * on success; the bus subscriber in this ViewModel
+     * re-reads state via [refresh]. The ViewModel no
+     * longer publishes (that was the architectural
+     * drift Phase 39 closed). On failure, the
+     * ViewModel still records the result on
+     * [WorkspacesState.lastActionResult] so the UI
+     * can show a snackbar.
      */
     fun createWorkspace(name: String, sessions: List<WorkspaceSession> = emptyList()): Result<Workspace> {
-        val nowMs = clock()
-        val result = workspaceManager.createWorkspace(name = name, sessions = sessions, nowMs = nowMs)
-        if (result.isSuccess) {
-            val ws = result.getOrThrow()
-            eventBus.publish(
-                RuntimeEvent.WorkspaceStateChangedEvent(
-                    atMs = nowMs,
-                    workspaceId = ws.id,
-                    fromState = "(none)",
-                    toState = ws.state.toString()
-                )
-            )
-            refresh()
-        } else {
+        val result = workspaceManager.createWorkspace(name = name, sessions = sessions)
+        if (result.isFailure) {
             _state.value = _state.value.copy(lastActionResult = result)
         }
         return result
@@ -135,56 +130,45 @@ class WorkspacesViewModel @Inject constructor(
     // --- state transitions ---
 
     fun pauseWorkspace(workspaceId: String): Result<Workspace> =
-        transitionAndPublish(workspaceId, "Active", "Paused") {
+        transitionAndRecord("Active", "Paused") {
             workspaceManager.pauseWorkspace(workspaceId)
         }
 
     fun activateWorkspace(workspaceId: String): Result<Workspace> =
-        transitionAndPublish(workspaceId, "Paused", "Active") {
+        transitionAndRecord("Paused", "Active") {
             workspaceManager.activateWorkspace(workspaceId)
         }
 
     fun closeWorkspace(workspaceId: String): Result<Workspace> =
-        transitionAndPublish(workspaceId, "Active", "Closed") {
+        transitionAndRecord("Active", "Closed") {
             workspaceManager.closeWorkspace(workspaceId)
         }
 
     // --- session management ---
 
+    /**
+     * Phase 39 — the manager publishes its own
+     * [RuntimeEvent.SessionAddedEvent] on success; the
+     * bus subscriber in this ViewModel re-reads state.
+     * The ViewModel only records the failure on
+     * [WorkspacesState.lastActionResult].
+     */
     fun addSession(workspaceId: String, session: WorkspaceSession): Result<Workspace> {
-        val nowMs = clock()
         val result = workspaceManager.addSession(workspaceId, session)
-        if (result.isSuccess) {
-            val ws = result.getOrThrow()
-            eventBus.publish(
-                RuntimeEvent.SessionAddedEvent(
-                    atMs = nowMs,
-                    workspaceId = ws.id,
-                    sessionId = session.id,
-                    sessionKind = session.kind.toString()
-                )
-            )
-            refresh()
-        } else {
+        if (result.isFailure) {
             _state.value = _state.value.copy(lastActionResult = result)
         }
         return result
     }
 
+    /**
+     * Phase 39 — see [addSession]. The manager
+     * publishes the event; the ViewModel just
+     * records failures.
+     */
     fun removeSession(workspaceId: String, sessionId: String): Result<Workspace> {
-        val nowMs = clock()
         val result = workspaceManager.removeSession(workspaceId, sessionId)
-        if (result.isSuccess) {
-            val ws = result.getOrThrow()
-            eventBus.publish(
-                RuntimeEvent.SessionRemovedEvent(
-                    atMs = nowMs,
-                    workspaceId = ws.id,
-                    sessionId = sessionId
-                )
-            )
-            refresh()
-        } else {
+        if (result.isFailure) {
             _state.value = _state.value.copy(lastActionResult = result)
         }
         return result
@@ -241,25 +225,23 @@ class WorkspacesViewModel @Inject constructor(
 
     // --- internals ---
 
-    private inline fun transitionAndPublish(
-        workspaceId: String,
-        fromState: String,
-        toState: String,
+    /**
+     * Phase 39 — `transitionAndPublish` is now just
+     * `transitionAndRecord`. The [WorkspaceManager]
+     * publishes its own [RuntimeEvent.WorkspaceStateChangedEvent];
+     * the bus subscriber in this ViewModel re-reads
+     * state. The `fromState` / `toState` parameters
+     * are kept for documentation (they describe the
+     * intended transition) but are no longer used
+     * to construct the event.
+     */
+    private inline fun transitionAndRecord(
+        @Suppress("UNUSED_PARAMETER") fromState: String,
+        @Suppress("UNUSED_PARAMETER") toState: String,
         block: () -> Result<Workspace>
     ): Result<Workspace> {
-        val nowMs = clock()
         val result = block()
-        if (result.isSuccess) {
-            eventBus.publish(
-                RuntimeEvent.WorkspaceStateChangedEvent(
-                    atMs = nowMs,
-                    workspaceId = workspaceId,
-                    fromState = fromState,
-                    toState = toState
-                )
-            )
-            refresh()
-        } else {
+        if (result.isFailure) {
             _state.value = _state.value.copy(lastActionResult = result)
         }
         return result

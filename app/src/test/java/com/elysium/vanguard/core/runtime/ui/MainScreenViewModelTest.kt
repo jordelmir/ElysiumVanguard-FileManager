@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit
 class MainScreenViewModelTest {
 
     private val workspaceStore = com.elysium.vanguard.core.runtime.workspaces.InMemoryWorkspaceStore()
-    private val workspaceManager = WorkspaceManager(workspaceStore)
+    private val workspaceManager = WorkspaceManager(workspaceStore, com.elysium.vanguard.core.runtime.observability.RecordingEventBus())
     private val distroManager = DistroManager(
         baseDir = java.nio.file.Files.createTempDirectory("elysium-ui").toFile(),
         downloader = com.elysium.vanguard.core.runtime.distros.DistroHttpDownloader { _ ->
@@ -258,7 +258,7 @@ class MainScreenViewModelTest {
                 )
             )
         )
-        val freshManager = WorkspaceManager(freshStore)
+        val freshManager = WorkspaceManager(freshStore, com.elysium.vanguard.core.runtime.observability.RecordingEventBus())
         MainScreenViewModel(
             workspaceManager = freshManager,
             distroManager = distroManager,

@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.workspaces
 
+import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -35,7 +36,8 @@ import java.util.concurrent.TimeUnit
 class WorkspaceManagerTest {
 
     private val store = InMemoryWorkspaceStore()
-    private val manager = WorkspaceManager(store)
+    private val eventBus = com.elysium.vanguard.core.runtime.observability.RecordingEventBus()
+    private val manager = WorkspaceManager(store, eventBus)
 
     // --- workspace invariants ---
 
@@ -213,7 +215,7 @@ class WorkspaceManagerTest {
         assertEquals(1, updated.sessions.size)
         // Persist: a fresh manager reading from the same
         // store must see the session.
-        val rehydrated = WorkspaceManager(store)
+        val rehydrated = WorkspaceManager(store, eventBus)
         val reloaded = rehydrated.getWorkspace(ws.id)
         assertNotNull(reloaded)
         assertEquals(1, reloaded!!.sessions.size)
@@ -277,7 +279,7 @@ class WorkspaceManagerTest {
         manager.closeWorkspace(ws.id)
         // A fresh manager reading from the same store
         // must see the final state.
-        val rehydrated = WorkspaceManager(store)
+        val rehydrated = WorkspaceManager(store, eventBus)
         val reloaded = rehydrated.getWorkspace(ws.id)
         assertNotNull(reloaded)
         assertEquals(WorkspaceState.Closed, reloaded!!.state)
@@ -316,7 +318,8 @@ class WorkspaceManagerTest {
     @Test
     fun `InMemoryWorkspaceStore save-load-list-delete round-trip`() {
         val localStore = InMemoryWorkspaceStore()
-        val localManager = WorkspaceManager(localStore)
+        val localEventBus = com.elysium.vanguard.core.runtime.observability.RecordingEventBus()
+        val localManager = WorkspaceManager(localStore, localEventBus)
         val ws = localManager.createWorkspace("Work", listOf(linuxSession("s-1"))).getOrThrow()
         // Save is implicit on every state change; load
         // returns the workspace.
@@ -333,10 +336,98 @@ class WorkspaceManagerTest {
     @Test
     fun `InMemoryWorkspaceStore clear empties the store`() {
         val localStore = InMemoryWorkspaceStore()
-        val localManager = WorkspaceManager(localStore)
+        val localEventBus = com.elysium.vanguard.core.runtime.observability.RecordingEventBus()
+        val localManager = WorkspaceManager(localStore, localEventBus)
         localManager.createWorkspace("Work", listOf(linuxSession("s-1")))
         localStore.clear()
         assertEquals(0, localStore.size())
+    }
+
+    // --- Phase 39: manager publishes its own events ---
+
+    @Test
+    fun `createWorkspace publishes a WorkspaceStateChangedEvent on the bus`() {
+        val result = manager.createWorkspace("Work", listOf(linuxSession("s-1")), nowMs = 1000L)
+        assertTrue(result.isSuccess)
+        val events = eventBus.events
+        assertEquals(1, events.size)
+        val event = events.single() as RuntimeEvent.WorkspaceStateChangedEvent
+        assertEquals(1000L, event.atMs)
+        assertEquals("(none)", event.fromState)
+        assertEquals("Active", event.toState)
+    }
+
+    @Test
+    fun `createWorkspace with a blank name does not publish on the bus`() {
+        val result = manager.createWorkspace(name = "")
+        assertTrue(result.isFailure)
+        assertEquals("no event on failure", 0, eventBus.events.size)
+    }
+
+    @Test
+    fun `pauseWorkspace publishes Active to Paused`() {
+        val ws = manager.createWorkspace("Work", nowMs = 1L).getOrThrow()
+        eventBus.clear()
+        val result = manager.pauseWorkspace(ws.id)
+        assertTrue(result.isSuccess)
+        val events = eventBus.events
+        assertEquals(1, events.size)
+        val event = events.single() as RuntimeEvent.WorkspaceStateChangedEvent
+        assertEquals("Active", event.fromState)
+        assertEquals("Paused", event.toState)
+    }
+
+    @Test
+    fun `activateWorkspace publishes Paused to Active`() {
+        val ws = manager.createWorkspace("Work", nowMs = 1L).getOrThrow()
+        manager.pauseWorkspace(ws.id)
+        eventBus.clear()
+        manager.activateWorkspace(ws.id)
+        val event = eventBus.events.single() as RuntimeEvent.WorkspaceStateChangedEvent
+        assertEquals("Paused", event.fromState)
+        assertEquals("Active", event.toState)
+    }
+
+    @Test
+    fun `closeWorkspace publishes Active to Closed`() {
+        val ws = manager.createWorkspace("Work", listOf(linuxSession("s-1")), nowMs = 1L).getOrThrow()
+        eventBus.clear()
+        manager.closeWorkspace(ws.id)
+        val event = eventBus.events.single() as RuntimeEvent.WorkspaceStateChangedEvent
+        assertEquals("Active", event.fromState)
+        assertEquals("Closed", event.toState)
+    }
+
+    @Test
+    fun `addSession publishes a SessionAddedEvent with the session kind`() {
+        val ws = manager.createWorkspace("Work", nowMs = 1L).getOrThrow()
+        eventBus.clear()
+        val result = manager.addSession(ws.id, linuxSession("s-1"))
+        assertTrue(result.isSuccess)
+        val event = eventBus.events.single() as RuntimeEvent.SessionAddedEvent
+        assertEquals(ws.id, event.workspaceId)
+        assertEquals("s-1", event.sessionId)
+        assertEquals("LINUX_PROOT", event.sessionKind)
+    }
+
+    @Test
+    fun `addSession with a duplicate id does not publish on the bus`() {
+        val ws = manager.createWorkspace("Work", listOf(linuxSession("s-1")), nowMs = 1L).getOrThrow()
+        eventBus.clear()
+        val result = manager.addSession(ws.id, linuxSession("s-1"))
+        assertTrue(result.isFailure)
+        assertEquals("no event on duplicate", 0, eventBus.events.size)
+    }
+
+    @Test
+    fun `removeSession publishes a SessionRemovedEvent`() {
+        val ws = manager.createWorkspace("Work", listOf(linuxSession("s-1")), nowMs = 1L).getOrThrow()
+        eventBus.clear()
+        val result = manager.removeSession(ws.id, "s-1")
+        assertTrue(result.isSuccess)
+        val event = eventBus.events.single() as RuntimeEvent.SessionRemovedEvent
+        assertEquals(ws.id, event.workspaceId)
+        assertEquals("s-1", event.sessionId)
     }
 
     // --- helpers ---

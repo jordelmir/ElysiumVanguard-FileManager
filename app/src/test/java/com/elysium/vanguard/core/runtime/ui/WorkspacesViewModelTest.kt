@@ -55,9 +55,16 @@ import java.util.concurrent.atomic.AtomicLong
 class WorkspacesViewModelTest {
 
     private val store: WorkspaceStore = InMemoryWorkspaceStore()
-    private val manager = WorkspaceManager(store)
     private val bus = RecordingEventBus()
     private val clock = AtomicLong(0L)
+    // Phase 39 — the manager publishes its own events
+    // on the same bus the ViewModel subscribes to. The
+    // shared instance is the only way the existing
+    // test assertions on the bus (e.g. "1 event
+    // published after createWorkspace") stay valid
+    // post-refactor. The shared clock is the only way
+    // the atMs assertion stays valid.
+    private val manager = WorkspaceManager(store, bus, clock = clock::get)
     private val runner = FakeSessionRunner()
     private val viewModel = WorkspacesViewModel(manager, bus, runner, clock = clock::get)
 
@@ -260,9 +267,10 @@ class WorkspacesViewModelTest {
 
     @Test
     fun `createWorkspace is thread-safe under concurrent calls`() {
+        val localBus = RecordingEventBus()
         val localVm = WorkspacesViewModel(
-            workspaceManager = WorkspaceManager(InMemoryWorkspaceStore()),
-            eventBus = RecordingEventBus(),
+            workspaceManager = WorkspaceManager(InMemoryWorkspaceStore(), localBus, clock = { 0L }),
+            eventBus = localBus,
             sessionRunner = FakeSessionRunner(),
             clock = { 0L }
         )
