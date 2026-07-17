@@ -228,6 +228,382 @@ The required invariants are:
   script is rejected at the
   sandbox step.
 
+The remaining 11 required
+invariants are the **cross-cutting
+contract invariants**. The
+platform proves each one with a
+property-based test on every
+release.
+
+- **Frozen revisions cannot
+  mutate.** A test asserts
+  the `VehicleRevision` in
+  `ENGINEERING_FREEZE`
+  cannot be edited.
+- **Stable inputs produce
+  stable compiler outputs.**
+  A test asserts the
+  compiler output is
+  byte-identical across two
+  runs on the same input
+  (per skill 04 section 7).
+- **Incompatible interfaces
+  cannot assemble.** A test
+  asserts the constraint
+  engine rejects an
+  interface binding that is
+  not in the catalog.
+- **Unauthorized users cannot
+  access projects.** A test
+  asserts a user without
+  access receives a typed
+  `UnauthorizedProjectAccess`
+  error.
+- **Duplicate commands remain
+  idempotent.** A test
+  asserts the same
+  `idempotencyKey` produces
+  the same result; the
+  state is unchanged.
+- **Historical contracts
+  remain immutable.** A test
+  asserts a signed
+  `RoyaltyContract` cannot
+  be mutated; an amendment
+  creates a new version.
+- **Sales cannot generate
+  royalties without an
+  active contract.** A test
+  asserts a sale without an
+  `ACTIVE` `RoyaltyContract`
+  produces no settlement.
+- **Financial reversals
+  balance.** A test asserts a
+  `Reversal` event produces
+  a settlement that
+  nullifies the original
+  without mutating the
+  original.
+- **AI proposals cannot
+  bypass validation.** A
+  test asserts the AI
+  council's typed proposal
+  is rejected by the
+  constraint engine when
+  the proposal violates a
+  constraint.
+- **Visual assets cannot
+  claim verified status
+  without evidence.** A test
+  asserts a `VISUAL_MESH`
+  that is labeled
+  `OEM_EXACT` is rejected.
+- **Safety blockers prevent
+  production release.** A
+  test asserts a
+  `releaseBlocking`
+  `SafetyFinding` with
+  `status = OPEN` blocks
+  the release pipeline.
+
+## 3.5. Property-based tests
+
+The platform generates **random
+inputs** for the critical
+invariants. The property-based
+tests assert the invariant
+**regardless of the generated
+input**.
+
+The random categories are:
+
+- **Vehicle definitions.** A
+  random `Spec.Artifact` (a
+  random `body` + a random
+  `propulsion` + a random
+  `driveline` + a random
+  `electrical` + a random
+  `chassis`).
+- **Unit combinations.** A
+  random `Unit` value (a
+  random value + a random
+  unit). The test asserts
+  the unit is normalized to
+  SI.
+- **Constraint graphs.** A
+  random `CompatibilityConstraint`
+  graph. The test asserts the
+  constraint engine produces
+  a sound + complete
+  solution.
+- **Revision histories.** A
+  random sequence of
+  `Revision` events. The
+  test asserts the
+  optimistic concurrency
+  detects the conflicts.
+- **Royalty tiers.** A
+  random `RoyaltyContract`
+  with random tiers. The
+  test asserts the engine
+  produces a deterministic
+  settlement.
+- **Deductions.** A random
+  `Deduction` set (some
+  in-contract + some not).
+  The test asserts the
+  not-in-contract deductions
+  are rejected.
+- **Reversal sequences.** A
+  random sequence of
+  `Reversal` / `Adjustment`
+  / `Correction` /
+  `Settlement` events.
+  The test asserts the
+  ledger remains balanced.
+- **Collaboration conflicts.**
+  A random sequence of
+  concurrent edits by N
+  users. The test asserts
+  the conflicts are
+  detected + the user is
+  given the merge option.
+
+The property-based tests run on
+the merge queue, not on every
+PR (they are slow).
+
+## 3.6. Fuzzing targets
+
+The platform fuzzes **8 input
+surfaces**. A fuzz crash is a P0
+incident.
+
+- **Vehicle DSL parser.** A
+  random string is fed to
+  the DSL parser. The test
+  asserts the parser does
+  not panic; the worst case
+  is a typed
+  `FoundryError`.
+- **GLB metadata parser.** A
+  random byte sequence is
+  fed to the GLB metadata
+  parser. The test asserts
+  the parser does not
+  panic.
+- **Archive extraction.** A
+  random ZIP / TGZ / 7z is
+  fed to the archive
+  extractor. The test
+  asserts the extractor
+  rejects the zip-bomb
+  attack (per skill 12
+  section 6 step 5).
+- **API decoders.** A random
+  JSON / Protobuf is fed to
+  the API decoders. The test
+  asserts the decoders do
+  not panic.
+- **Contract-rule parser.** A
+  random contract rule is
+  fed to the rule parser.
+  The test asserts the
+  parser does not panic;
+  the worst case is a typed
+  `VehicleDefinitionInvalid`.
+- **Manifest parser.** A
+  random `SceneManifest` is
+  fed to the manifest
+  parser. The test asserts
+  the parser does not
+  panic; the worst case is
+  a typed
+  `ArtifactIntegrityFailure`.
+- **Deep-link parser.** A
+  random deep-link string is
+  fed to the deep-link
+  parser. The test asserts
+  the parser rejects
+  unauthorized
+  destinations.
+- **Import/export packages.**
+  A random import / export
+  package is fed to the
+  importer. The test asserts
+  the importer does not
+  panic; the worst case is
+  a typed
+  `ArtifactIntegrityFailure`.
+
+The CI runs the fuzz targets for
+a fixed time budget (1 hour per
+release for the critical
+surfaces).
+
+## 3.7. Performance tests
+
+The platform measures **10
+performance metrics**. A
+performance regression beyond
+the approved limit is a P1
+incident.
+
+- **Android frame time.** A
+  test asserts the P99 frame
+  time is ≤ 16.67ms (60 FPS)
+  on a baseline device.
+- **GLB load latency.** A
+  test asserts the GLB
+  load latency is ≤ the
+  approved limit per LOD
+  (default: 200ms for LOD 1).
+- **Peak memory.** A test
+  asserts the peak memory
+  per scene is ≤ the
+  approved budget (default:
+  512 MB).
+- **GPU resource lifecycle.**
+  A test asserts the GPU
+  resources are disposed
+  on scene close; a
+  resource leak is a P0
+  incident.
+- **Compiler throughput.** A
+  test asserts the compiler
+  produces N specs / sec;
+  a regression is a P1
+  incident.
+- **Database query latency.**
+  A test asserts the
+  per-query P99 latency is
+  ≤ the approved limit.
+- **Event-publication lag.**
+  A test asserts the
+  outbox-to-bus lag is ≤
+  the approved limit
+  (default: 1 second).
+- **AI orchestration
+  latency.** A test asserts
+  the per-role response
+  latency is ≤ the approved
+  budget.
+- **Artifact-download time.**
+  A test asserts the
+  artifact download time
+  is ≤ the approved limit
+  per artifact.
+- **Royalty batch
+  throughput.** A test
+  asserts the royalty engine
+  processes N sales / hour;
+  a regression is a P1
+  incident.
+
+**Set baselines and fail CI on
+unjustified regression.** A
+regression without an approved
+ADR is a P1 incident.
+
+## 3.8. Test data rules
+
+The platform uses **synthetic
+identities and contracts** for
+test fixtures. A test fixture
+that uses production data is a
+contract violation.
+
+- **Synthetic identities.** A
+  test uses a synthetic
+  user (a UUID + a synthetic
+  name + a synthetic email).
+- **Synthetic contracts.** A
+  test uses a synthetic
+  `RoyaltyContract` (a
+  synthetic party + a
+  synthetic `Effective
+  Period` + a synthetic
+  royalty rule).
+- **No production secrets.** A
+  test never uses a
+  production API key, a
+  production token, a
+  production database
+  credential, or a
+  production signing key.
+- **No customer vehicle
+  data.** A test never uses
+  a real customer's
+  `VehicleDefinition` +
+  `EngineeringFact<T>` +
+  `AuthorshipClaim`. The
+  test generates a synthetic
+  vehicle.
+- **No private engineering
+  artifacts.** A test never
+  uses a real OEM's glTF +
+  STEP + USD. The test
+  generates a synthetic
+  artifact.
+
+A test fixture that uses
+production data is a P0
+incident; the test is rolled
+back + the production data
+that leaked is rotated + a
+postmortem is filed.
+
+## 3.9. Definition of done
+
+A release candidate requires
+**every** item below to be
+true.
+
+- **All critical workflows
+  passing.** The end-to-end
+  tests for the 7 critical
+  user journeys (the
+  designer creates a
+  vehicle, the engineer
+  reviews, the supplier
+  quotes, the mechanic
+  diagnoses, the regulator
+  approves, the user
+  publishes, the AI
+  deliberates) all pass.
+- **Zero critical security
+  findings.** The pen test
+  (per skill 12 section 7.6)
+  finds zero critical
+  findings.
+- **No flaky critical tests.**
+  The critical tests pass
+  on N consecutive runs
+  (N ≥ 10); a flaky test is
+  a P1 incident.
+- **Migration test success.**
+  The migration is re-runnable
+  + idempotent; the
+  rollback is tested.
+- **Rollback or recovery
+  procedure.** Every release
+  has a rollback procedure
+  (or a forward recovery
+  plan, per the deployment
+  strategy).
+- **Performance within
+  budget.** The 10
+  performance metrics are
+  within the approved
+  budgets; a regression
+  without an ADR is a P1
+  incident.
+- **Signed release evidence.**
+  Every release artifact is
+  signed (per skill 12
+  section 7.5); the
+  signature is verifiable.
+
 ## 4. Quality gates (the 30+)
 
 The quality gates are enforced on
