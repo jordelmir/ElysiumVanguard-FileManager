@@ -3,22 +3,120 @@ name: digital-twin-diagnostics
 description: The digital twin, the telemetry ingestion, the fault model, the diagnostic flow, the repair actions. The bridge between "the user has a vehicle" and "the field has the data to fix it".
 ---
 
-# Skill 07 — Digital Twin + Diagnostics
+# Skill 07 — Digital Twin and Diagnostics
 
 ## 1. Mission
 
-Run the **digital twin** of every vehicle the
-platform tracks, ingest the **telemetry** from the
-field, model the **faults** the parts can exhibit,
-and provide the **diagnostic + repair flow** the
-field mechanic uses. The digital twin is the
-"living" version of the spec; the diagnostics are
-the "what's wrong and how do I fix it" answer.
+**Turn the generated vehicle into an
+interactive diagnostic and repair model.**
 
-The skill is the bridge between "the user has a
-vehicle" and "the field has the data to fix it".
+The system must **diagnose functions and
+systems**, not blindly replace the component
+named by a DTC. A `P0301` (cylinder 1
+misfire) is a **symptom**; the root cause may
+be a spark plug, an ignition coil, a fuel
+injector, a compression issue, or a wiring
+fault. The diagnostic graph walks the
+function tree from the symptom to the root
+cause; the mechanic sees the path, not just
+the code.
 
-## 2. In-scope
+The digital twin is the "living" version of
+the spec (per skill 04's `Spec.Artifact`);
+the diagnostics are the "what's wrong and
+how do I fix it" answer; the field
+mechanic's flow is the UX. The skill is the
+bridge between "the user has a vehicle" and
+"the field has the data to fix it".
+
+## 2. Diagnostic graph
+
+The platform models the relationships
+among:
+
+- **Vehicle functions** (the
+  functions a vehicle performs:
+  propulsion, steering, braking,
+  HVAC, infotainment, ADAS).
+- **Subsystems** (the `Subsystem`s
+  that implement the functions:
+  the powertrain, the chassis,
+  the electrical, the
+  electronics, the software).
+- **Components** (the
+  `PartDefinition`s +
+  `PartInstance`s that compose
+  the subsystems: the battery
+  pack, the motor, the ECU).
+- **Signals** (the telemetry
+  signals the components emit:
+  the cell voltage, the
+  temperature, the current).
+- **Fault codes** (the DTCs
+  the components emit when a
+  fault is detected: `P0301`,
+  `B1342`, `C1234`).
+- **Symptoms** (the user-
+  observable manifestations:
+  reduced power, warning
+  lights, abnormal noise).
+- **Root causes** (the actual
+  reasons for a fault: a
+  failed cell, a wiring
+  break, a software bug).
+- **Repair actions** (the
+  interventions the mechanic
+  applies: replace the cell,
+  repair the wiring, reflash
+  the ECU).
+- **Procedures** (the
+  step-by-step instructions
+  for the repair action: the
+  torque sequence, the
+  safety precautions, the
+  tools required).
+- **Verification tests** (the
+  tests that confirm the
+  repair: the cell voltage
+  after replacement, the
+  fault code after the
+  reflash).
+
+The graph is a **typed DAG** (a
+directed acyclic graph with
+typed nodes + typed edges).
+A cycle in the graph is a
+contract violation; the
+verifier (skill 14) rejects
+the graph.
+
+A diagnostic walk is a
+**topological traversal** of
+the graph from the symptom
+to the root cause. The
+traversal is deterministic;
+the same symptom + the same
+telemetry produces the same
+walk. The traversal respects
+the platform's verification
+levels (per `.ai/STANDARDS.md`
+section 3.2): a fault whose
+root cause is `AI_INFERRED`
+is flagged; a fault whose
+root cause is `OEM_VERIFIED`
+or `LAB_VERIFIED` is
+authoritative.
+
+A diagnostic that returns the
+DTC as the answer (without
+the walk) is a contract
+violation. The system
+diagnoses functions and
+systems, not blindly replaces
+the component named by a
+DTC.
+
+## 3. In-scope
 
 - Running the digital twin simulation (per
   vehicle, per scenario).
@@ -39,7 +137,7 @@ vehicle" and "the field has the data to fix it".
   the telemetry after the repair matches the
   expected pattern.
 
-## 3. Out-of-scope
+## 4. Out-of-scope
 
 - The 3D model (skill 06).
 - The marketplace (skill 10).
@@ -54,7 +152,7 @@ mobile UX shows the diagnostic to the mechanic.
 The regulatory submission audits the diagnostic
 flow. Each is its own concern.
 
-## 4. Inputs
+## 5. Inputs
 
 - The `Spec.Artifact` (the vehicle's spec, from
   skill 04).
@@ -64,7 +162,7 @@ flow. Each is its own concern.
 - The telemetry stream (from the field).
 - The user's brand + project context.
 
-## 5. Outputs
+## 6. Outputs
 
 - A `DigitalTwinState` artifact (the current
   state of the twin).
@@ -84,7 +182,7 @@ The artifacts are content-addressed + signed.
 The trace lands in the catalog (skill 09) for
 the audit trail.
 
-## 6. Workflow
+## 7. Workflow
 
 1. **Receive telemetry.** The pipeline ingests
    the telemetry stream. The format is
@@ -116,7 +214,7 @@ the audit trail.
    `DiagnosticTrace` (fault → root cause →
    repair → validation) lands in the catalog.
 
-## 7. Quality gates
+## 8. Quality gates
 
 - The twin is deterministic.
 - The fault model has unit tests for every
@@ -129,7 +227,7 @@ the audit trail.
 - The closed-loop validation is automated.
 - The trace is in the catalog.
 
-## 8. Failure modes
+## 9. Failure modes
 
 - **Telemetry is missing or corrupt.** The
   twin falls back to the last-known state. A
@@ -149,7 +247,7 @@ the audit trail.
   A persistent divergence is a quality-gate
   failure.
 
-## 9. Coordination contract
+## 10. Coordination contract
 
 - **Input from**: skill 04 (spec), skill 06
   (3D), the field (telemetry).
@@ -160,7 +258,7 @@ the audit trail.
   fault detection, every diagnostic request.
 - **Frequency**: per telemetry batch (real-time).
 
-## 10. Forbidden patterns
+## 11. Forbidden patterns
 
 - **Non-deterministic twins.** A twin that
   depends on wall-clock time, on the order of
@@ -188,7 +286,7 @@ the audit trail.
   triggers a part order is a violation. The
   flow informs the user; the user decides.
 
-## 11. The diagnostic flow in the Elysium
+## 12. The diagnostic flow in the Elysium
 Automotive Foundry
 
 The diagnostic flow is the platform's "what's
@@ -212,7 +310,7 @@ fault codes, and the platform:
 The trace is the platform's "we know what
 happened, and we can prove it" answer.
 
-## 12. Working with this skill
+## 13. Working with this skill
 
 When invoked, this skill:
 
