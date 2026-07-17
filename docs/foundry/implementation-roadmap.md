@@ -183,7 +183,7 @@ Increments:
 
 ### Phase 5 — Commercial foundation
 
-Gate: **G6**, **G7**, **G8**.
+Gate: **G6**, **G7**.
 
 Increments:
 
@@ -195,17 +195,84 @@ Increments:
 5. **Royalty rules.** The rule engine.
 6. **Statements.** The per-user statement.
 7. **Audit trail.** The signed ledger.
-8. **Listings.** The marketplace surface.
-9. **Escrow.** The escrow flow.
-10. **Supplier integration.** The
-    supplier catalog.
+
+### Phase 6 — Marketplace and manufacturing
+network
+
+Gate: **G8**.
+
+Increments:
+
+1. **Supplier discovery.** A supplier
+   browses the parts catalog; a designer
+   browses the supplier catalog. The
+   match is `EngineeringFact<T>`-driven.
+2. **RFQs (Request For Quote).** A
+   designer sends an RFQ to a supplier.
+   The RFQ is a typed artifact; the
+   response is a typed artifact; both
+   are content-addressed + signed.
+3. **Offers.** A supplier responds to
+   an RFQ with an offer. The offer is
+   bound to the RFQ; the offer is
+   content-addressed + signed; the
+   offer's money is `BigDecimal`.
+4. **Qualification.** A supplier is
+   qualified by a regulator (skill 13)
+   + a buyer (skill 10) + an engineer
+   (skill 03). The qualification is a
+   signed event in the audit trail.
+5. **Controlled disclosure.** A supplier
+   shares proprietary data with a
+   qualified buyer + a signed NDA + a
+   time-bound disclosure. The disclosure
+   is in the audit trail; the
+   disclosure's data is encrypted at
+   rest + in transit; the disclosure is
+   revocable.
+
+### Phase 7 — Production hardening
+
+Gate: **G9**, **G10**.
+
+Increments:
+
+1. **Threat modeling.** The threat
+   model is current (per
+   `docs/threat-model/`); the
+   residual-risk register is reviewed;
+   the red team has run at least once.
+2. **Performance.** The performance
+   baselines are documented (P99
+   latency per surface, requests-per-
+   second per surface, resource hot
+   spots); the performance gates are in
+   the CI; a regression beyond the
+   approved limit is a P1 incident.
+3. **Observability.** The OpenTelemetry
+   traces are sampled; the metrics are
+   emitted; the logs are structured;
+   the alerts are in place; the
+   dashboards are built.
+4. **Disaster recovery.** The DR plan
+   is documented; the RPO + RTO are
+   measured; the failover is tested;
+   the backups are encrypted; the
+   backups are restorable.
+5. **Security review.** The security
+   sign-off is in `docs/audits/`; the
+   CVE feed is monitored; the patch
+   SLA is met; the secrets are in the
+   vault; the auth + authz are zero-
+   trust; the encryption is at rest +
+   in transit.
 
 ## Dependencies
 
 The phases are dependency-ordered:
 
 ```
-Phase 0 → Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5
+Phase 0 → Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7
 ```
 
 Within each phase, the increments are

@@ -108,13 +108,13 @@ violation.
 
 ## 4. Execution phases
 
-The Foundry is built in 6 controlled phases.
-A phase is **not** declared done until its
-gate (per `.ai/AGENTS.md` section 22, the
-**Project Gates**) is green. A phase is
-**not** started until the previous phase's
-gate is green. A skipped phase is a contract
-violation.
+The Foundry is built in 8 controlled phases
+(Phase 0 through Phase 7). A phase is
+**not** declared done until its gate (per
+`.ai/AGENTS.md` section 22, the **Project
+Gates**) is green. A phase is **not** started
+until the previous phase's gate is green. A
+skipped phase is a contract violation.
 
 ### Phase 0 — Discovery
 
@@ -223,8 +223,94 @@ The orchestrator dispatches skill 09
 
 Gate: **G6** (IP and provenance ledger
 operational), **G7** (Royalty engine
-contract-driven), **G8** (Marketplace and
-supplier workflow).
+contract-driven).
+
+### Phase 6 — Marketplace and manufacturing
+network
+
+The orchestrator dispatches skill 10
+(marketplace/manufacturing) to implement the
+network side of the platform:
+
+- **Supplier discovery.** A supplier
+  browses the parts catalog; a designer
+  browses the supplier catalog. The
+  match is `EngineeringFact<T>`-driven
+  (the supplier's parts have the same
+  provenance model as the designer's
+  parts).
+- **RFQs (Request For Quote).** A
+  designer sends an RFQ to a supplier.
+  The RFQ is a typed artifact; the
+  response is a typed artifact; both are
+  content-addressed + signed.
+- **Offers.** A supplier responds to
+  an RFQ with an offer. The offer is
+  bound to the RFQ; the offer is
+  content-addressed + signed; the
+  offer's money is `BigDecimal`.
+- **Qualification.** A supplier is
+  qualified by a regulator (skill 13)
+  + a buyer (skill 10) + an engineer
+  (skill 03). The qualification is a
+  signed event in the audit trail.
+- **Controlled disclosure.** A supplier
+  may share proprietary data with a
+  qualified buyer + a signed NDA +
+  a time-bound disclosure. The
+  disclosure is in the audit trail;
+  the disclosure's data is encrypted
+  at rest + in transit; the
+  disclosure is revocable.
+
+Gate: **G8** (Marketplace and supplier
+workflow). Listings + RFQs + offers +
+qualification + controlled disclosure
+are end-to-end; the `VISUAL_ONLY` and
+`CONCEPTUAL` ineligibility is tested
+across the network; the disclosure's
+revocation is tested.
+
+### Phase 7 — Production hardening
+
+The orchestrator dispatches skill 12
+(security) + skill 15 (devops) + skill 14
+(quality) to harden the platform for
+production:
+
+- **Threat modeling.** The threat model
+  is current (per
+  `docs/threat-model/`); the residual-
+  risk register is reviewed; the red
+  team has run at least once.
+- **Performance.** The performance
+  baselines are documented (P99 latency
+  per surface, requests-per-second per
+  surface, resource hot spots); the
+  performance gates are in the CI; a
+  regression beyond the approved limit
+  is a P1 incident.
+- **Observability.** The OpenTelemetry
+  traces are sampled; the metrics are
+  emitted; the logs are structured;
+  the alerts are in place; the
+  dashboards are built.
+- **Disaster recovery.** The DR plan
+  is documented; the RPO + RTO are
+  measured; the failover is tested; the
+  backups are encrypted; the backups
+  are restorable.
+- **Security review.** The security
+  sign-off is in `docs/audits/`; the
+  CVE feed is monitored; the patch SLA
+  is met; the secrets are in the vault;
+  the auth + authz are zero-trust; the
+  encryption is at rest + in transit.
+
+Gate: **G9** (Safety and regulatory
+evidence model) + **G10** (Production
+hardening). All 11 gates (G0–G10) are
+green. The platform is production-ready.
 
 ## 5. Project gates
 
@@ -251,6 +337,188 @@ not a bypass.
 The full gate definitions, the evidence
 required, and the recovery patterns are in
 `.ai/AGENTS.md` section 22.
+
+### 5.1 Parallelism rules
+
+Parallel work is allowed only when **every**
+condition below is true. A condition that
+cannot be met is a blocker on the parallel
+work; the orchestrator serializes the work.
+
+- **Aggregate ownership does not overlap.**
+  The two skills do not own the same domain
+  aggregate (per `docs/foundry/domain-ownership.md`).
+- **API contracts are frozen or versioned.**
+  The two skills' cross-skill contracts are
+  signed off (per `docs/foundry/dependency-map.md`).
+  A breaking change is a blocker on the
+  parallel work.
+- **Database migrations do not modify the
+  same tables.** The two skills' migrations
+  are disjoint. A migration that touches the
+  same table is serialized.
+- **Shared identifiers and value objects
+  are already approved.** The shared
+  `BrandId`, `ProjectId`, `VehicleId`, etc.
+  are in the ontology (skill 03); the
+  shared value objects are in the artifact
+  contract (per `.ai/AGENTS.md` section 12).
+- **Integration tests are defined first.**
+  The cross-skill contract test is defined
+  BEFORE the two skills' implementations.
+  A test that is defined after the
+  implementation is a smell.
+
+**Never** allow two agents to independently
+create representations of:
+
+- `Vehicle`.
+- `Part`.
+- `Project`.
+- `User`.
+- `Contract`.
+- `Sale`.
+- `Royalty`.
+- `Artifact`.
+
+A representation is a Kotlin data class + a
+TypeScript interface + a Rust struct + a SQL
+table + an OpenAPI schema + a JSON envelope.
+The platform's canonical representation is
+the ontology (skill 03). A second
+representation is a contract violation; the
+orchestrator arbitrates per
+`docs/foundry/domain-ownership.md`.
+
+### 5.2 Definition of done
+
+The orchestrator may close a phase only
+when **every** item below is true. A failing
+item is a blocker; the phase is not closed.
+
+1. **All acceptance criteria pass.** The
+   per-increment acceptance criteria (per
+   `docs/foundry/implementation-roadmap.md`)
+   are met. The verifier (skill 14) emits
+   the report.
+2. **No critical or high-risk security
+   defect remains.** The security review
+   (skill 12) is current. A HIGH-severity
+   CVE is a blocker; a CRITICAL-severity
+   defect is a blocker.
+3. **Migrations are reversible or have an
+   approved forward-only recovery plan.**
+   A migration that is not reversible
+   requires a forward-only recovery plan
+   in `docs/foundry/risk-register.md` +
+   the plan is tested on a fixture.
+4. **API compatibility has been checked.**
+   The OpenAPI contract is the API
+   (per `.ai/AGENTS.md` section 12 + per
+   skill 14's contract tests). A breaking
+   change is a major version bump + a
+   deprecation schedule.
+5. **Performance baselines have not
+   regressed beyond approved limits.** The
+   P99 latency + the requests-per-second
+   are within the approved limits (per
+   skill 15's SLOs). A regression beyond
+   the limit is a blocker.
+6. **Documentation has been updated.** The
+   PRD + the ADR + the API doc + the
+   runbook + the test report + the
+   user-facing docs are all current (per
+   `.ai/AGENTS.md` section 23 — Required
+   Documentation). A drift between docs
+   and code is a blocker.
+7. **The next phase dependencies are
+   satisfied.** The next phase's
+   prerequisites (per
+   `docs/foundry/implementation-roadmap.md`)
+   are in place. A missing prerequisite is
+   a blocker; the next phase is not
+   started.
+
+### 5.3 Critical integration test
+
+The orchestrator runs the **critical
+integration test** at the end of every
+phase. The test starts with an **empty
+database** and asserts the platform's
+core invariants.
+
+The test scenario is:
+
+1. **Create a project.** A user with the
+   `designer` role creates a `Project`.
+   The `Project` is persisted; the
+   `ProjectId` is stable; the `Project`
+   is queryable.
+2. **Create a vehicle definition.** The
+   user authors a vehicle definition in
+   the DSL (skill 04). The DSL compiler
+   emits a `Spec.Artifact`; the artifact
+   is content-addressed + signed; the
+   artifact is bound to the `Project`.
+3. **Compile a revision.** The user
+   compiles a `VehicleRevision`. The
+   revision is the first revision; the
+   revision's parent is the project; the
+   revision is signed.
+4. **Attach an artifact.** The user
+   attaches a `Part` artifact (a glTF
+   + a STEP + a USD). The artifact is
+   validated (manifold + units +
+   coordinate system + no-embedded-
+   scripts + provenance coverage); the
+   artifact is stored in the content-
+   addressed store; the artifact is
+   referenced by the revision.
+5. **Register provenance.** The user
+   registers the `ProvenanceRecord` for
+   the artifact. The record has all
+   required `EngineeringFact<T>`
+   metadata (per `.ai/STANDARDS.md`
+   section 3); the record is signed.
+6. **Freeze the revision.** The user
+   freezes the revision. The freeze is
+   a signed event in the audit trail;
+   the revision is read-only.
+
+The test then asserts:
+
+- **IDs remain stable.** The `ProjectId`,
+  the `RevisionId`, the `ArtifactId`, the
+  `ProvenanceRecordId` do not change
+  across the test.
+- **Event order is deterministic.** The
+  audit trail records the events in the
+  order: project_created,
+  spec_artifact_emitted, revision_compiled,
+  artifact_attached, provenance_registered,
+  revision_frozen. The order is
+  reproducible.
+- **Duplicate commands do not duplicate
+  state.** A second `createProject` call
+  with the same ID is idempotent; the
+  state is unchanged.
+- **Unauthorized users cannot read the
+  project.** A user without access to
+  the `Project` receives a typed
+  `UnauthorizedProjectAccess` error.
+- **Frozen revisions cannot be mutated.**
+  A mutation on a frozen `VehicleRevision`
+  receives a typed `RevisionConflict`
+  error.
+- **Audit history remains complete.** The
+  audit trail contains every signed
+  event, in order, with the right
+  `provenance` + `verificationStatus`
+  per fact.
+
+A failing assertion is a P0 incident;
+the phase is not closed; the orchestrator
+dispatches remediation work.
 
 ## 6. Inputs
 
