@@ -448,6 +448,157 @@ classes of AI attacks**.
   `.ai/STANDARDS.md` section
   5).
 
+**Use project-scoped retrieval
+and policy checks outside the
+model.** The model's retrieval is
+scoped to the project's data (a
+role cannot read another project's
+data). The policy checks (the
+permission check, the data
+classification check, the export
+control check) are deterministic
+engines, not model calls. A model
+that bypasses a policy check is a
+contract violation.
+
+## 7.5. Supply-chain security
+
+The platform's supply chain is the
+**largest attack surface outside the
+code itself**. The platform requires
+**10 supply-chain controls**.
+
+- **Dependency lockfiles.** A
+  `package-lock.json` (npm) +
+  a `build.gradle.kts` lock (Maven)
+  + a `Cargo.lock` (Rust) + a
+  `pubspec.lock` (Dart) — every
+  build is reproducible.
+- **Vulnerability scanning.** A
+  per-PR scan + a per-release scan
+  (npm audit, Snyk, OWASP
+  Dependency-Check). A HIGH CVE
+  is a P1 incident.
+- **SBOM.** A Software Bill of
+  Materials per release (per
+  UN R156). The SBOM is in
+  `docs/regulatory/`.
+- **Signed builds.** Every
+  release artifact is signed
+  (Sigstore / cosign / an
+  equivalent). An unsigned
+  artifact is rejected.
+- **Provenance attestations.**
+  Every release artifact has a
+  SLSA / in-toto provenance
+  attestation. The attestation
+  is verifiable; an
+  unverifiable artifact is
+  rejected.
+- **Protected branches.** The
+  main branch is protected; a
+  direct push is rejected; a
+  PR requires a CODEOWNERS
+  review.
+- **Required reviews.** A PR
+  requires:
+  - 1 CODEOWNER from the
+    affected skill.
+  - 1 CODEOWNER from skill 14
+    (quality) for non-trivial
+    changes.
+  - 1 CODEOWNER from skill 12
+    (security) for security-
+    surface changes.
+  - 1 CODEOWNER from skill 13
+    (regulatory) for
+    regulated-surface changes.
+  A PR without the required
+  reviews is rejected.
+- **Secret scanning.** A
+  per-PR scan + a per-release
+  scan for known secret
+  patterns (per section 5).
+  A positive match is a hard
+  build failure.
+- **Reproducible critical
+  workers where practical.** The
+  critical workers (the DSL
+  compiler, the diagnostic
+  engine, the royalty engine)
+  are reproducible builds. A
+  non-reproducible build is a
+  P1 incident.
+- **Restricted CI credentials.**
+  The CI credentials are
+  scoped to the minimum
+  permissions; a CI token
+  that has admin access is a
+  P0 incident.
+
+## 7.6. Definition of done
+
+**No release while critical
+findings remain.** A critical
+finding (a CRITICAL-severity CVE +
+a critical red-team finding + a
+critical pen-test finding + a
+critical audit finding) blocks the
+release until it is remediated.
+
+Penetration tests MUST include
+**11 attack categories** per
+release:
+
+- **IDOR** (Insecure Direct Object
+  Reference). A user that
+  knows another user's ID
+  cannot read the other
+  user's data.
+- **Tenant escape.** A user
+  in tenant A cannot read or
+  write tenant B's data.
+- **Malicious GLB.** A glTF
+  with embedded scripts is
+  rejected (per skill 06).
+- **Zip bomb.** An archive
+  with a pathological
+  decompression ratio is
+  rejected (per section 6).
+- **Path traversal.** A path
+  built from user input is
+  sanitized.
+- **Prompt injection.** An
+  untrusted-data source is
+  treated as data, not as
+  commands (per skill 05).
+- **Contract tampering.** A
+  signed contract cannot be
+  mutated (per skill 09).
+- **Duplicate financial
+  events.** A duplicate
+  `eventId` produces the
+  same settlement; the
+  state is unchanged (per
+  skill 09).
+- **Privilege escalation.** A
+  user with role X cannot
+  perform an action that
+  requires role Y.
+- **Signed URL reuse.** A
+  signed URL is single-use;
+  a second use is rejected.
+- **Offline-cache extraction.**
+  A cached restricted asset
+  is encrypted at rest (per
+  section 4); a device that
+  is rooted cannot extract
+  the asset.
+
+A pen test that misses a
+category is a P1 incident; the
+pen test is repeated.
+
 ## 8. Workflow
 
 1. **Threat model every
