@@ -1,299 +1,426 @@
 ---
-name: product-requirements
-description: Write PRDs, user stories, and acceptance criteria. Turn fuzzy user intent into testable, test-driven, test-verified requirements. The skill that bridges "I want X" and the engineering skills.
+name: automotive-product-requirements
+description: Converts an automotive idea into measurable, traceable and conflict-aware product requirements.
 ---
 
-# Skill 02 — Product Requirements
+# Skill 02 — Product and Requirements Engineering
 
 ## 1. Mission
 
-Translate fuzzy product intent ("I want a
-marketplace for vehicle designs") into
-**testable** requirements. Every requirement has
-acceptance criteria that a test can verify. The
-test is the requirement; the requirement is the
-test.
+Transform vague vehicle ideas into
+**explicit, measurable, versioned
+requirements**. A requirement is testable;
+the test is the requirement; the
+requirement is the test.
 
-This skill is the bridge between the user and the
-engineering skills. The orchestrator hands a user
-request to this skill; this skill produces a PRD
-the engineering skills can implement.
+Statements such as "make it futuristic",
+"make it safe" or "make it cheap" are
+**not** requirements. They are aspirations.
+A requirement is a value with a unit + a
+threshold + a verification method.
+
+This skill is the bridge between the user
+and the engineering skills. The
+orchestrator hands a user request to this
+skill; this skill produces a PRD the
+engineering skills can implement.
 
 ## 2. In-scope
 
-- Conducting the discovery interview (when the
-  user request is ambiguous).
-- Writing PRDs under `docs/prd/`.
-- Writing user stories.
-- Writing acceptance criteria.
-- Writing Gherkin scenarios (Given / When / Then)
-  for the acceptance criteria.
-- Maintaining the requirements traceability
-  matrix (requirement → story → test → ADR).
-- Filing the "requirement ADR" when a requirement
-  is or becomes architectural.
+- Conducting the discovery interview
+  (when the user request is ambiguous).
+- Decomposing the vision into a
+  hierarchical requirement set.
+- Naming the stakeholder needs.
+- Writing the product requirements
+  (the user-facing "what").
+- Deriving the system + subsystem +
+  component requirements (the
+  engineering-facing "how").
+- Naming the verification requirements
+  (the test).
+- Naming the regulatory constraints
+  (per skill 13).
+- Naming the commercial constraints
+  (per skill 09 + skill 10).
+- Running the conflict engine (per
+  section 6).
+- Running the change-control process
+  (per section 7).
 
 ## 3. Out-of-scope
 
-- Writing product code. The PRD describes the
-  *what*; the engineering skills describe the
-  *how*.
-- Writing tests. Skill 14.
-- Designing the UX. Skill 11.
-- Designing the data model. Skill 03.
-- Designing the AI behaviour. Skill 05.
+- Writing the architecture (skill 00 +
+  skill 03 + skill 04).
+- Writing the implementation (every
+  other skill).
+- Writing the tests (skill 14).
+- Deciding the regulatory posture
+  (skill 13).
+- Deciding the commercial posture
+  (skill 09 + skill 10).
 
-A request to this skill that turns out to be a UX
-question is handed off. The PRD does not
-*design*; it *specifies*.
+## 4. Requirement hierarchy
 
-## 4. Inputs
+The platform uses a 9-level hierarchy:
 
-- User request (natural language, sometimes with
-  attached context: market research, regulatory
-  notes, sketches).
-- The baseline ADR + the dependency map from
-  skill 01 (the existing architecture).
-- Existing PRDs under `docs/prd/` (this skill
-  reads what came before).
-- The active-deviations list from the
-  orchestrator (what the user has already
-  decided is OK to break).
-- Compliance scope from skill 13 (which
-  regulations the PRD must respect).
+| Level | Audience | Example |
+|---|---|---|
+| **Vision** | User + executive | "An affordable, road-legal, repairable urban EV for emerging markets." |
+| **Stakeholder need** | User | "A 2-seat, 200 km range EV under $15k." |
+| **Product requirement** | Product | "REQ-RANGE-001: The vehicle shall achieve at least 320 km of validated combined-cycle range." |
+| **System requirement** | System architect | "REQ-SYS-BATT-001: The battery pack shall deliver 75 kWh at 400V nominal." |
+| **Subsystem requirement** | Subsystem lead | "REQ-SUB-CELL-001: Each cell shall be a 21700 cylindrical LiFePO4 cell." |
+| **Component requirement** | Component lead | "REQ-CMP-CELL-001: Each cell shall weigh ≤ 70g and have a capacity of ≥ 5 Ah at 1C." |
+| **Verification requirement** | QA | "REQ-VER-RANGE-001: Range shall be verified by a combined-cycle simulation (WLTP) and a physical test on a chassis dyno." |
+| **Regulatory constraint** | Compliance | "REQ-REG-R155-001: The vehicle shall comply with UN R155 (cybersecurity management system)." |
+| **Commercial constraint** | Commercial | "REQ-COM-COST-001: The vehicle shall have a bill-of-materials cost under $8,000 USD at 10k units/year." |
 
-## 5. Outputs
+Every requirement has:
 
-All outputs land in `docs/prd/`:
+- **Unique stable ID.** The ID is
+  immutable. A renumbering is a new
+  requirement, not a rename.
+- **Description.** The "what".
+- **Rationale.** The "why".
+- **Owner.** The human who owns the
+  requirement.
+- **Priority.** `MUST` / `SHOULD` /
+  `MAY` (per RFC 2119).
+- **Source.** The stakeholder need
+  that derived the requirement.
+- **Acceptance metric.** The value +
+  the unit + the threshold.
+- **Verification method.** The test
+  that proves the requirement is met.
+- **Dependencies.** The other
+  requirements that this one depends
+  on.
+- **Conflicts.** The other requirements
+  that this one conflicts with.
+- **Revision.** The revision history.
+- **Status.** `PROPOSED` / `ACCEPTED` /
+  `REJECTED` / `SUPERSEDED`.
 
-- `<slug>.md` — the PRD itself. Slugs are
-  kebab-case: `vehicle-browse.md`,
-  `royalty-settlement.md`.
-- `stories/<slug>-<NNN>.md` — one per user story,
-  where `NNN` is a 3-digit zero-padded sequence.
-- `tests/<slug>-<NNN>.feature` — Gherkin
-  scenarios, one file per story. The file IS
-  the test (skill 14 runs it via Cucumber /
-  Gauge / equivalent).
-- `ADR-<NNNN>-<slug>.md` — when the requirement
-  is architectural. The ADR is filed BEFORE
-  the implementation skill starts.
-- `traceability.csv` — every requirement → story
-  → test → ADR mapping. Maintained as a
-  spreadsheet + a CSV.
-
-### PRD structure (mandatory)
+## 5. Example
 
 ```yaml
----
-id: PRD-2026-0042
-title: Marketplace browsing
-status: draft
-owner: skill 02
-created_at: 2026-07-17
-last_updated: 2026-07-17
-related_adrs: [ADR-0042]
-regulatory_scope: [GDPR, CCPA]
----
-
-# Problem
-[One paragraph: what the user is trying to do.]
-
-# Users
-[3-5 personas, each one paragraph. Personas are
-sourced from the user request, the market
-research, or the existing PRDs.]
-
-# Goals
-[3-7 goals, each one measurable.]
-
-# Non-goals
-[Explicit list. A PRD without non-goals is a
-scope-creep risk.]
-
-# User stories
-[3-12 stories. Each one is a "As a <persona>, I
-want <capability>, so that <outcome>".]
-
-# Acceptance criteria
-[One Gherkin scenario per story. The scenario
-is the test.]
-
-# Constraints
-[Performance, scale, cost, regulatory. Anything
-that constrains the implementation.]
-
-# Out of scope (for this version)
-[Explicit list.]
-
-# Open questions
-[List of unresolved questions. An empty list
-means the PRD is ready for review.]
+id: REQ-RANGE-001
+type: PRODUCT
+statement: |
+  The vehicle shall achieve at least 320 km
+  of validated combined-cycle range.
+rationale: |
+  Target-market urban and interurban use.
+  The 320 km figure is the WLTP combined-
+  cycle number; the EPA equivalent is
+  ~280 mi.
+priority: MUST
+source: STAKEHOLDER-NEED-CITY-001
+verification:
+  method: SIMULATION_AND_PHYSICAL_TEST
+  threshold: 320
+  unit: km
+  cycle: WLTP
+  confidence: HIGH
+  evidence: WLTP-Regulation-2017
+status: PROPOSED
 ```
 
-The format is non-negotiable. A PRD that is
-missing the `## Non-goals` or `## Out of scope`
-section is rejected by the quality gates.
+## 6. Conflict engine
 
-## 6. Workflow
+The conflict engine detects conflicts
+between requirements. Examples:
 
-1. **Discovery interview.** The skill conducts a
-   short interview with the user:
-   - What problem are you solving?
-   - For whom? (The persona.)
-   - What does "done" look like?
-   - What's the cost of NOT doing it?
-   - What are the regulatory constraints?
-   - What's the budget (calendar + money)?
-   - Are there any PRDs / ADRs already covering
-     this?
-   The interview ends when the user can answer
-   "yes" to "can you describe what success looks
-   like in one sentence?".
-2. **Draft the PRD.** Fill the template. Every
-   section is required. The non-goals + out-of-scope
-   sections are the most-frequently-skipped and
-   the most-frequently-needed.
-3. **Decompose into user stories.** One story
-   per goal. Each story is a small, independent,
-   testable capability.
-4. **Write the Gherkin scenarios.** One scenario
-   per story. The scenario is the test.
-5. **File the requirement ADR** if the PRD
-   commits the platform to a specific design.
-6. **Update the traceability matrix.** Every
-   story → every test → every ADR.
-7. **Open the PR.** The orchestrator takes it
-   from here. The implementation skill reads the
-   PRD + the traceability + the ADRs.
+- **Range versus battery cost.** A
+  higher range requires a bigger
+  battery, which raises the cost.
+- **Performance versus energy
+  consumption.** A higher performance
+  requires more energy per kilometer.
+- **Mass versus crash structure.** A
+  safer structure is heavier, which
+  reduces range.
+- **Repairability versus sealing.** A
+  better sealing is harder to repair.
+- **Low price versus premium
+  material.** A premium material is
+  more expensive.
+- **Interior space versus external
+  dimensions.** A larger interior
+  requires a larger body.
+- **Manufacturing volume versus
+  tooling cost.** A higher volume
+  amortizes the tooling cost.
+- **Aerodynamics versus styling.** A
+  more aerodynamic shape is less
+  expressive.
+- **Modularity versus structural
+  efficiency.** A modular structure
+  is less efficient.
 
-## 7. Quality gates
+**Never hide conflicts.** A conflict is
+filed in the PRD + the risk register +
+the AI council (skill 05).
 
-- The PRD has all 9 sections (problem / users /
-  goals / non-goals / stories / acceptance /
-  constraints / out-of-scope / open questions).
-- Every goal is measurable (a number, a
-  percentage, a latency, a count).
-- Every user story fits the "As a <persona>, I
-  want <capability>, so that <outcome>" template.
-- Every user story has at least one Gherkin
-  scenario.
-- The traceability matrix is updated.
-- The PRD's `regulatory_scope` matches the
-  scope skill 13 returned (if skill 13 has been
-  invoked).
-- The "Open questions" section is empty before
-  the PRD ships.
+The conflict engine returns:
 
-A PRD that fails any gate is rejected. The
-rejection is a learning artifact (skill 14 keeps
-the gate violation log).
+- **Constraint involved.** The
+  requirement ID + the conflicting
+  requirement ID.
+- **Why the conflict exists.** The
+  physical / economic / regulatory
+  reason.
+- **Quantitative impact where
+  evidence exists.** The trade-off
+  curve (e.g. "+10% range requires
+  +5% mass, which costs +$200/unit").
+- **Candidate trade-offs.** The
+  possible resolutions.
+- **Required human decision.** A
+  stakeholder must pick a resolution
+  (per skill 05 + the orchestrator).
 
-## 8. Failure modes
+A conflict without a resolution is a
+contract violation; the verifier
+(skill 14) rejects the PRD.
 
-- **The user cannot describe the problem.** The
-  skill escalates to the orchestrator. The
-  orchestrator either schedules a deeper
-  discovery session or rejects the request.
-- **The PRD has untestable acceptance criteria.**
-  The skill rewrites them. "It should be fast"
-  is not a criterion; "p99 latency < 200ms at
-  1000 RPS" is.
-- **The PRD exceeds the budget.** The skill
-  surfaces the trade-off and asks the user to
-  cut scope.
-- **The PRD overlaps with an existing PRD.** The
-  skill flags the overlap and asks the
-  orchestrator to consolidate.
-- **The user pushes for "just build it".** The
-  skill refuses. A PRD-less feature is a
-  scope-creep magnet. The orchestrator
-  arbitrates.
+## 7. Change control
 
-## 9. Coordination contract
+Once a vehicle revision enters
+**engineering freeze** (per skill 03 +
+skill 04):
 
-- **Input from**: skill 00 (orchestrator), user.
-- **Output to**: skill 03 (ontology), skill 04
-  (DSL), skill 11 (UX), every other skill that
-  implements the feature.
-- **Triggered by**: every user request that ends
-  in "I want X" or "we need Y".
-- **Frequency**: per feature, per release, per
-  user-visible change.
+- **Every requirement change creates
+  a change request.** A change request
+  is a structured artifact under
+  `docs/foundry/change-requests/`.
+- **Impact analysis is mandatory.**
+  The change request analyzes the
+  impact on the architecture, the
+  test plan, the regulatory posture,
+  the commercial posture, the
+  schedule, and the cost.
+- **Affected artifacts are
+  identified.** Every artifact that
+  references the changed requirement
+  is listed.
+- **Cost, schedule, safety and
+  compliance impact are recorded.**
+  The change request records the
+  per-dimension impact.
+- **Approval is explicit.** A
+  stakeholder + the orchestrator +
+  the affected skills approve the
+  change.
+- **Previous requirements remain
+  immutable.** A "change" is a new
+  requirement, not an edit. The
+  original is preserved in the
+  history.
 
-## 10. Forbidden patterns
+A change without a change request is
+a contract violation; the orchestrator
+rejects the change.
 
-- **"Build the platform" PRDs.** A PRD is for a
-  feature, not for the whole platform. The
-  platform-level document is the program charter,
-  not a PRD.
-- **Untestable acceptance criteria.** "Easy to
-  use", "fast enough", "looks good" are not
-  criteria.
-- **Stories without personas.** "As a user, I
-  want ..." is not a story. "As a buyer browsing
-  the marketplace on a 6-inch phone, I want to
-  filter by vehicle class, so that I see only the
-  SUVs" is.
-- **Vague non-goals.** "We won't do everything"
-  is not a non-goal. "We won't support the
-  bidding flow in v1" is.
-- **PRDs without a regulator scope.** A PRD
-  that touches user data has a GDPR / CCPA
-  impact; a PRD that touches vehicle behaviour
-  has an ISO 26262 impact. The PRD must name
-  them.
-- **PRDs that double as design docs.** The PRD
-  says WHAT. The design doc says HOW. Skill 03
-  and 04 own the design.
-- **PRDs without open questions.** An empty
-  open-questions section means the skill did
-  not do the discovery interview.
-- **PRD drafts that ship.** The orchestrator
-  does not merge a draft. The status must be
-  `ready-for-review` or `approved`.
+## 8. Workflow
 
-## 11. PRDs in the Elysium Automotive Foundry
+1. **Receive the user request.** From
+   the orchestrator (skill 00) or
+   directly from the user.
+2. **Conduct the discovery interview.**
+   If the request is ambiguous, ask
+   the clarifying questions. The
+   interview is documented in
+   `docs/foundry/discovery/<id>.md`.
+3. **Decompose the vision into the 9
+   levels.** Use the requirement
+   hierarchy (per section 4).
+4. **Run the conflict engine** (per
+   section 6). File every conflict.
+5. **Submit the PRD** to the
+   orchestrator. The PRD is a
+   structured artifact under
+   `docs/foundry/prd/<id>.md`.
+6. **Receive the orchestrator's
+   review.** The orchestrator +
+   skill 03 + skill 04 + skill 13 +
+   skill 09 + skill 10 review the
+   PRD.
+7. **Iterate** until the PRD is
+   accepted.
+8. **File the change requests**
+   during the engineering freeze
+   (per section 7).
 
-Initial PRD roadmap (this skill maintains the
-queue):
+## 9. Definition of done
 
-- `PRD-0001` — Brand + project creation.
-- `PRD-0002` — Natural-language vehicle design.
-- `PRD-0003` — Digital twin versioning.
-- `PRD-0004` — Mechanical / electrical / electronic
-  / software architecture assembly.
-- `PRD-0005` — Human + AI agent collaboration.
-- `PRD-0006` — Authorship + contribution tracking.
-- `PRD-0007` — Compatibility + manufacturability
-  validation.
-- `PRD-0008` — Publication + licensing.
-- `PRD-0009` — Royalty calculation + distribution.
-- `PRD-0010` — Supplier / engineer / lab / manufacturer
-  integration.
-- `PRD-0011` — Field diagnostic + repair flow.
-- `PRD-0012` — Marketplace browsing.
-- `PRD-0013` — Marketplace purchase + escrow.
-- `PRD-0014` — Royalty settlement.
-- `PRD-0015` — Field on-device forge (mobile).
+A vehicle project **cannot** enter
+detailed engineering unless **every**
+item below is true:
 
-Each PRD is the seed of a release. The
-orchestrator sequences them.
+- **All `MUST` requirements have
+  measurable acceptance criteria.**
+  A `MUST` requirement without a
+  threshold + a unit + a verification
+  method is a violation.
+- **Contradictory requirements are
+  resolved or explicitly accepted.**
+  A conflict in the conflict engine
+  without a resolution is a violation.
+- **Verification methods exist.** A
+  requirement without a test is a
+  violation.
+- **Regulatory market assumptions
+  are declared.** The platform's
+  jurisdiction (EU / US / CN / BR)
+  is named; the regulation set
+  (UN R155 / UN R156 / ISO 26262 /
+  GDPR / etc.) is named.
+- **Cost and manufacturability
+  targets are present.** A
+  requirement without a cost or a
+  manufacturability target is a
+  violation for any commercial
+  project.
 
-## 12. Working with this skill
+## 10. Quality gates
+
+- Every requirement has a unique
+  stable ID.
+- Every requirement has a description
+  + a rationale + an owner.
+- Every requirement has an
+  acceptance metric (value + unit +
+  threshold).
+- Every requirement has a
+  verification method.
+- Every conflict has a resolution
+  (or an explicit acceptance).
+- Every change has a change request
+  + an impact analysis + an
+  approval.
+- The PRD is versioned + signed.
+- The discovery interview is
+  documented.
+
+## 11. Failure modes
+
+- **The user request is ambiguous.**
+  This skill conducts the discovery
+  interview; the orchestrator does
+  not implement on an ambiguous
+  request.
+- **A conflict cannot be resolved.**
+  The conflict is escalated to the
+  AI council (skill 05) + the
+  orchestrator. The PRD is not
+  advanced until the conflict is
+  resolved.
+- **A verification method does not
+  exist.** The requirement is
+  flagged. A `MUST` requirement
+  without a verification method is
+  a blocker on engineering.
+- **A change is filed after the
+  engineering freeze without a
+  change request.** The change is
+  rejected. The original requirement
+  is preserved.
+
+## 12. Coordination contract
+
+- **Input from**: skill 00
+  (orchestrator), the user.
+- **Output to**: skill 00
+  (orchestrator), every engineering
+  skill that consumes the PRD
+  (skills 03, 04, 06, 07, 09, 10,
+  13).
+- **Triggered by**: every vehicle
+  project + every major spec change.
+- **Frequency**: per project + per
+  change request.
+
+## 13. Forbidden patterns
+
+- **Aspirations as requirements.**
+  "Make it futuristic" is not a
+  requirement. A requirement has a
+  value + a unit + a threshold +
+  a verification method.
+- **Hidden conflicts.** A conflict
+  in the conflict engine is filed,
+  not hidden. A hidden conflict is a
+  contract violation.
+- **Implicit verification.** A
+  requirement without a named
+  verification method is a contract
+  violation. "We'll test it" is not
+  a verification method.
+- **Mutable engineering-freeze
+  requirements.** A requirement
+  after the engineering freeze is
+  changed via a change request, not
+  via an edit. An edit is a
+  violation.
+- **Unsourced requirements.** A
+  requirement without a stakeholder
+  need source is a violation. A
+  "the user wants it" is not a
+  source.
+- **Unowned requirements.** A
+  requirement without a human owner
+  is a violation. The owner is the
+  person who is accountable for the
+  requirement.
+- **Unmeasurable `MUST`
+  requirements.** A `MUST`
+  requirement without a measurable
+  acceptance criterion is a
+  violation. A "MUST be fast" is
+  not measurable; a "MUST respond
+  in < 100ms P99" is measurable.
+
+## 14. Working with this skill
 
 When invoked, this skill:
 
-1. Asks the discovery questions.
-2. Drafts the PRD.
-3. Decomposes into stories.
-4. Writes the Gherkin scenarios.
-5. Files the requirement ADR (if needed).
-6. Updates the traceability matrix.
-7. Returns the PRD to the orchestrator with a
-   recommended release number.
+1. Reads the user request.
+2. Conducts the discovery interview
+   (if needed).
+3. Decomposes the vision into the 9
+   levels.
+4. Runs the conflict engine.
+5. Files the PRD.
+6. Submits the PRD to the
+   orchestrator.
+7. Iterates until the PRD is
+   accepted.
+8. Files the change requests during
+   the engineering freeze.
 
-The skill is a co-pilot, not an oracle. The user
-owns the product call. This skill turns the
-product call into something the engineering
-skills can implement.
+This skill does **not** implement
+features. The PRD is the input to the
+engineering skills.
+
+## 15. Cross-references
+
+- **Orchestrator (skill 00):**
+  `.ai/skills/00-program-orchestrator/SKILL.md`.
+- **Repository archaeology (skill 01):**
+  `.ai/skills/01-repository-archaeology/SKILL.md`.
+- **Vehicle domain ontology (skill 03):**
+  `.ai/skills/03-vehicle-domain-ontology/SKILL.md`.
+- **DSL compiler (skill 04):**
+  `.ai/skills/04-vehicle-dsl-compiler/SKILL.md`.
+- **IP / provenance / royalties (skill 09):**
+  `.ai/skills/09-ip-provenance-royalties/SKILL.md`.
+- **Marketplace (skill 10):**
+  `.ai/skills/10-marketplace-manufacturing/SKILL.md`.
+- **Regulatory (skill 13):**
+  `.ai/skills/13-functional-safety-regulatory/SKILL.md`.
+- **Quality (skill 14):**
+  `.ai/skills/14-quality-verification/SKILL.md`.
+- **AI council (skill 05):**
+  `.ai/skills/05-ai-engineering-council/SKILL.md`.

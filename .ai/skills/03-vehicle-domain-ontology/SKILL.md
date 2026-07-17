@@ -30,6 +30,38 @@ ontology is the contract; the rest is plumbing.
   `Authorship`, `Contribution`, `RoyaltyContract`,
   `License`, `Listing`, `Order`, `Escrow`,
   `Settlement`.
+- Defining the **mandatory core entities**
+  (the platform's canonical automotive
+  taxonomy; the ontology is the shared
+  kernel between every bounded context,
+  per `docs/architecture/domain-map.md`):
+  - `VehicleProgram` — the strategic
+    container for a vehicle line (a brand
+    decides to make a vehicle; the
+    VehicleProgram is the result).
+  - `VehicleRevision` — an immutable
+    project revision of a vehicle. Every
+    change creates a new revision; the
+    previous revision is preserved.
+  - `VehicleConfiguration` — a configured
+    instance of a `VehicleRevision` (a
+    specific battery + motor + chassis
+    combo selected by a user).
+  - `Platform` — a shared mechanical /
+    electrical / software architecture
+    that multiple vehicle programs
+    inherit (a skateboard platform that
+    multiple vehicle bodies use).
+  - `BodyArchitecture` — the body + chassis
+    + exterior form. A `Platform` has a
+    `BodyArchitecture` (or several).
+  - The full core entity list (per
+    section 2.2) extends the platform
+    across gasoline, diesel, hybrid,
+    electric, hydrogen, motorcycles,
+    commercial vehicles, and future
+    mobility categories without
+    duplicating foundational concepts.
 - Defining the **vehicle representation types**
   (the platform's "what kind of truth is this
   vehicle?" answer):
@@ -350,6 +382,17 @@ regulatory / diagnostic — is in
   `Vehicle` and a `Car` and a `Model` and a
   `Product` is four types for the same concept.
   The ontology picks one.
+- **Conflating the canonical pairs.** Per
+  section 12, a `PartDefinition` is not
+  a `PartInstance`; an `AssemblyDefinition`
+  is not an `AssemblyInstance`; a
+  `GeometryAsset` is not a `PartDefinition`;
+  a `VehicleDefinition` is not a
+  `VehicleRevision`; a `VehicleDefinition`
+  is not a `VehicleUnit`; a `DiagnosticTarget`
+  is not a `DiagnosticableEntity`. A
+  conflation is a contract violation; the
+  verifier rejects the model.
 - **Anemic IDs.** `Part` with a `partId: Long`
   is a smell. `Part` with a `id: PartId` is
   correct. The ID is a type, not a primitive.
@@ -411,7 +454,198 @@ regulatory / diagnostic — is in
   relation without a typed field is a bug
   waiting to happen.
 
-## 12. Working with this skill
+## 12. Core distinction (canonical separation)
+
+**Never** conflate these pairs. A conflation
+is a contract violation; the verifier
+(skill 14) rejects the model. The pair is
+the platform's "this is the design, this
+is the artifact" split.
+
+- **`PartDefinition`** vs **`PartInstance`.**
+  A `PartDefinition` is the reusable
+  technical definition ("a 75 kWh NMC
+  prismatic battery pack with these
+  dimensions + this chemistry + this
+  BMS"). A `PartInstance` is a physical
+  or digital occurrence in a specific
+  vehicle ("the battery pack in VIN
+  ABC123, manufactured on 2026-07-01").
+  A `PartDefinition` is versioned; a
+  `PartInstance` is manufactured.
+- **`AssemblyDefinition`** vs
+  **`AssemblyInstance`.** An
+  `AssemblyDefinition` is the reusable
+  composition ("the powertrain subsystem
+  is composed of a motor + a battery
+  pack + an inverter"). An
+  `AssemblyInstance` is the installed
+  composition ("the powertrain
+  subsystem in VIN ABC123, with
+  battery pack #B-2026-001").
+- **`GeometryAsset`** vs **`PartDefinition`.**
+  A `GeometryAsset` is the visual or
+  engineering representation (a glTF, a
+  STEP, a USD). A `PartDefinition` is
+  the typed engineering contract that
+  the geometry represents. The geometry
+  may change without changing the
+  `PartDefinition` (a new mesh); the
+  `PartDefinition` may change without
+  changing the geometry (a new
+  chemistry).
+- **`VehicleDefinition`** vs
+  **`VehicleRevision`.** A
+  `VehicleDefinition` is the
+  configuration specification ("a
+  2-seat, 200 km range EV under $15k").
+  A `VehicleRevision` is an immutable
+  project revision of that definition.
+  Every change creates a new revision;
+  the previous revision is preserved.
+- **`VehicleDefinition`** vs **`VehicleUnit`.**
+  A `VehicleDefinition` is the
+  configuration specification. A
+  `VehicleUnit` is a manufactured
+  physical unit (a specific car with a
+  specific VIN). A `VehicleDefinition`
+  can produce N `VehicleUnit`s.
+- **`DiagnosticTarget`** vs
+  **`DiagnosticableEntity`.** A
+  `DiagnosticTarget` is a component or
+  function addressable by diagnosis
+  (a battery cell, a motor winding,
+  an ECU software module). A
+  `DiagnosticableEntity` is the
+  physical or digital entity the
+  target refers to.
+
+A pair that is conflated is a smell.
+The ontology is the single source of
+truth; the pair is the discipline.
+
+## 13. Mandatory core entities (full list)
+
+The platform's mandatory core entities
+(per section 2) extend across:
+
+- **Gasoline.** A `Powertrain.Subsystem`
+  with an `InternalCombustionEngine` +
+  a `FuelSystem` + an `ExhaustSystem`.
+- **Diesel.** A `Powertrain.Subsystem`
+  with a `CompressionIgnitionEngine` +
+  a `DieselFuelSystem` + an
+  `ExhaustAftertreatmentSystem`.
+- **Hybrid.** A `Powertrain.Subsystem`
+  with both an `InternalCombustionEngine`
+  + an `ElectricDrive` + a
+  `BatteryPack` + a power-split
+  device.
+- **Electric.** A `Powertrain.Subsystem`
+  with an `ElectricDrive` + a
+  `BatteryPack` + a `Charger` + a
+  `ThermalManagementSubsystem`.
+- **Hydrogen.** A `Powertrain.Subsystem`
+  with a `FuelCellStack` + a
+  `HydrogenTank` + a
+  `ThermalManagementSubsystem`.
+- **Motorcycles.** A `VehicleDefinition`
+  with 2 wheels + a
+  `RiderErgonomics.Subsystem` + a
+  smaller `Powertrain.Subsystem`.
+- **Commercial vehicles.** A
+  `VehicleDefinition` with a
+  `CargoBody.Subsystem` + a
+  `PayloadMounting.Subsystem` + a
+  `Telematics.Subsystem`.
+- **Future mobility categories.** A
+  new category (a drone, a robotaxi,
+  an eVTOL) is added as a new
+  `VehicleDefinition` that composes
+  existing entities. The platform
+  does **not** duplicate the
+  foundational concepts.
+
+The cross-cutting entities (per
+section 2's `EngineeringFact<T>`,
+`VerificationStatus`, `SourceType`,
+`VehicleRepresentationLevel`) apply
+to every category. A new category
+that introduces a new foundational
+concept is an ADR + a vote in the AI
+council (skill 05).
+
+## 14. Aliases, taxonomy and applicability rules
+
+The ontology also owns:
+
+- **Aliases.** Every concept may have
+  multiple names (a `BatteryPack` may
+  also be called `battery`,
+  `accumulator`, `energy storage`,
+  `ESS`). The aliases are recorded
+  in the ontology. A consumer of
+  the ontology may use any alias;
+  the canonical name is the
+  ontology's primary.
+- **Taxonomy.** The hierarchy
+  (a `BatteryCell` is a kind of
+  `PartDefinition`; a `Lithium-ion
+  battery cell` is a kind of
+  `BatteryCell`; a `21700 LiFePO4
+  cell` is a kind of
+  `Lithium-ion battery cell`). The
+  taxonomy is recorded as a graph,
+  not a tree (a concept may have
+  multiple parents).
+- **Interfaces.** The contract
+  between concepts (a `BatteryPack`
+  exposes a `HighVoltageInterface` +
+  a `ThermalInterface` + a
+  `CommunicationInterface`; an
+  `Inverter` consumes the
+  `HighVoltageInterface` + the
+  `CommunicationInterface`).
+  Interfaces are first-class types.
+- **Signals.** The typed data the
+  interfaces carry (a
+  `BatteryPackStatus` signal with
+  `StateOfCharge`, `StateOfHealth`,
+  `Voltage`, `Current`,
+  `Temperature`).
+- **Diagnostics.** The
+  `DiagnosticTarget`s + the
+  `DiagnosticProcedure`s + the
+  `FaultCode`s + the
+  `RepairAction`s. The diagnostic
+  surface is owned here; skill 07
+  consumes it.
+- **Procedures.** The
+  `AssemblyProcedure`s + the
+  `DisassemblyProcedure`s + the
+  `MaintenanceProcedure`s + the
+  `RepairProcedure`s. Procedures
+  are first-class types.
+- **Applicability rules.** A
+  rule that determines whether a
+  `PartDefinition` is applicable
+  to a `VehicleDefinition` (a
+  "75 kWh battery pack is
+  applicable to a 2-seat EV but
+  not to a motorcycle"). The
+  rules are typed; the engine
+  (skill 04) evaluates the rules.
+
+A concept without aliases +
+taxonomy + interfaces + signals +
+diagnostics + procedures +
+applicability rules is a partial
+definition. The ontology does not
+ship partial definitions.
+
+## 15. Working with this skill
+
+When invoked, this skill:
 
 When invoked, this skill:
 

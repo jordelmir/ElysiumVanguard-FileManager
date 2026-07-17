@@ -311,28 +311,72 @@ The output is in `.ai/archaeology/<repo-id>/`:
 
 The report is complete when it answers:
 
-- **What is the architecture?** (the
-  STRUCTURE + the dependency map + the
-  domain vocabulary + the duplication
-  matrix)
-- **What is the baseline?** (the test
-  count + the coverage + the build
-  status + the green/red/skipped)
-- **What is broken?** (the critical
-  blockers + the security defects + the
-  performance defects)
-- **What is reusable?** (the modules +
-  the interfaces + the contracts the
-  Foundry can inherit)
-- **What is dead?** (the abandoned code
-  + the unmaintained dependencies +
-  the duplicate concepts)
-- **What is the migration?** (the bridges
-  from the current state to the target
-  state)
+1. **What already exists?** Every
+   module, every dependency, every
+   data store, every test, every
+   build artifact, every auth surface,
+   every vehicle entity, every 3D
+   asset, every diagnostic binding,
+   every AI provider, every network
+   boundary. A "we don't know" is
+   itself a finding.
+2. **What is trustworthy?** The
+   test suite that is green; the
+   dependencies with a clean CVE
+   history; the modules with a
+   recent-commit-date; the secrets
+   that are in the vault (not in the
+   code). An untrustworthy surface is
+   flagged with a severity + an
+   owner.
+3. **What is duplicated?** Every
+   concept that has more than one
+   representation (per the duplication
+   matrix, section 3). A duplicate is
+   a candidate for consolidation; the
+   canonical candidate is named.
+4. **What must be migrated?** Every
+   table that the Foundry's new
+   tables will conflict with; every
+   file format that the Foundry's new
+   format will replace; every API
+   endpoint that the Foundry's new
+   endpoint will deprecate; every
+   dependency that the Foundry's new
+   dependency will replace. The
+   migration plan is filed.
+5. **What would break if the Foundry
+   were added immediately?** Every
+   coupling that would conflict with
+   the Foundry's zero-trust security
+   model; every workflow that would
+   conflict with the Foundry's
+   content-addressed artifact model;
+   every test that would fail under
+   the Foundry's typed error model;
+   every user-facing API that would
+   change under the Foundry's
+   correlation-id + retry-classification
+   model. The breakage is filed as a
+   risk.
+6. **What should be preserved?** Every
+   working behavior + every passing
+   test + every deployed contract +
+   every production data path + every
+   user-facing feature. The Foundry
+   must not damage existing
+   behavior; the preserved behavior
+   is the baseline.
+7. **Which module should own each new
+   domain?** Every domain aggregate
+   has exactly one owner (per
+   `docs/foundry/domain-ownership.md`).
+   The mapping is filed; the
+   conflict is arbitrated before any
+   code is written.
 
-A report that does not answer all six
-questions is **incomplete**. The
+A report that does not answer all
+seven questions is **incomplete**. The
 orchestrator does not advance past G0
 until the report is complete.
 
@@ -348,6 +392,16 @@ listed. The report is rejected.
 A security defect without a severity +
 a P-level + an owner is **not a defect**
 — it is a note. The report is rejected.
+
+A "what would break" without a specific
+surface + a specific test + a specific
+risk is **not a finding** — it is a
+vague concern. The report is rejected.
+
+A preservation claim without a test that
+asserts the preserved behavior is still
+preserved is **not a baseline** — it is
+an aspiration. The report is rejected.
 
 ## 9. Quality gates
 
