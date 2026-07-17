@@ -527,44 +527,157 @@ truth; the pair is the discipline.
 ## 13. Mandatory core entities (full list)
 
 The platform's mandatory core entities
-(per section 2) extend across:
+(per section 2) cover the **canonical
+automotive taxonomy** + the **core
+entity set** below. The ontology MUST
+have a typed entity for every name in
+this list. A missing entity is a
+contract violation.
 
-- **Gasoline.** A `Powertrain.Subsystem`
-  with an `InternalCombustionEngine` +
-  a `FuelSystem` + an `ExhaustSystem`.
-- **Diesel.** A `Powertrain.Subsystem`
-  with a `CompressionIgnitionEngine` +
-  a `DieselFuelSystem` + an
-  `ExhaustAftertreatmentSystem`.
-- **Hybrid.** A `Powertrain.Subsystem`
-  with both an `InternalCombustionEngine`
-  + an `ElectricDrive` + a
-  `BatteryPack` + a power-split
-  device.
-- **Electric.** A `Powertrain.Subsystem`
-  with an `ElectricDrive` + a
-  `BatteryPack` + a `Charger` + a
-  `ThermalManagementSubsystem`.
-- **Hydrogen.** A `Powertrain.Subsystem`
-  with a `FuelCellStack` + a
-  `HydrogenTank` + a
-  `ThermalManagementSubsystem`.
-- **Motorcycles.** A `VehicleDefinition`
-  with 2 wheels + a
-  `RiderErgonomics.Subsystem` + a
-  smaller `Powertrain.Subsystem`.
-- **Commercial vehicles.** A
-  `VehicleDefinition` with a
-  `CargoBody.Subsystem` + a
-  `PayloadMounting.Subsystem` + a
-  `Telematics.Subsystem`.
-- **Future mobility categories.** A
-  new category (a drone, a robotaxi,
-  an eVTOL) is added as a new
-  `VehicleDefinition` that composes
-  existing entities. The platform
-  does **not** duplicate the
-  foundational concepts.
+### 13.1 Powertrain and propulsion
+
+- **`PropulsionArchitecture`.** The
+  high-level strategy: ICE, BEV,
+  HEV, PHEV, FCEV. A
+  `VehicleDefinition` has exactly
+  one `PropulsionArchitecture`.
+- **`Powertrain`.** The aggregate
+  that produces + delivers motive
+  power. A `Powertrain` is composed
+  of an `Engine` (or a `Motor` +
+  a `BatteryPack`) + a
+  `Transmission` + the
+  `Driveline`.
+- **`EnergyStorage`.** The energy
+  reservoir. A `BatteryPack` (a
+  kind of `EnergyStorage`) + a
+  `FuelTank` (a kind of
+  `EnergyStorage`) + a
+  `HydrogenTank` (a kind of
+  `EnergyStorage`).
+- **`Transmission`.** The
+  gear-reduction + the clutch (or
+  the torque converter). A
+  `ManualTransmission` + an
+  `AutomaticTransmission` + a
+  `DCT` + a `CVT` + a
+  `SingleSpeedReducer` (for
+  BEVs).
+
+### 13.2 Chassis and dynamics
+
+- **`Chassis`.** The structural
+  frame. A `Unibody` + a
+  `BodyOnFrame` + a
+  `Spaceframe`.
+- **`Suspension`.** The
+  wheel-attachment + the
+  damping. A `MacPhersonStrut` +
+  a `DoubleWishbone` + a
+  `MultiLink` + an `AirSuspension`
+  + an `ActiveSuspension`.
+- **`Steering`.** The
+  direction-control. A
+  `RackAndPinion` + a
+  `RecirculatingBall` + a
+  `SteerByWire`.
+- **`BrakeSystem`.** The
+  friction + the hydraulic (or
+  electric). A `DiscBrake` + a
+  `DrumBrake` + a
+  `RegenerativeBrake` + an
+  `ElectronicStabilityProgram`.
+- **`ThermalSystem`.** The
+  temperature-management. A
+  `CoolingSystem` + a
+  `HVAC` + a
+  `BatteryThermalManagement`.
+
+### 13.3 Electrical and electronics
+
+- **`ElectricalArchitecture`.** The
+  high-level strategy: 12V
+  (legacy), 48V (mild hybrid),
+  400V (modern BEV), 800V
+  (next-gen BEV), zonal (modern
+  domain controller). A
+  `VehicleDefinition` has
+  exactly one
+  `ElectricalArchitecture`.
+- **`ElectronicControlUnit`.** A
+  domain controller (a `VCU`,
+  a `BCM`, a `TCU`, a
+  `BMS`, an `ADASController`,
+  a `CockpitController`).
+- **`NetworkBus`.** The
+  communication fabric. A
+  `CANBus` + a `LINBus` + a
+  `FlexRayBus` + an
+  `AutomotiveEthernet` + a
+  `ZonalEthernet`.
+- **`Harness`.** The wiring
+  assembly. A `Harness` has
+  many `Connector`s.
+- **`Connector`.** The
+  electrical-mechanical interface
+  (a `DeutschConnector` + an
+  `AMPConnector` + a
+  `USCARConnector`).
+- **`Sensor`.** The
+  perception. A `Camera` + a
+  `Radar` + a `Lidar` + an
+  `UltrasonicSensor` + a
+  `IMU` + a `GNSS` + a
+  `WheelSpeedSensor`.
+- **`Actuator`.** The action.
+  An `ElectricMotor` (for
+  power seats, windows,
+  etc.) + a
+  `SolenoidValve` + a
+  `Relay`.
+
+### 13.4 Domain + identity + cross-cutting
+
+- **`PartDefinition`.** The
+  reusable technical definition.
+- **`PartInstance`.** The physical
+  or digital occurrence in a
+  specific vehicle.
+- **`InterfacePort`.** The
+  typed port an entity exposes
+  or consumes (per section 16 —
+  interface taxonomy).
+- **`CompatibilityConstraint`.**
+  The rule that determines
+  whether two `PartDefinition`s
+  can be combined in a
+  `VehicleDefinition`.
+- **`DiagnosticBinding`.** The
+  link between a
+  `DiagnosticTarget` and a
+  `FaultCode` + a
+  `RepairAction` + a
+  `DiagnosticProcedure`.
+- **`Procedure`.** A
+  `RepairProcedure` + a
+  `MaintenanceProcedure` + an
+  `AssemblyProcedure` + a
+  `DisassemblyProcedure`.
+- **`EngineeringArtifact`.** A
+  content-addressed + signed
+  artifact (a glTF, a STEP, a
+  USD, a compilation report,
+  a homologation package).
+- **`EvidenceReference`.** A
+  reference to the source of an
+  `EngineeringFact<T>` (an OEM
+  doc, a regulatory filing, a
+  lab report, an engineer memo,
+  a telemetry stream, an AI
+  inference, a user input, a
+  community contribution).
+
+### 13.5 Cross-cutting taxonomies
 
 The cross-cutting entities (per
 section 2's `EngineeringFact<T>`,
@@ -575,77 +688,355 @@ that introduces a new foundational
 concept is an ADR + a vote in the AI
 council (skill 05).
 
-## 14. Aliases, taxonomy and applicability rules
+### 13.6 Per-category extensions
 
-The ontology also owns:
+The platform supports these
+per-category extensions without
+duplicating foundational concepts:
 
-- **Aliases.** Every concept may have
-  multiple names (a `BatteryPack` may
-  also be called `battery`,
-  `accumulator`, `energy storage`,
-  `ESS`). The aliases are recorded
-  in the ontology. A consumer of
-  the ontology may use any alias;
-  the canonical name is the
-  ontology's primary.
-- **Taxonomy.** The hierarchy
-  (a `BatteryCell` is a kind of
-  `PartDefinition`; a `Lithium-ion
-  battery cell` is a kind of
-  `BatteryCell`; a `21700 LiFePO4
-  cell` is a kind of
-  `Lithium-ion battery cell`). The
-  taxonomy is recorded as a graph,
-  not a tree (a concept may have
-  multiple parents).
-- **Interfaces.** The contract
-  between concepts (a `BatteryPack`
-  exposes a `HighVoltageInterface` +
-  a `ThermalInterface` + a
-  `CommunicationInterface`; an
-  `Inverter` consumes the
-  `HighVoltageInterface` + the
-  `CommunicationInterface`).
-  Interfaces are first-class types.
-- **Signals.** The typed data the
-  interfaces carry (a
-  `BatteryPackStatus` signal with
-  `StateOfCharge`, `StateOfHealth`,
-  `Voltage`, `Current`,
-  `Temperature`).
-- **Diagnostics.** The
-  `DiagnosticTarget`s + the
-  `DiagnosticProcedure`s + the
-  `FaultCode`s + the
-  `RepairAction`s. The diagnostic
-  surface is owned here; skill 07
-  consumes it.
-- **Procedures.** The
-  `AssemblyProcedure`s + the
-  `DisassemblyProcedure`s + the
-  `MaintenanceProcedure`s + the
-  `RepairProcedure`s. Procedures
-  are first-class types.
-- **Applicability rules.** A
-  rule that determines whether a
-  `PartDefinition` is applicable
-  to a `VehicleDefinition` (a
-  "75 kWh battery pack is
-  applicable to a 2-seat EV but
-  not to a motorcycle"). The
-  rules are typed; the engine
-  (skill 04) evaluates the rules.
+- **Gasoline.** A
+  `Powertrain.Subsystem` with an
+  `InternalCombustionEngine` + a
+  `FuelSystem` + an
+  `ExhaustSystem`.
+- **Diesel.** A
+  `Powertrain.Subsystem` with a
+  `CompressionIgnitionEngine` +
+  a `DieselFuelSystem` + an
+  `ExhaustAftertreatmentSystem`.
+- **Hybrid.** A
+  `Powertrain.Subsystem` with
+  both an
+  `InternalCombustionEngine` +
+  an `ElectricDrive` + a
+  `BatteryPack` + a power-split
+  device.
+- **Electric.** A
+  `Powertrain.Subsystem` with an
+  `ElectricDrive` + a
+  `BatteryPack` + a `Charger` +
+  a `ThermalManagementSubsystem`.
+- **Hydrogen.** A
+  `Powertrain.Subsystem` with a
+  `FuelCellStack` + a
+  `HydrogenTank` + a
+  `ThermalManagementSubsystem`.
+- **Motorcycles.** A
+  `VehicleDefinition` with 2
+  wheels + a
+  `RiderErgonomics.Subsystem` +
+  a smaller
+  `Powertrain.Subsystem`.
+- **Commercial vehicles.** A
+  `VehicleDefinition` with a
+  `CargoBody.Subsystem` + a
+  `PayloadMounting.Subsystem` +
+  a
+  `Telematics.Subsystem`.
+- **Future mobility categories.**
+  A new category (a drone, a
+  robotaxi, an eVTOL) is added
+  as a new `VehicleDefinition`
+  that composes existing
+  entities. The platform does
+  **not** duplicate the
+  foundational concepts.
 
-A concept without aliases +
-taxonomy + interfaces + signals +
-diagnostics + procedures +
-applicability rules is a partial
-definition. The ontology does not
-ship partial definitions.
+## 14. Strongly typed identifiers
 
-## 15. Working with this skill
+**Do not** pass raw strings for
+domain identity. Every aggregate has
+a `@JvmInline value class` ID that
+wraps a `UUID` (or a `ULong` when
+the platform's locale favors it).
 
-When invoked, this skill:
+```kotlin
+@JvmInline
+value class VehicleRevisionId(val value: UUID)
+
+@JvmInline
+value class PartDefinitionId(val value: UUID)
+
+@JvmInline
+value class ArtifactId(val value: UUID)
+```
+
+Validate construction at the
+boundaries. A string that is not a
+valid `UUID` is rejected at the
+boundary; the rejection is a typed
+`FoundryError` (per
+`.ai/STANDARDS.md` section 7).
+
+A `Map<String, Any>` field on a
+`Part` is a smell. A `Map<String,
+String>` is a worse smell. A
+`String` field is the worst
+smell. The ID is a type, not a
+primitive.
+
+## 15. Interface taxonomy
+
+The platform supports at least these
+`InterfacePort` kinds. A new kind
+is an ADR + a vote in the AI
+council (skill 05).
+
+**Mechanical:**
+
+- `MECHANICAL_MOUNT`
+- `BOLT_PATTERN`
+- `SHAFT`
+- `SPLINE`
+- `BEARING_SEAT`
+
+**Fluid:**
+
+- `FLUID_INLET`
+- `FLUID_OUTLET`
+- `VACUUM`
+- `FUEL`
+- `REFRIGERANT`
+- `COOLANT`
+- `LUBRICATION`
+- `EXHAUST`
+
+**Electrical (low voltage):**
+
+- `LOW_VOLTAGE_POWER`
+- `GROUND`
+
+**Electrical (high voltage):**
+
+- `HIGH_VOLTAGE_POWER`
+
+**Signal:**
+
+- `ANALOG_SIGNAL`
+- `DIGITAL_SIGNAL`
+- `PWM`
+
+**Network:**
+
+- `CAN_HIGH`
+- `CAN_LOW`
+- `LIN`
+- `K_LINE`
+- `AUTOMOTIVE_ETHERNET`
+
+**Optical:**
+
+- `OPTICAL`
+
+A `PartDefinition` exposes a set of
+`InterfacePort`s; a `PartInstance`
+in a `VehicleDefinition` binds
+those ports to compatible ports
+on other `PartInstance`s. An
+incompatible binding is a typed
+`CompatibilityConstraintViolation`
+error (per `.ai/STANDARDS.md`
+section 7).
+
+## 16. Units of measure
+
+Use a units-of-measure library (or
+explicit value objects). **Never**
+store ambiguous naked numbers.
+
+Bad:
+
+```json
+{ "torque": 40 }
+```
+
+Correct:
+
+```json
+{
+  "torque": {
+    "value": 40,
+    "unit": "N_M"
+  }
+}
+```
+
+Normalize internally to canonical SI
+units while preserving source units.
+A user input in `lbf_ft` is
+normalized to `N_M` internally;
+the user input is preserved in the
+audit trail.
+
+A value without a unit is a
+contract violation; the verifier
+(skill 14) rejects the value. A
+value with an unknown unit is a
+typed `UnitUnknown` error (the
+error is added to the canonical
+list per `.ai/AGENTS.md` section
+10).
+
+## 17. Alias resolution
+
+Maintain **locale-aware aliases**.
+The alias table is a per-locale
+list of names that resolve to the
+canonical name.
+
+Example:
+
+```json
+{
+  "canonical": "LOWER_CONTROL_ARM",
+  "aliases": [
+    "tijereta",
+    "brazo inferior",
+    "trapecio",
+    "parrilla",
+    "lower control arm"
+  ]
+}
+```
+
+Alias resolution returns **candidates
+and confidence**. It MUST NOT
+silently force an ambiguous match.
+A user input "tijereta" with three
+possible canonical candidates
+returns a list with the confidence
+per candidate; the user picks.
+
+A silent alias resolution is a
+contract violation. The resolver
+is a typed `Result` (Kotlin) / an
+`Either` (Haskell) / a tagged
+union (TypeScript).
+
+## 18. Applicability
+
+Every `PartDefinition` application
+MAY depend on:
+
+- **Manufacturer.** The OEM that
+  produced the part.
+- **Platform.** The platform
+  ("the MEB platform" for VW's
+  BEV).
+- **Model.** The model name
+  ("Golf", "ID.4").
+- **Model year.** The year the
+  model was produced.
+- **Production date.** The exact
+  production date of the
+  `VehicleUnit`.
+- **Market.** The market / region
+  ("EU", "US", "CN", "BR").
+- **Body.** The body style
+  ("sedan", "hatchback", "SUV").
+- **Trim.** The trim level
+  ("base", "sport", "luxury").
+- **Engine code.** The engine
+  identifier ("EA888").
+- **Transmission code.** The
+  transmission identifier
+  ("DQ381").
+- **Steering side.** The
+  steering side ("LHD", "RHD").
+- **Option codes.** The optional
+  equipment codes.
+- **VIN range.** The VIN range
+  the part is applicable to.
+
+**Never** declare universal
+compatibility based only on name
+similarity. A "Battery Pack X"
+that fits a "Golf" by name is
+NOT a declaration of mechanical
+compatibility. The compatibility
+is the `CompatibilityConstraint`
+rule + the engineering review,
+not the 3D viewer (per
+`.ai/AGENTS.md` section 5.1).
+
+A `PartDefinition` without an
+applicability rule is a smell;
+the rule may be "all" but it is
+a rule. A `VehicleDefinition`
+that references a `PartDefinition`
+without the applicable rule
+firing is a typed
+`CompatibilityConstraintViolation`
+error.
+
+## 19. Definition of done
+
+The ontology is accepted only when
+it can represent:
+
+1. **A 2005 gasoline compact sedan.**
+   The classic case: a `Chassis`
+   + an `InternalCombustionEngine`
+   + a `ManualTransmission` + a
+   `FuelSystem` + a
+   `Suspension` + a `Steering` +
+   a `BrakeSystem` + a
+   `LowVoltageElectricalArchitecture`
+   + a `CANBus` + a `Harness` +
+   a `Sensor` set.
+2. **A modern BEV with zonal
+   electronics.** The cutting-edge
+   case: a `Chassis` + an
+   `ElectricDrive` + a
+   `BatteryPack` + a
+   `SingleSpeedReducer` + a
+   `ZonalElectricalArchitecture`
+   + an `AutomotiveEthernet` + a
+   `CockpitController` + an
+   `ADASController` + a
+   `Sensor` set (camera + radar
+   + lidar).
+3. **A hybrid.** The mixed case: a
+   `Chassis` + both an
+   `InternalCombustionEngine` +
+   an `ElectricDrive` + a
+   `BatteryPack` + a
+   `PowerSplitDevice` + a
+   `BatteryThermalManagement`.
+4. **A motorcycle.** The
+   constrained case: 2 wheels +
+   a `RiderErgonomics` + a
+   smaller `Powertrain` + a
+   `LowVoltageElectricalArchitecture`.
+5. **A conceptual vehicle with
+   incomplete data.** The
+   `VISUAL_ONLY` /
+   `CONCEPTUAL` case: a
+   `VehicleDefinition` with a
+   `representationLevel` of
+   `CONCEPTUAL`, an
+   `IncompletenessManifest` of
+   the missing fields, + a
+   flag in the UI that says
+   "this is not validated".
+6. **A single part shared across
+   multiple vehicle revisions.**
+   The reuse case: a
+   `PartDefinition` referenced
+   by 3 `VehicleRevision`s; the
+   `PartDefinition` is content-
+   addressed; the
+   `VehicleRevision`s point to
+   the same `PartDefinitionId` +
+   the same `ArtifactId`.
+
+A `VehicleDefinition` that the
+ontology cannot represent is a
+failure of the ontology. The
+verifier (skill 14) runs the 6
+canonical cases as a property test.
+
+## 20. Working with this skill
 
 When invoked, this skill:
 
