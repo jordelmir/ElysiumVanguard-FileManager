@@ -148,11 +148,19 @@ class QemuPhase23Test {
     }
 
     @Test
-    fun `command line uses a headless display`() {
+    fun `command line uses a VNC display bound to the configured port`() {
+        // Phase 47 — QEMU uses a real VNC display
+        // (`-vnc 127.0.0.1:<displayNumber>`) so the
+        // Phase 9.6.5 viewer can connect. The legacy
+        // `-display none` headless mode is gone.
         val args = QemuCommandLine.build(spec = testSpec(), options = testOptions())
-        val idx = args.indexOf("-display")
-        assertTrue("command line must include -display", idx >= 0)
-        assertEquals("none", args[idx + 1])
+        val idx = args.indexOf("-vnc")
+        assertTrue("command line must include -vnc", idx >= 0)
+        // Default testOptions() leaves vncDisplay = 0
+        // (QemuOptions' default), so the value is
+        // `127.0.0.1:0`. The actual VNC port is
+        // `5900 + 0 = 5900`.
+        assertEquals("127.0.0.1:0", args[idx + 1])
     }
 
     // --- QmpMessage ---
@@ -285,6 +293,37 @@ class QemuPhase23Test {
         // (on-device) replaces this with a real spawn.
         assertTrue("start must produce Running or Error, got $state",
             state is WindowsVmState.Running || state is WindowsVmState.Error)
+    }
+
+    @Test
+    fun `QemuWindowsVmBackend start returns a Running state with a VNC port`() {
+        // Phase 47 — the Running state carries the
+        // VNC port (5900 + display number) so the
+        // Phase 9.6.5 viewer can connect. The first
+        // VM gets display 0 -> port 5900.
+        val baseDir = Files.createTempDirectory("elysium-qemu-vnc").toFile()
+        val backend = QemuWindowsVmBackend(baseDir)
+        val state = backend.start(testSpec(id = "first-vm"))
+        assertTrue("start must produce Running, got $state",
+            state is WindowsVmState.Running)
+        val running = state as WindowsVmState.Running
+        assertEquals("first VM's VNC port must be 5900",
+            5900, running.vncPort)
+    }
+
+    @Test
+    fun `QemuWindowsVmBackend allocates a unique VNC port per VM`() {
+        // Phase 47 — each VM gets its own display
+        // number; the VNC port is `5900 + display`.
+        // The second VM gets display 1 -> port 5901.
+        val baseDir = Files.createTempDirectory("elysium-qemu-vnc-2").toFile()
+        val backend = QemuWindowsVmBackend(baseDir)
+        val first = backend.start(testSpec(id = "vm-1"))
+        val second = backend.start(testSpec(id = "vm-2"))
+        assertTrue(first is WindowsVmState.Running)
+        assertTrue(second is WindowsVmState.Running)
+        assertEquals(5900, (first as WindowsVmState.Running).vncPort)
+        assertEquals(5901, (second as WindowsVmState.Running).vncPort)
     }
 
     @Test

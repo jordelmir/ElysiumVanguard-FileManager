@@ -85,11 +85,14 @@ object QemuCommandLine {
         // need it for debugging.
         args += "-monitor"
         args += "tcp:127.0.0.1:${options.monitorPort},server,nowait"
-        // Display: a `none` display for headless operation.
-        // The runtime's VNC / RDP / SPICE layer provides
-        // the actual remote display in a follow-up phase.
-        args += "-display"
-        args += "none"
+        // Display: a VNC server bound to 127.0.0.1
+        // on `5900 + options.vncDisplay`. The runtime's
+        // RfbSession connects to this port and streams
+        // the guest framebuffer. Phase 47 — the legacy
+        // `-display none` is replaced by a real VNC
+        // display so the Phase 9.6.5 viewer can render.
+        args += "-vnc"
+        args += "127.0.0.1:${options.vncDisplay}"
         // TPM (for Windows 11 and Server 2022+).
         if (spec.requiresSwtpm) {
             args += "-chardev"
@@ -119,6 +122,16 @@ data class QemuOptions(
     val qmpPort: Int,
     /** QEMU human-readable monitor port. */
     val monitorPort: Int,
+    /**
+     * Phase 47 — QEMU VNC display number. The actual
+     * VNC port is `5900 + vncDisplay` (QEMU's
+     * convention). The runtime connects to
+     * `127.0.0.1:${5900 + vncDisplay}` from the
+     * [com.elysium.vanguard.core.runtime.distros.gui.rfb.RfbSession].
+     * Set to 0 to disable the VNC display (the
+     * legacy headless `none` mode).
+     */
+    val vncDisplay: Int = 0,
     /** QEMU `-netdev` backend (default: `user`). */
     val netdev: String = "user",
     /** Path to the SWTPM socket (only when the spec
@@ -130,5 +143,12 @@ data class QemuOptions(
         require(qmpPort in 1..65535) { "qmpPort out of range: $qmpPort" }
         require(monitorPort in 1..65535) { "monitorPort out of range: $monitorPort" }
         require(qmpPort != monitorPort) { "qmpPort and monitorPort must differ" }
+        require(monitorPort != vncPort()) {
+            "monitorPort and VNC port must differ"
+        }
+        require(vncDisplay in 0..99) { "vncDisplay out of range: $vncDisplay" }
     }
+
+    /** The VNC port (`5900 + vncDisplay`). */
+    fun vncPort(): Int = 5900 + vncDisplay
 }

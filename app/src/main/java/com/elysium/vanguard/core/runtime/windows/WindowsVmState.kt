@@ -39,11 +39,21 @@ sealed class WindowsVmState {
      * The VM is running. Carries the QEMU PID + the QMP
      * socket port so the runtime can talk to the guest
      * via the QEMU machine protocol.
+     *
+     * Phase 47 — `vncPort` is the QEMU VNC display
+     * port (the `5900 + displayNumber` QEMU
+     * convention; display 0 = port 5900). The
+     * `WindowsVmVncScreen` uses this to connect
+     * via RFB and stream the guest framebuffer.
+     * `null` for backends that do not expose a
+     * VNC port (e.g. tests using the in-memory
+     * backend).
      */
     data class Running(
         val pid: Int,
         val qmpPort: Int,
-        val monitorPort: Int? = null
+        val monitorPort: Int? = null,
+        val vncPort: Int? = null
     ) : WindowsVmState()
 
     /** The VM is paused (QEMU `stop` command). The runtime

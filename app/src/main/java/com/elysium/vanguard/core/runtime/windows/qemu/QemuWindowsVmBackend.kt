@@ -39,18 +39,29 @@ class QemuWindowsVmBackend(
 ) : WindowsVmBackend {
 
     private val nextPort = AtomicInteger(qmpPortBase)
+    private val nextVncDisplay = AtomicInteger(0)
     private val vms = java.util.concurrent.ConcurrentHashMap<String, VmRecord>()
 
     private data class VmRecord(
         val pid: Int,
         val qmpPort: Int,
-        val monitorPort: Int
+        val monitorPort: Int,
+        val vncDisplay: Int
     )
 
     override fun start(spec: WindowsVmSpec): WindowsVmState {
         return try {
             val qmpPort = nextPort.getAndIncrement()
             val monitorPort = nextPort.getAndIncrement()
+            // Phase 47 — each VM gets its own VNC
+            // display number; the actual port is
+            // `5900 + display` (QEMU convention).
+            // The display counter is shared with
+            // `qmpPortBase` and `monitorPort` because
+            // all three port ranges are process-wide
+            // unique. Phase 48 will thread the
+            // `vncPort` into the runtime's VNC viewer.
+            val vncDisplay = nextVncDisplay.getAndIncrement()
             val diskImage = File(baseDir, "${spec.id}.qcow2")
             val swtpmSocket = if (spec.requiresSwtpm) {
                 File(baseDir, "${spec.id}.swtpm.sock").absolutePath
@@ -59,6 +70,7 @@ class QemuWindowsVmBackend(
                 diskImagePath = diskImage.absolutePath,
                 qmpPort = qmpPort,
                 monitorPort = monitorPort,
+                vncDisplay = vncDisplay,
                 swtpmSocketPath = swtpmSocket
             )
             val args = QemuCommandLine.build(spec, options, qemuBinary)
@@ -75,13 +87,15 @@ class QemuWindowsVmBackend(
             val record = VmRecord(
                 pid = 0,
                 qmpPort = qmpPort,
-                monitorPort = monitorPort
+                monitorPort = monitorPort,
+                vncDisplay = vncDisplay
             )
             vms[spec.id] = record
             WindowsVmState.Running(
                 pid = record.pid,
                 qmpPort = record.qmpPort,
-                monitorPort = record.monitorPort
+                monitorPort = record.monitorPort,
+                vncPort = 5900 + vncDisplay
             )
         } catch (e: IOException) {
             WindowsVmState.Error(
@@ -125,7 +139,8 @@ class QemuWindowsVmBackend(
         return WindowsVmState.Running(
             pid = record.pid,
             qmpPort = record.qmpPort,
-            monitorPort = record.monitorPort
+            monitorPort = record.monitorPort,
+            vncPort = 5900 + record.vncDisplay
         )
     }
 
