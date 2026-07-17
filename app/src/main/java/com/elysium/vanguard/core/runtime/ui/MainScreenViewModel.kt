@@ -99,10 +99,21 @@ class MainScreenViewModel @Inject constructor(
     /**
      * Append [event] to the recent-events buffer; trim to
      * [recentEventsCapacity]. The buffer is the UI's
-     * "what just happened" feed. A session lifecycle
-     * event also triggers a full refresh so the
-     * [MainScreenState.runningSessionCount] stays in
-     * sync with the runner.
+     * "what just happened" feed. Lifecycle events that
+     * affect a stat-bar field also trigger a partial
+     * refresh so the field stays in sync with its
+     * underlying source.
+     *
+     * Phase 43 — the refresh is granular (re-read only
+     * the affected field) instead of a full [refresh].
+     * The session events update [MainScreenState.runningSessionCount];
+     * the distro events update
+     * [MainScreenState.linuxDistrosInstalled] /
+     * [MainScreenState.linuxDistrosInstalling]; the
+     * Windows VM events update
+     * [MainScreenState.windowsVmsRunning]. Every other
+     * event just appends to [MainScreenState.recentEvents]
+     * without a state recompute.
      */
     private fun handleEvent(event: RuntimeEvent) {
         val current = _state.value
@@ -113,9 +124,31 @@ class MainScreenViewModel @Inject constructor(
             is RuntimeEvent.SessionStartedEvent,
             is RuntimeEvent.SessionStoppedEvent,
             is RuntimeEvent.SessionStartFailedEvent -> {
-                // Re-read the runner's active count.
                 _state.value = updated.copy(
                     runningSessionCount = sessionRunner.activeCount()
+                )
+            }
+            is RuntimeEvent.DistroInstalledEvent,
+            is RuntimeEvent.DistroInstallFailedEvent -> {
+                // Re-read the distro manager's installed
+                // + installing counts. The DistroManager
+                // publishes these events on every
+                // install / fail transition, so this
+                // path is the canonical way the status
+                // bar learns about a new install.
+                _state.value = updated.copy(
+                    linuxDistrosInstalled = distroManager.installed.value.size,
+                    linuxDistrosInstalling = distroManager.installing.value.size
+                )
+            }
+            is RuntimeEvent.VmStateChangedEvent -> {
+                // Re-read the Windows VM manager's
+                // running count. The manager publishes
+                // this event on every VM state
+                // transition (Booting -> Running,
+                // Running -> Stopped, etc.).
+                _state.value = updated.copy(
+                    windowsVmsRunning = windowsVmManager.listRunning().size
                 )
             }
             else -> {

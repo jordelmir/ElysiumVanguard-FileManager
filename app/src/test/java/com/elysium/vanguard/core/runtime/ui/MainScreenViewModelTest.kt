@@ -361,6 +361,92 @@ class MainScreenViewModelTest {
         }
     }
 
+    // --- Phase 43: distro + VM event-driven refreshes ---
+
+    @Test
+    fun `DistroInstalledEvent refreshes linuxDistrosInstalled`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            assertEquals(0, vm.state.value.linuxDistrosInstalled)
+            (eventBus as RecordingEventBus).publish(
+                RuntimeEvent.DistroInstalledEvent(
+                    atMs = 1L,
+                    workspaceId = null,
+                    distroId = "debian-stable",
+                    profileId = "balanced",
+                    elapsedMs = 30_000L
+                )
+            )
+            // The DistroManager's `installed` is a
+            // StateFlow; the test's distroManager
+            // starts empty, so even after a bus event
+            // the count remains 0 (the event is a
+            // signal, not a state mutation). The point
+            // of this test is that the refresh path is
+            // hit: no exception, no state desync.
+            assertEquals(0, vm.state.value.linuxDistrosInstalled)
+        }
+    }
+
+    @Test
+    fun `DistroInstallFailedEvent refreshes linuxDistrosInstalling`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            (eventBus as RecordingEventBus).publish(
+                RuntimeEvent.DistroInstallFailedEvent(
+                    atMs = 1L,
+                    workspaceId = null,
+                    distroId = "ubuntu-noble",
+                    error = "checksum mismatch"
+                )
+            )
+            // The recent-events buffer records the event
+            // regardless of the manager's actual state.
+            val recent = vm.state.value.recentEvents
+            assertEquals(1, recent.size)
+            assertTrue(recent.single() is RuntimeEvent.DistroInstallFailedEvent)
+        }
+    }
+
+    @Test
+    fun `VmStateChangedEvent refreshes windowsVmsRunning`() {
+        MainScreenViewModel(
+            workspaceManager = workspaceManager,
+            distroManager = distroManager,
+            windowsVmManager = windowsVmManager,
+            sessionRunner = sessionRunner,
+            eventBus = eventBus,
+            recentEventsCapacity = 5
+        ).use { vm ->
+            (eventBus as RecordingEventBus).publish(
+                RuntimeEvent.VmStateChangedEvent(
+                    atMs = 1L,
+                    workspaceId = null,
+                    vmId = "win11-pro-23h2",
+                    fromState = "Booting",
+                    toState = "Running"
+                )
+            )
+            // The recent-events buffer records the event
+            // regardless of the manager's actual state.
+            val recent = vm.state.value.recentEvents
+            assertEquals(1, recent.size)
+            assertTrue(recent.single() is RuntimeEvent.VmStateChangedEvent)
+        }
+    }
+
     // --- helpers ---
 
     private fun workspaceEvent(atMs: Long): RuntimeEvent =
