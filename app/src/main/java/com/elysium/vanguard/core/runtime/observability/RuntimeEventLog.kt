@@ -121,6 +121,33 @@ class RuntimeEventLog(
                 "workspaceId" to event.workspaceId,
                 "sessionId" to event.sessionId
             )
+        is RuntimeEvent.SessionStartedEvent ->
+            jsonObject(
+                "kind" to "SessionStarted",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "sessionId" to event.sessionId,
+                "sessionKind" to event.kind,
+                "launcherKind" to (event.launcherKind ?: ""),
+                "pid" to event.pid
+            )
+        is RuntimeEvent.SessionStoppedEvent ->
+            jsonObject(
+                "kind" to "SessionStopped",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "sessionId" to event.sessionId,
+                "exitCode" to event.exitCode
+            )
+        is RuntimeEvent.SessionStartFailedEvent ->
+            jsonObject(
+                "kind" to "SessionStartFailed",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "sessionId" to event.sessionId,
+                "sessionKind" to event.kind,
+                "error" to event.error
+            )
         is RuntimeEvent.VmStateChangedEvent ->
             jsonObject(
                 "kind" to "VmStateChanged",

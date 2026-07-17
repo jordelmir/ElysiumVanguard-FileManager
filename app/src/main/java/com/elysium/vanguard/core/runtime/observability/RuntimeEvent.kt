@@ -69,6 +69,32 @@ sealed class RuntimeEvent {
         val sessionId: String
     ) : RuntimeEvent()
 
+    // --- Session runner (Phase 30) ---
+
+    data class SessionStartedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val sessionId: String,
+        val kind: String,
+        val launcherKind: String?,
+        val pid: Int
+    ) : RuntimeEvent()
+
+    data class SessionStoppedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val sessionId: String,
+        val exitCode: Int
+    ) : RuntimeEvent()
+
+    data class SessionStartFailedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val sessionId: String,
+        val kind: String,
+        val error: String
+    ) : RuntimeEvent()
+
     // --- Windows VM (Phase 22) ---
 
     data class VmStateChangedEvent(

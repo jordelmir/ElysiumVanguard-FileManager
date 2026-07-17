@@ -81,7 +81,7 @@ class DistroManager(
      * [provisioningPipeline] is set, to avoid double-applying).
      */
     private val fallbackOverlay: ElysiumOsReleaseOverlay = defaultOverlay()
-) {
+) : com.elysium.vanguard.core.runtime.runner.DistroSessionBackend {
     private val _installed = MutableStateFlow(loadInstalled())
     val installed: StateFlow<List<DistroInstallation>> = _installed.asStateFlow()
 
@@ -155,7 +155,7 @@ class DistroManager(
         _installed.value = loadInstalled()
     }
 
-    fun findInstalled(id: String): DistroInstallation? =
+    override fun findInstalled(id: String): DistroInstallation? =
         installed.value.firstOrNull { it.distro.id == id }
 
     /**
@@ -166,7 +166,7 @@ class DistroManager(
      * healthy installation; on resolution failure the launcher is the
      * jailed-shell fallback so the UI still gets something to launch.
      */
-    fun launcherFor(id: String): LauncherPick? {
+    override fun launcherFor(id: String): LauncherPick? {
         val installation = findInstalled(id) ?: return null
         if (!installation.isHealthy) return null
         return launcherResolver.resolve(installation.rootfsDir)
