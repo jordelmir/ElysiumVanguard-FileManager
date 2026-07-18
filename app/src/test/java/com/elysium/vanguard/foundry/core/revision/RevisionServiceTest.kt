@@ -96,11 +96,13 @@ class RevisionServiceTest {
         val definition = sampleDefinition(projectId)
         val compilation = Compilation(contentHash = ContentHash.of("abc"))
         val sceneManifest = com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator().generate(compilation, definition)
-        val provenance = com.elysium.vanguard.foundry.core.provenance.ProvenanceService().createProvenance(
+        val provenance = com.elysium.vanguard.foundry.core.provenance.ProvenanceService(
+            auditTrail = com.elysium.vanguard.foundry.core.audit.InMemoryAuditTrail(),
+        ).createProvenance(
             subjectId = "abc",
             source = "test",
             signingKey = RevisionService.DEFAULT_SIGNING_KEY,
-        )
+        ).getOrThrow()
 
         try {
             VehicleRevision(

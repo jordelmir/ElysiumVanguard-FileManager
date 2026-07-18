@@ -1,5 +1,7 @@
 package com.elysium.vanguard.foundry.core.revision
 
+import com.elysium.vanguard.foundry.core.audit.AuditTrail
+import com.elysium.vanguard.foundry.core.audit.InMemoryAuditTrail
 import com.elysium.vanguard.foundry.core.compiler.Compilation
 import com.elysium.vanguard.foundry.core.ontology.ids.ProjectId
 import com.elysium.vanguard.foundry.core.ontology.ids.VehicleRevisionId
@@ -7,7 +9,6 @@ import com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError
 import com.elysium.vanguard.foundry.core.ontology.primitives.RepresentationLevel
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
 import com.elysium.vanguard.foundry.core.provenance.ProvenanceService
-import com.elysium.vanguard.foundry.core.revision.VehicleDefinition
 import com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator
 
 /**
@@ -22,7 +23,8 @@ import com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator
  *      the `Compilation.contentHash` alone does not carry the
  *      component list — the manifest is a derived artifact).
  *   2. Create a `ProvenanceRecord` for the `contentHash`,
- *      signed with the revision's signing key.
+ *      signed with the revision's signing key. The record is
+ *      appended to the audit trail (per ADR-0006).
  *   3. Assemble the `VehicleRevision` with `isImmutable = true`.
  *
  * The `modifyFrozenRevision` is the platform's hard guard. It
@@ -31,10 +33,15 @@ import com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator
  */
 class RevisionService(
     private val sceneManifestGenerator: SceneManifestGenerator = SceneManifestGenerator(),
-    private val provenanceService: ProvenanceService = ProvenanceService(),
+    private val auditTrail: AuditTrail = InMemoryAuditTrail(),
     private val clock: Timestamp.Companion.TimestampSource = Timestamp.monotonicWallClock(),
     private val signingKey: ByteArray = DEFAULT_SIGNING_KEY,
 ) {
+
+    private val provenanceService: ProvenanceService = ProvenanceService(
+        auditTrail = auditTrail,
+        clock = clock,
+    )
 
     /**
      * Freeze a `Compilation` into a `VehicleRevision`. The
@@ -56,15 +63,18 @@ class RevisionService(
             representationLevel = RepresentationLevel.PARAMETRIC_FUNCTIONAL,
         )
 
-        // 2. Create the provenance record. The subject is the
-        //    content hash; the source is the compiler version
-        //    captured in the canonical form. The signing key
-        //    binds the provenance to the revision.
+        // 2. Create the provenance record (and append to the
+        //    audit trail). The subject is the content hash;
+        //    the source is the compiler version captured in
+        //    the canonical form. The signing key binds the
+        //    provenance to the revision.
         val provenance = provenanceService.createProvenance(
             subjectId = compilation.contentHash.value,
             source = "compiler:deterministic-v1",
             signingKey = signingKey,
-        )
+        ).getOrElse {
+            return Result.failure(it)
+        }
 
         // 3. Assemble the revision. `isImmutable = true` is
         //    enforced by the data class `init` block.

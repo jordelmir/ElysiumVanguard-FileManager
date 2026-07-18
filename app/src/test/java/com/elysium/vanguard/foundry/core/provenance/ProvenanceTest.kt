@@ -1,14 +1,15 @@
 package com.elysium.vanguard.foundry.core.provenance
 
+import com.elysium.vanguard.foundry.core.audit.InMemoryAuditTrail
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProvenanceTest {
 
-    private val service = ProvenanceService()
+    private val auditTrail = InMemoryAuditTrail()
+    private val service = ProvenanceService(auditTrail = auditTrail)
     private val signingKey = "phase-1-test-key".toByteArray()
 
     @Test
@@ -17,53 +18,63 @@ class ProvenanceTest {
             subjectId = "compilation:abc123",
             source = "compiler:1.0.0",
             signingKey = signingKey,
-        )
+        ).getOrThrow()
         assertTrue(record.isComplete)
     }
 
     @Test
-    fun `provenance record is not complete when no witness is provided`() {
-        // Construct a record manually with an empty witness list.
-        val record = service.createProvenance(
+    fun `provenance record appends a signed event to the audit trail`() {
+        val before = auditTrail.count()
+        service.createProvenance(
             subjectId = "compilation:abc123",
             source = "compiler:1.0.0",
             signingKey = signingKey,
-            witnesses = emptyList(),
-        )
-        // The system adds its own signature as the first witness,
-        // so even with empty witnesses, isComplete is true.
-        assertTrue(
-            "system signature should be a witness; isComplete should be true",
-            record.isComplete,
-        )
+        ).getOrThrow()
+        val after = auditTrail.count()
+        assertEquals("audit trail should grow by 1", before + 1, after)
+    }
+
+    @Test
+    fun `find by subject returns the events for a given subject`() {
+        service.createProvenance(
+            subjectId = "compilation:abc",
+            source = "compiler:1.0.0",
+            signingKey = signingKey,
+        ).getOrThrow()
+        service.createProvenance(
+            subjectId = "compilation:abc",
+            source = "compiler:1.0.1",
+            signingKey = signingKey,
+        ).getOrThrow()
+        service.createProvenance(
+            subjectId = "compilation:def",
+            source = "compiler:1.0.0",
+            signingKey = signingKey,
+        ).getOrThrow()
+        val abcEvents = auditTrail.findBySubject("compilation:abc")
+        assertEquals(2, abcEvents.size)
     }
 
     @Test
     fun `provenance record is not complete when source is blank`() {
-        try {
-            service.createProvenance(
-                subjectId = "compilation:abc123",
-                source = "",
-                signingKey = signingKey,
-            )
-            assert(false) { "expected IllegalArgumentException for blank source" }
-        } catch (e: IllegalArgumentException) {
-            assertTrue(e.message!!.contains("source must not be blank"))
-        }
+        val result = service.createProvenance(
+            subjectId = "compilation:abc123",
+            source = "",
+            signingKey = signingKey,
+        )
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError.VehicleDefinitionInvalid)
     }
 
     @Test
     fun `provenance record is not complete when subjectId is blank`() {
-        try {
-            service.createProvenance(
-                subjectId = "",
-                source = "compiler:1.0.0",
-                signingKey = signingKey,
-            )
-            assert(false) { "expected IllegalArgumentException for blank subjectId" }
-        } catch (e: IllegalArgumentException) {
-            assertTrue(e.message!!.contains("subjectId must not be blank"))
-        }
+        val result = service.createProvenance(
+            subjectId = "",
+            source = "compiler:1.0.0",
+            signingKey = signingKey,
+        )
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError.VehicleDefinitionInvalid)
     }
 
     @Test
@@ -72,12 +83,12 @@ class ProvenanceTest {
             subjectId = "compilation:abc",
             source = "compiler:1.0.0",
             signingKey = signingKey,
-        )
+        ).getOrThrow()
         val b = service.createProvenance(
             subjectId = "compilation:abc",
             source = "compiler:1.0.0",
             signingKey = signingKey,
-        )
+        ).getOrThrow()
         assertNotEquals(a.id, b.id)
         // The signature depends only on the payload, not the ID.
         assertEquals(a.signature, b.signature)
@@ -89,12 +100,12 @@ class ProvenanceTest {
             subjectId = "compilation:abc",
             source = "compiler:1.0.0",
             signingKey = signingKey,
-        )
+        ).getOrThrow()
         val b = service.createProvenance(
             subjectId = "compilation:abc",
             source = "compiler:1.0.1",
             signingKey = signingKey,
-        )
+        ).getOrThrow()
         assertNotEquals(a.signature, b.signature)
     }
 
@@ -104,12 +115,12 @@ class ProvenanceTest {
             subjectId = "compilation:abc",
             source = "compiler:1.0.0",
             signingKey = "key-1".toByteArray(),
-        )
+        ).getOrThrow()
         val b = service.createProvenance(
             subjectId = "compilation:abc",
             source = "compiler:1.0.0",
             signingKey = "key-2".toByteArray(),
-        )
+        ).getOrThrow()
         assertNotEquals(a.signature, b.signature)
     }
 }

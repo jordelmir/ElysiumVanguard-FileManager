@@ -1,9 +1,11 @@
 package com.elysium.vanguard.foundry.integration
 
+import com.elysium.vanguard.foundry.core.audit.InMemoryAuditTrail
+import com.elysium.vanguard.foundry.core.audit.SignedEventPayload
 import com.elysium.vanguard.foundry.core.compiler.DeterministicVehicleCompiler
+import com.elysium.vanguard.foundry.core.ontology.ids.UserId
 import com.elysium.vanguard.foundry.core.ontology.primitives.CatalogRevision
 import com.elysium.vanguard.foundry.core.ontology.primitives.CompilerVersion
-import com.elysium.vanguard.foundry.core.ontology.ids.UserId
 import com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError
 import com.elysium.vanguard.foundry.core.ontology.primitives.RepresentationLevel
 import com.elysium.vanguard.foundry.core.project.ProjectService
@@ -23,22 +25,25 @@ import org.junit.Test
  *   - Define a `VehicleDefinition` (a compact electric).
  *   - Compile the configuration (deterministic).
  *   - Freeze the `VehicleRevision` (immutable + provenance +
- *     scene manifest).
+ *     scene manifest + audit trail).
  *   - Recompile (must produce the same `contentHash`).
  *   - Assert the revision is immutable, the provenance is
  *     complete, the scene manifest is non-null, the
- *     representation level is set, and a mutation attempt
- *     throws `FrozenRevisionMutationRejected`.
+ *     representation level is set, the audit trail is
+ *     populated, and a mutation attempt throws
+ *     `FrozenRevisionMutationRejected`.
  *
  * This test validates the platform's foundation: determinism,
- * traceability, immutability, stable identity, and the
- * connection between engineering and visualization.
+ * traceability, immutability, stable identity, audit-trail
+ * persistence, and the connection between engineering and
+ * visualization.
  */
 class VehicleProjectToDigitalTwinIntegrationTest {
 
+    private val auditTrail = InMemoryAuditTrail()
     private val projectService = ProjectService()
     private val compiler = DeterministicVehicleCompiler()
-    private val revisionService = RevisionService()
+    private val revisionService = RevisionService(auditTrail = auditTrail)
 
     @Test
     fun `vehicle project compiles into immutable traceable digital twin`() {
@@ -47,6 +52,7 @@ class VehicleProjectToDigitalTwinIntegrationTest {
             ownerId = UserId.random(),
             name = "Urban One",
         ).getOrThrow()
+        assertEquals("expected version 0 on fresh project", 0L, project.version)
 
         // 2. Define vehicle
         val definition = VehicleDefinitionFixture.validCompactElectricVehicleDefinition(
@@ -102,16 +108,39 @@ class VehicleProjectToDigitalTwinIntegrationTest {
             revision.representationLevel,
         )
 
-        // 6f. The scene manifest's content hash is stable
-        val firstManifestHash = revision.sceneManifest.contentHash
-        // The manifest is recomputable: regenerating it from the
-        // same inputs produces the same hash.
-        val recomputedManifest = revisionService
-            .let { _ -> com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator() }
-            .generate(compilation, definition, RepresentationLevel.PARAMETRIC_FUNCTIONAL)
-        assertEquals(firstManifestHash, recomputedManifest.contentHash)
+        // 6f. The audit trail is populated with the provenance event
+        val events = auditTrail.findBySubject(compilation.contentHash.value)
+        assertEquals(
+            "audit trail should have exactly one event for the content hash",
+            1,
+            events.size,
+        )
+        val event = events.first()
+        assertEquals("provenance.appended", event.eventType)
+        val payload = event.payload
+        assertTrue(
+            "payload should be ProvenanceAppended, got ${payload?.javaClass}",
+            payload is SignedEventPayload.ProvenanceAppended,
+        )
+        payload as SignedEventPayload.ProvenanceAppended
+        // The subjectId of the audit-trail event IS the compilation's
+        // content hash (the RevisionService passes it as the subject).
+        // The event's own contentHash is a derived hash of the record,
+        // NOT the compilation's content hash.
+        assertEquals(compilation.contentHash.value, payload.provenanceSubjectId)
+        assertEquals("compiler:deterministic-v1", payload.source)
 
-        // 6g. A mutation attempt throws
+        // 6g. The scene manifest's content hash is stable
+        val firstManifest = revision.sceneManifest
+        val recomputedManifest = com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator()
+            .generate(compilation, definition, RepresentationLevel.PARAMETRIC_FUNCTIONAL)
+        assertEquals(
+            "scene manifest content hash must be stable",
+            firstManifest,
+            recomputedManifest,
+        )
+
+        // 6h. A mutation attempt throws
         val thrown = kotlin.runCatching { revisionService.modifyFrozenRevision(revision.id) }
             .exceptionOrNull()
         assertTrue(

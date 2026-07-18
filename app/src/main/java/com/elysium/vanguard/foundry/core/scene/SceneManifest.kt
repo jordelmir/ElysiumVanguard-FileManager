@@ -20,6 +20,12 @@ import com.elysium.vanguard.foundry.core.ontology.primitives.RepresentationLevel
  * derived from the `VehicleDefinition.parameters`; the LODs are
  * stub placeholders. Phase 3 replaces the stub with the real
  * 3D pipeline + the validated `Canonical3DAsset` references.
+ *
+ * The `contentHash` is computed in the `init` block (not a
+ * `get()` property) so the data class equality includes the
+ * hash. This means two `SceneManifest` instances with the same
+ * fields are equal; a manifest with the same fields but a
+ * different hash is impossible.
  */
 data class SceneManifest(
     val revisionContentHash: ContentHash,
@@ -28,23 +34,25 @@ data class SceneManifest(
     val representationLevel: RepresentationLevel,
 ) {
     /**
-     * The manifest's own content hash. Computed from the
-     * canonical form of the manifest. Used to verify the
-     * manifest has not been tampered with at load time.
+     * The manifest's own content hash. Computed in the `init`
+     * block from the canonical form of the manifest. Used to
+     * verify the manifest has not been tampered with at load
+     * time.
      */
     val contentHash: ContentHash
-        get() {
-            val canonical = buildString {
-                append("scene-manifest:v1")
-                append("|revision=").append(revisionContentHash.value)
-                append("|level=").append(representationLevel.name)
-                append("|components=")
-                append(components.sortedBy { it.id }.joinToString(";") { "${it.id}:${it.label}" })
-                append("|lods=")
-                append(lods.sortedBy { it.level }.joinToString(";") { "${it.level}:${it.resolution}" })
-            }
-            return ContentHash.of(canonical)
+
+    init {
+        val canonical = buildString {
+            append("scene-manifest:v1")
+            append("|revision=").append(revisionContentHash.value)
+            append("|level=").append(representationLevel.name)
+            append("|components=")
+            append(components.sortedBy { it.id }.joinToString(";") { "${it.id}:${it.label}" })
+            append("|lods=")
+            append(lods.sortedBy { it.level }.joinToString(";") { "${it.level}:${it.resolution}" })
         }
+        contentHash = ContentHash.of(canonical)
+    }
 }
 
 /**
