@@ -190,10 +190,12 @@ fun RuntimeInspectScreen(
                 return@Column
             }
 
+            val snapshotValue = snapshot ?: return@Column
+
             when (selectedTab) {
-                0 -> FilesTab(snapshot!!.entries)
-                1 -> OsReleaseTab(snapshot!!.osRelease)
-                2 -> PackagesTab(snapshot!!.packages)
+                0 -> FilesTab(snapshotValue.entries)
+                1 -> OsReleaseTab(snapshotValue.osRelease)
+                2 -> PackagesTab(snapshotValue.packages)
                 3 -> SnapshotsTab(
                     snapshots = snapshots,
                     onRemove = viewModel::removeSnapshot

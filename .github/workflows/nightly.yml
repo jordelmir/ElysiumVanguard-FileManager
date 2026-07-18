@@ -1,0 +1,104 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx6g -Dorg.gradle.parallel=true
+
+jobs:
+  full-test-suite:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Full test suite
+        run: ./gradlew testDebugUnitTest --no-daemon
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-report
+          path: app/build/reports/tests/
+      - name: Count tests
+        run: |
+          total=$(grep -r 'test' app/build/reports/tests/testDebugUnitTest/index.html | grep -oP '\d+' | head -1)
+          echo "Total tests: $total" >> $GITHUB_STEP_SUMMARY
+
+  lint-full:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Full lint
+        run: ./gradlew lint --no-daemon
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-lint-report
+          path: app/build/reports/lint-results-*.html
+
+  build-all:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build all variants
+        run: ./gradlew assemble --no-daemon
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-apks
+          path: app/build/outputs/apk/**/*.apk
+
+  size-report:
+    runs-on: ubuntu-22.04
+    needs: [build-all]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-apks
+          path: apks
+      - name: Size report
+        run: |
+          echo "## APK Size Report" >> $GITHUB_STEP_SUMMARY
+          for apk in $(find apks -name '*.apk'); do
+            size=$(stat --format=%s "$apk")
+            echo "- $(basename $apk): $(numfmt --to=iec $size)" >> $GITHUB_STEP_SUMMARY
+          done
+
+  dependency-scan:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Dependency scan
+        run: |
+          ./gradlew app:dependencies --configuration debugRuntimeClasspath > deps.txt
+          echo "## Dependency Count" >> $GITHUB_STEP_SUMMARY
+          wc -l deps.txt | awk '{print "- " $1 " lines of dependency output"}' >> $GITHUB_STEP_SUMMARY
+
+  stale-branch-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for stale branches
+        run: |
+          git branch -r --merged origin/main | grep -v 'origin/main' | grep -v 'origin/develop' || echo "No stale branches"

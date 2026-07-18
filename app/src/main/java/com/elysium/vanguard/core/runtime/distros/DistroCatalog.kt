@@ -145,8 +145,13 @@ data class Distro(
     /** Optional lowercase SHA-256 of the downloaded archive. */
     val sha256: String? = null,
     /** Number of archive path segments removed before extraction. */
-    val stripComponents: Int = 0
+    val stripComponents: Int = 0,
+    /** Desktop environment to configure after rootfs extraction. */
+    val desktopProfile: DesktopProfile = DesktopProfile.TTY
 )
+
+/** Convenience alias for a Distro that ships with an XFCE desktop. */
+typealias XfceDistro = Distro
 
 /** Supported distro families. Each carries the install strategy. */
 enum class DistroFamily {

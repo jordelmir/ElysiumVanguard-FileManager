@@ -7,8 +7,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
 import java.io.IOException
 import java.net.ServerSocket
@@ -153,8 +151,8 @@ class LocalFileServer(
         val socket = serverSocket ?: return
         serverSocket = null
         try { socket.close() } catch (_: IOException) {}
-        // Wait briefly for acceptJob to die so we don't double-close.
-        runBlocking { withContext(Dispatchers.IO) { acceptJob?.cancel() } }
+        // Cancel the accept loop; it checks `isActive` and exits on its own.
+        acceptJob?.cancel()
         Log.i(TAG, "Stopped")
     }
 
@@ -223,7 +221,7 @@ class LocalFileServer(
         }
     }
 
-    private fun dispatch(request: HttpRequest): HttpResponse {
+    private suspend fun dispatch(request: HttpRequest): HttpResponse {
         // Auth gate: any path NOT in the public allow-list must carry a valid token.
         if (!isPublicRoute(request.path) && request.bearerToken != authTokenSupplier()) {
             return HttpResponse.unauthorized()
@@ -232,7 +230,7 @@ class LocalFileServer(
         val match = routes.firstOrNull {
             it.method == request.method && it.path == request.path
         } ?: return HttpResponse.notFound()
-        return runBlocking { match.handler(request) }
+        return match.handler(request)
     }
 
     /**
@@ -245,7 +243,7 @@ class LocalFileServer(
         else -> false
     }
 
-    private fun writeResponse(socket: Socket, response: HttpResponse) {
+    private suspend fun writeResponse(socket: Socket, response: HttpResponse) {
         val out = BufferedOutputStream(socket.getOutputStream())
         val reason = statusReason(response.status)
         out.write("HTTP/1.1 ${response.status} $reason\r\n".toByteArray(Charsets.US_ASCII))

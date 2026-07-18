@@ -79,7 +79,7 @@ fun GalleryScreen(
         containerColor = Color.Transparent,
         topBar = {
             TitanHeader(
-                title = if (selectedAlbum != null) selectedAlbum!!.name else tabs[pagerState.currentPage],
+                title = selectedAlbum?.name ?: tabs[pagerState.currentPage],
                 onBack = {
                     if (selectedAlbum != null) viewModel.setAlbum(null)
                     else onBack()

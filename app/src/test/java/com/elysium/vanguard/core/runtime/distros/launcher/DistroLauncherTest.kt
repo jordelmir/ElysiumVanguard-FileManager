@@ -270,6 +270,109 @@ class NativeProotLauncherTest {
             runtimeDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `refreshGuestDns updates resolv conf in place`() {
+        val runtimeDir = Files.createTempDirectory("elysium-proot-dns-refresh").toFile()
+        val rootfs = File(File(runtimeDir, "guest"), "rootfs").apply { mkdirs() }
+        try {
+            File(runtimeDir, "libproot.so").writeText("proot")
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            var currentDns = GuestDnsConfig(
+                nameservers = listOf("192.0.2.53"),
+                searchDomains = listOf("lab.example")
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp"),
+                guestDnsConfigProvider = GuestDnsConfigProvider { currentDns }
+            )
+            launcher.buildShellCommand(rootfs, "")
+            val ok = launcher.refreshGuestDns(rootfs)
+            assertTrue(ok)
+            val dnsFile = File(File(runtimeDir, "tmp/dns"), "guest.resolv.conf")
+            assertTrue(dnsFile.readText().contains("192.0.2.53"))
+            currentDns = GuestDnsConfig(
+                nameservers = listOf("1.1.1.1", "8.8.8.8"),
+                searchDomains = emptyList()
+            )
+            val refreshed = launcher.refreshGuestDns(rootfs)
+            assertTrue(refreshed)
+            val content = dnsFile.readText()
+            assertTrue(content.contains("1.1.1.1"))
+            assertTrue(content.contains("8.8.8.8"))
+            assertFalse(content.contains("192.0.2.53"))
+        } finally {
+            rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `dnsFilePath returns path when file exists`() {
+        val runtimeDir = Files.createTempDirectory("elysium-proot-dns-path").toFile()
+        val rootfs = File(File(runtimeDir, "guest"), "rootfs").apply { mkdirs() }
+        try {
+            File(runtimeDir, "libproot.so").writeText("proot")
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp"),
+                guestDnsConfigProvider = GuestDnsConfigProvider {
+                    GuestDnsConfig(nameservers = listOf("1.1.1.1"))
+                }
+            )
+            launcher.buildShellCommand(rootfs, "")
+            val path = launcher.dnsFilePath(rootfs)
+            assertNotNull(path)
+            assertTrue(path!!.contains("guest.resolv.conf"))
+        } finally {
+            rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `dnsFilePath returns null before buildShellCommand`() {
+        val runtimeDir = Files.createTempDirectory("elysium-proot-dns-null").toFile()
+        val rootfs = File(File(runtimeDir, "guest"), "rootfs").apply { mkdirs() }
+        try {
+            File(runtimeDir, "libproot.so").writeText("proot")
+            File(runtimeDir, "libproot_loader.so").writeText("loader")
+            val library = ProotNativeLibrary.default(
+                abis = setOf("arm64-v8a"),
+                nativeLibraryDir = runtimeDir,
+                userProotDir = null,
+                termuxProotCandidates = emptyList()
+            )
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = library,
+                runtimeTmpDir = File(runtimeDir, "tmp"),
+                guestDnsConfigProvider = GuestDnsConfigProvider {
+                    GuestDnsConfig(nameservers = listOf("1.1.1.1"))
+                }
+            )
+            assertNull(launcher.dnsFilePath(rootfs))
+        } finally {
+            rootfs.deleteRecursively()
+            runtimeDir.deleteRecursively()
+        }
+    }
 }
 
 /**

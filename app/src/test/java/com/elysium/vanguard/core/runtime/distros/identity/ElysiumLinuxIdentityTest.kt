@@ -1,0 +1,171 @@
+package com.elysium.vanguard.core.runtime.distros.identity
+
+import com.elysium.vanguard.core.runtime.distros.Distro
+import com.elysium.vanguard.core.runtime.distros.DistroFamily
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+/**
+ * Unit tests for Elysium Linux identity generation.
+ */
+class ElysiumLinuxIdentityTest {
+
+    private val testDistro = Distro(
+        id = "test-debian",
+        displayName = "Test Debian",
+        family = DistroFamily.DEBIAN,
+        version = "12 (Bookworm)",
+        approxSizeBytes = 100_000_000,
+        minAndroidVersion = 26,
+        rootfsUrl = "https://example.com/test.tar.gz",
+        rootfsKind = com.elysium.vanguard.core.runtime.distros.RootfsKind.TarGz,
+        bootstrapCommand = null,
+        packageManager = "apt",
+        homepage = "https://example.com",
+        sha256 = "abc123"
+    )
+
+    @Test
+    fun `os-release contains required fields`() {
+        val osRelease = ElysiumLinuxIdentity.generateOsRelease(testDistro)
+        assertTrue(osRelease.contains("NAME="))
+        assertTrue(osRelease.contains("VERSION="))
+        assertTrue(osRelease.contains("ID=debian"))
+        assertTrue(osRelease.contains("PRETTY_NAME="))
+        assertTrue("BUILD_ID=" in osRelease)
+        assertTrue("elysium-" in osRelease)
+        assertTrue("VARIANT=" in osRelease)
+        assertTrue("Elysium Vanguard" in osRelease)
+        assertTrue("PLATFORM_ID=" in osRelease)
+    }
+
+    @Test
+    fun `os-release for Alpine uses musl ID`() {
+        val alpine = testDistro.copy(
+            id = "alpine-test",
+            displayName = "Test Alpine",
+            family = DistroFamily.MUSL
+        )
+        val osRelease = ElysiumLinuxIdentity.generateOsRelease(alpine)
+        assertTrue(osRelease.contains("ID=musl"))
+        assertTrue("ID_LIKE=" in osRelease)
+        assertTrue("alpine" in osRelease)
+    }
+
+    @Test
+    fun `os-release for Arch uses arch ID`() {
+        val arch = testDistro.copy(
+            id = "arch-test",
+            displayName = "Test Arch",
+            family = DistroFamily.ARCH
+        )
+        val osRelease = ElysiumLinuxIdentity.generateOsRelease(arch)
+        assertTrue(osRelease.contains("ID=arch"))
+        assertTrue("ID_LIKE=" in osRelease)
+        assertTrue("arch" in osRelease)
+    }
+
+    @Test
+    fun `rootfs manifest contains distro metadata`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test"),
+            installedAtMs = 1234567890L
+        )
+        assertEquals("test-debian", manifest.distroId)
+        assertEquals("Test Debian", manifest.distroDisplayName)
+        assertEquals(DistroFamily.DEBIAN, manifest.distroFamily)
+        assertEquals("12 (Bookworm)", manifest.distroVersion)
+        assertEquals("apt", manifest.packageManager)
+        assertEquals(1234567890L, manifest.installedAtMs)
+    }
+
+    @Test
+    fun `rootfs manifest json contains distro info`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val json = manifest.toJson()
+        assertTrue(json.contains("\"distroId\":\"test-debian\""))
+        assertTrue(json.contains("\"distroFamily\":\"DEBIAN\""))
+        assertTrue(json.contains("\"sbom\":{"))
+    }
+
+    @Test
+    fun `signed manifest contains signature with default HMAC signer`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val signed = ElysiumLinuxIdentity.signManifest(manifest)
+        assertTrue(signed.signature.isNotEmpty())
+        // HMAC-SHA256 base64 = 44 characters. The previous hex
+        // encoding was 64; the format change tracks the new signer
+        // contract (RootfsSigner.sign returns base64).
+        assertEquals(44, signed.signature.length)
+        assertEquals("HmacSHA256", signed.algorithm)
+        assertTrue(signed.publicKey == null)
+        assertTrue(signed.signedAtMs > 0)
+    }
+
+    @Test
+    fun `signed manifest records algorithm and public key for RSA signer`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val keyPair = RsaRootfsSigner.generateKeyPair()
+        val signer = RsaRootfsSigner(keyPair)
+        val signed = ElysiumLinuxIdentity.signManifest(manifest, signer)
+        assertEquals("SHA256withRSA", signed.algorithm)
+        assertNotNull(signed.publicKey)
+        assertTrue(signed.publicKey!!.length > 100) // X.509 SPKI base64
+
+        // Verifier roundtrip
+        val verifier = RsaRootfsSigner(keyPair)
+        val canonical = manifest.toJson()
+        assertTrue(verifier.verify(canonical.toByteArray(Charsets.UTF_8), signed.signature))
+    }
+
+    @Test
+    fun `signed manifest JSON includes algorithm and publicKey fields`() {
+        val manifest = ElysiumLinuxIdentity.generateRootfsManifest(
+            distro = testDistro,
+            rootfsDir = File("/tmp/test")
+        )
+        val keyPair = RsaRootfsSigner.generateKeyPair()
+        val signed = ElysiumLinuxIdentity.signManifest(manifest, RsaRootfsSigner(keyPair))
+        val json = signed.toJson()
+        assertTrue(json.contains("\"algorithm\":\"SHA256withRSA\""))
+        assertTrue(json.contains("\"publicKey\":\""))
+    }
+
+    @Test
+    fun `verifyRootfsIntegrity returns true when no expected hash`() {
+        val result = ElysiumLinuxIdentity.verifyRootfsIntegrity(
+            rootfsDir = File("/tmp/nonexistent"),
+            expectedSha256 = null
+        )
+        assertTrue(result)
+    }
+
+    @Test
+    fun `sbom contains package count`() {
+        val sbom = SoftwareBillOfMaterials(
+            packages = listOf(
+                PackageEntry("bash", "5.2.15"),
+                PackageEntry("coreutils", "9.4")
+            ),
+            totalPackages = 2,
+            generatedAtMs = 1000L
+        )
+        val json = sbom.toJson()
+        assertTrue(json.contains("\"totalPackages\":2"))
+        assertTrue(json.contains("\"name\":\"bash\""))
+        assertTrue(json.contains("\"version\":\"5.2.15\""))
+    }
+}

@@ -47,8 +47,14 @@ class TerminalService : Service() {
                     stopSelf()
                     return@collectLatest
                 }
-                if (foregroundSessionId !in activeIds) foregroundSessionId = activeIds.first()
-                startForegroundFor(foregroundSessionId!!, activeIds.size)
+                val currentForeground = foregroundSessionId
+                if (currentForeground == null || currentForeground !in activeIds) {
+                    foregroundSessionId = activeIds.first()
+                }
+                val sessionId = foregroundSessionId
+                if (sessionId != null) {
+                    startForegroundFor(sessionId, activeIds.size)
+                }
             }
         }
     }

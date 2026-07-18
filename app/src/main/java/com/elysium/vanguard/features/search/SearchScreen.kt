@@ -81,9 +81,7 @@ fun SearchScreen(
                 isSearching = state.isSearching
             )
 
-            if (state.errorMessage != null) {
-                ErrorBanner(state.errorMessage!!)
-            }
+            state.errorMessage?.let { ErrorBanner(it) }
 
             if (state.results.isEmpty() && !state.isSearching && state.query.isNotBlank()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

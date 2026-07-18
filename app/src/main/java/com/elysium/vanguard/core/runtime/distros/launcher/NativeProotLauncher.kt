@@ -226,11 +226,8 @@ open class NativeProotLauncher(
             val dnsDir = File(runtimeDir, "dns")
             if (!dnsDir.isDirectory && !dnsDir.mkdirs()) return null
             cleanupStaleDnsFiles(dnsDir)
-            val key = rootfsDir.parentFile?.name.orEmpty()
-                .replace(Regex("[^A-Za-z0-9._-]"), "_")
-                .ifBlank { "guest" }
-            val target = File(dnsDir, "$key.resolv.conf")
-            val staging = File(dnsDir, "$key.resolv.conf.part")
+            val target = dnsFileFor(rootfsDir, dnsDir)
+            val staging = File(dnsDir, "${target.name}.part")
             staging.writeText(config.renderResolvConf())
             if (!staging.renameTo(target)) {
                 staging.copyTo(target, overwrite = true)
@@ -240,6 +237,38 @@ open class NativeProotLauncher(
         } catch (_: IOException) {
             null
         }
+    }
+
+    fun refreshGuestDns(rootfsDir: File): Boolean {
+        val config = guestDnsConfigProvider.current()
+        if (config.nameservers.isEmpty()) return false
+        val runtimeDir = runtimeTmpDir ?: return false
+        return try {
+            val dnsDir = File(runtimeDir, "dns")
+            if (!dnsDir.isDirectory) return false
+            val target = dnsFileFor(rootfsDir, dnsDir)
+            if (!target.exists()) return false
+            val staging = File(dnsDir, "${target.name}.part")
+            staging.writeText(config.renderResolvConf())
+            val ok = staging.renameTo(target) || (staging.copyTo(target, overwrite = true).also { staging.delete() }).exists()
+            ok
+        } catch (_: IOException) {
+            false
+        }
+    }
+
+    fun dnsFilePath(rootfsDir: File): String? {
+        val runtimeDir = runtimeTmpDir ?: return null
+        val dnsDir = File(runtimeDir, "dns")
+        val target = dnsFileFor(rootfsDir, dnsDir)
+        return if (target.exists()) target.absolutePath else null
+    }
+
+    private fun dnsFileFor(rootfsDir: File, dnsDir: File): File {
+        val key = rootfsDir.parentFile?.name.orEmpty()
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .ifBlank { "guest" }
+        return File(dnsDir, "$key.resolv.conf")
     }
 
     private fun cleanupStaleDnsFiles(dnsDir: File) {

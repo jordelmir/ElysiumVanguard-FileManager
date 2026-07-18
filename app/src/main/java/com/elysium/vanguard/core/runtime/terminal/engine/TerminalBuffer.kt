@@ -203,10 +203,11 @@ internal class TerminalBuffer(
     fun enterAlternateScreen(clear: Boolean = true, saveCursor: Boolean = false) {
         if (activeScreen !== primaryScreen) return
         if (saveCursor) saveCursor()
-        val alternate = if (clear || alternateScreen == null) {
+        val existing = alternateScreen
+        val alternate = if (clear || existing == null) {
             ScreenState(blankGrid(cols, rows), scrollBottom = rows - 1)
         } else {
-            alternateScreen!!
+            existing
         }
         alternateScreen = alternate
         activeScreen = alternate
