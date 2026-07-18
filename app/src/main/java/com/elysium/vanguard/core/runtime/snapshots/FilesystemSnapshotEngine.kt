@@ -59,7 +59,27 @@ import java.util.concurrent.atomic.AtomicInteger
 class FilesystemSnapshotEngine(
     private val baseDir: File,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val idGenerator: () -> String = ::defaultIdGenerator
+    private val idGenerator: () -> String = ::defaultIdGenerator,
+    /**
+     * Phase 52 — when `true`, the engine
+     * always uses [CopyStrategy.FULL_COPY]
+     * (never POSIX hardlinks). Hardlinks share
+     * inodes with the source, which means a
+     * write to the source after a hardlink
+     * snapshot is visible through the
+     * snapshot — the rollback would copy the
+     * (mutated) snapshot back, a no-op. The
+     * critical end-to-end test
+     * ([com.elysium.vanguard.core.runtime.CriticalEndToEndTest])
+     * needs a snapshot that is INDEPENDENT of
+     * the live rootfs, so the test passes
+     * `forceFullCopy = true`. Production
+     * defaults to `false` (hardlink-first) for
+     * speed; a future Phase 53+ follow-up
+     * will decide whether the production
+     * default should also flip.
+     */
+    private val forceFullCopy: Boolean = false
 ) : SnapshotEngine {
 
     private val workspaceLocks = ConcurrentHashMap<String, Any>()
@@ -229,7 +249,7 @@ class FilesystemSnapshotEngine(
      * succeeded.
      */
     private fun tryHardlinkCopy(source: File, target: File): CopyOutcome {
-        if (runCpSucceeded("-al", source, target)) {
+        if (!forceFullCopy && runCpSucceeded("-al", source, target)) {
             return CopyOutcome.Ok(CopyStrategy.HARDLINK)
         }
         // Fallback: full copy. This always works on
