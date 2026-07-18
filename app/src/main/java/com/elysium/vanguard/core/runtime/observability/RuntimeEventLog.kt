@@ -174,6 +174,30 @@ class RuntimeEventLog(
                 "distroId" to event.distroId,
                 "error" to event.error
             )
+        is RuntimeEvent.SnapshotCreatedEvent ->
+            jsonObject(
+                "kind" to "SnapshotCreated",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "snapshotId" to event.snapshotId,
+                "label" to event.label,
+                "copyStrategy" to event.copyStrategy
+            )
+        is RuntimeEvent.SnapshotRestoredEvent ->
+            jsonObject(
+                "kind" to "SnapshotRestored",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "snapshotId" to event.snapshotId,
+                "label" to event.label
+            )
+        is RuntimeEvent.SnapshotDeletedEvent ->
+            jsonObject(
+                "kind" to "SnapshotDeleted",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "snapshotId" to event.snapshotId
+            )
     }
 
     private fun jsonObject(vararg pairs: Pair<String, Any?>): String {
@@ -283,6 +307,24 @@ class RuntimeEventLog(
                 workspaceId = workspaceId,
                 distroId = map["distroId"] ?: "",
                 error = map["error"] ?: ""
+            )
+            "SnapshotCreated" -> RuntimeEvent.SnapshotCreatedEvent(
+                atMs = atMs,
+                workspaceId = map["workspaceId"] ?: "",
+                snapshotId = map["snapshotId"] ?: "",
+                label = map["label"] ?: "",
+                copyStrategy = map["copyStrategy"] ?: ""
+            )
+            "SnapshotRestored" -> RuntimeEvent.SnapshotRestoredEvent(
+                atMs = atMs,
+                workspaceId = map["workspaceId"] ?: "",
+                snapshotId = map["snapshotId"] ?: "",
+                label = map["label"] ?: ""
+            )
+            "SnapshotDeleted" -> RuntimeEvent.SnapshotDeletedEvent(
+                atMs = atMs,
+                workspaceId = map["workspaceId"] ?: "",
+                snapshotId = map["snapshotId"] ?: ""
             )
             else -> null
         }

@@ -121,4 +121,27 @@ sealed class RuntimeEvent {
         val distroId: String,
         val error: String
     ) : RuntimeEvent()
+
+    // --- Snapshots (Phase 49) ---
+
+    data class SnapshotCreatedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val snapshotId: String,
+        val label: String,
+        val copyStrategy: String  // "HARDLINK" | "FULL_COPY"
+    ) : RuntimeEvent()
+
+    data class SnapshotRestoredEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val snapshotId: String,
+        val label: String
+    ) : RuntimeEvent()
+
+    data class SnapshotDeletedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val snapshotId: String
+    ) : RuntimeEvent()
 }

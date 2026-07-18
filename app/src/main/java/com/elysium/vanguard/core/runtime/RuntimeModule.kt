@@ -13,6 +13,8 @@ import com.elysium.vanguard.core.runtime.runner.SessionRunner
 import com.elysium.vanguard.core.runtime.runner.SessionRunnerRegistry
 import com.elysium.vanguard.core.runtime.runner.WindowsVmSessionBackend
 import com.elysium.vanguard.core.runtime.runner.WindowsVmSessionRunner
+import com.elysium.vanguard.core.runtime.snapshots.FilesystemSnapshotEngine
+import com.elysium.vanguard.core.runtime.snapshots.SnapshotEngine
 import com.elysium.vanguard.core.runtime.windows.WindowsVmBackend
 import com.elysium.vanguard.core.runtime.windows.WindowsVmManager
 import com.elysium.vanguard.core.runtime.windows.qemu.QemuWindowsVmBackend
@@ -93,12 +95,34 @@ object RuntimeModule {
     fun provideWorkspaceManager(
         store: WorkspaceStore,
         eventBus: RuntimeEventBus,
+        snapshotEngine: SnapshotEngine,
         @WallClock clock: () -> Long
     ): WorkspaceManager = WorkspaceManager(
         store = store,
         eventBus = eventBus,
+        snapshotEngine = snapshotEngine,
         clock = clock
     )
+
+    // --- Snapshots (Phase 49) ---
+
+    /**
+     * The on-disk snapshot engine. Stores under
+     * `<filesDir>/workspaces/<workspaceId>/snapshots/<snapshotId>/`.
+     * The base dir is the same as the
+     * [FileWorkspaceStore]'s base dir; the engine's
+     * `<workspaceId>/snapshots/` paths are
+     * disjoint from the store's
+     * `<workspaceId>.json` files.
+     */
+    @Provides
+    @Singleton
+    fun provideSnapshotEngine(@ApplicationContext context: Context): SnapshotEngine {
+        val baseDir = File(context.filesDir, "workspaces").apply {
+            if (!exists()) mkdirs()
+        }
+        return FilesystemSnapshotEngine(baseDir = baseDir)
+    }
 
     // --- Windows VMs (Phase 22 + Phase 23) ---
 

@@ -2,6 +2,12 @@ package com.elysium.vanguard.core.runtime.workspaces
 
 import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
+import com.elysium.vanguard.core.runtime.snapshots.MountPlan
+import com.elysium.vanguard.core.runtime.snapshots.RollbackResult
+import com.elysium.vanguard.core.runtime.snapshots.SnapshotEngine
+import com.elysium.vanguard.core.runtime.snapshots.SnapshotError
+import com.elysium.vanguard.core.runtime.snapshots.SnapshotResult
+import com.elysium.vanguard.core.runtime.snapshots.WorkspaceSnapshot
 
 /**
  * Phase 24 — the user-facing orchestrator for workspaces.
@@ -36,10 +42,20 @@ import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
  * manager is the single source of truth for "what
  * just happened to a workspace", and the bus is the
  * single place that learns about it.
+ *
+ * Phase 49 — the manager is also the user-facing
+ * surface for the [SnapshotEngine]. The engine is
+ * injected; the manager wraps every engine call,
+ * publishes the appropriate
+ * [RuntimeEvent.SnapshotCreatedEvent] /
+ * [RuntimeEvent.SnapshotRestoredEvent] /
+ * [RuntimeEvent.SnapshotDeletedEvent], and returns
+ * the result.
  */
 class WorkspaceManager(
     private val store: WorkspaceStore,
     private val eventBus: RuntimeEventBus,
+    private val snapshotEngine: SnapshotEngine? = null,
     clock: () -> Long = Companion::systemClock
 ) {
     private val clock: () -> Long = clock
@@ -281,6 +297,149 @@ class WorkspaceManager(
         for (workspace in byId.values) store.save(workspace)
     }
 
+    // ---- Snapshot / rollback (Phase 49) ----
+
+    /**
+     * Capture a snapshot of the workspace's live
+     * rootfs.
+     *
+     * The caller provides the live rootfs path
+     * (the runtime knows where the distro's
+     * rootfs lives; the manager does not). The
+     * mount plan is recorded in the manifest for
+     * future "rollback to mount plan" use.
+     *
+     * On success, the manager publishes
+     * [RuntimeEvent.SnapshotCreatedEvent] on the
+     * bus. The event carries the snapshot id,
+     * label, and the copy strategy the engine
+     * used.
+     *
+     * Errors:
+     * - `WorkspaceError.SnapshotEngineNotConfigured`
+     *   if the manager was constructed without a
+     *   [SnapshotEngine].
+     * - [SnapshotError] (the engine's typed
+     *   errors) for snapshot capture failures.
+     */
+    fun snapshotWorkspace(
+        workspaceId: String,
+        sourceRootfsPath: String,
+        mountPlan: MountPlan,
+        label: String
+    ): Result<WorkspaceSnapshot> {
+        val engine = snapshotEngine
+            ?: return Result.failure(WorkspaceError.SnapshotEngineNotConfigured("snapshot"))
+        if (byId[workspaceId] == null) {
+            return Result.failure(WorkspaceError.NotFound(workspaceId))
+        }
+        return when (val outcome = engine.snapshot(workspaceId, sourceRootfsPath, mountPlan, label)) {
+            is SnapshotResult.Success -> {
+                eventBus.publish(
+                    RuntimeEvent.SnapshotCreatedEvent(
+                        atMs = outcome.snapshot.createdAtMs,
+                        workspaceId = workspaceId,
+                        snapshotId = outcome.snapshot.id,
+                        label = outcome.snapshot.label,
+                        copyStrategy = outcome.snapshot.copyStrategy.name
+                    )
+                )
+                Result.success(outcome.snapshot)
+            }
+            is SnapshotResult.Failure -> Result.failure(outcome.error)
+        }
+    }
+
+    /**
+     * Restore a workspace's live rootfs to a
+     * previously captured snapshot.
+     *
+     * The caller provides the live rootfs path
+     * (the manager does not know which distro's
+     * rootfs backs the workspace). The previous
+     * live rootfs is NOT preserved; the manager
+     * is the orchestrator but the engine is the
+     * destructive-IO layer.
+     *
+     * On success, publishes
+     * [RuntimeEvent.SnapshotRestoredEvent] on
+     * the bus.
+     *
+     * Errors:
+     * - `WorkspaceError.SnapshotEngineNotConfigured`
+     *   if the manager was constructed without a
+     *   [SnapshotEngine].
+     * - `WorkspaceError.NotFound` if the
+     *   workspace id is unknown.
+     * - [SnapshotError] for engine failures
+     *   (snapshot not found, live rootfs
+     *   missing, copy I/O error).
+     */
+    fun rollbackWorkspace(
+        workspaceId: String,
+        snapshotId: String,
+        liveRootfsPath: String
+    ): Result<WorkspaceSnapshot> {
+        val engine = snapshotEngine
+            ?: return Result.failure(WorkspaceError.SnapshotEngineNotConfigured("rollback"))
+        if (byId[workspaceId] == null) {
+            return Result.failure(WorkspaceError.NotFound(workspaceId))
+        }
+        return when (val outcome = engine.rollback(workspaceId, snapshotId, liveRootfsPath)) {
+            is RollbackResult.Success -> {
+                eventBus.publish(
+                    RuntimeEvent.SnapshotRestoredEvent(
+                        atMs = clock(),
+                        workspaceId = workspaceId,
+                        snapshotId = outcome.restoredFrom.id,
+                        label = outcome.restoredFrom.label
+                    )
+                )
+                Result.success(outcome.restoredFrom)
+            }
+            is RollbackResult.Failure -> Result.failure(outcome.error)
+        }
+    }
+
+    /**
+     * List every snapshot of [workspaceId],
+     * sorted by `createdAtMs` ascending.
+     * Returns an empty list if the workspace has
+     * no snapshots or no engine is configured.
+     */
+    fun listSnapshots(workspaceId: String): List<WorkspaceSnapshot> {
+        val engine = snapshotEngine ?: return emptyList()
+        if (byId[workspaceId] == null) return emptyList()
+        return engine.list(workspaceId)
+    }
+
+    /**
+     * Delete a snapshot. On success, publishes
+     * [RuntimeEvent.SnapshotDeletedEvent] on
+     * the bus.
+     *
+     * Returns `true` if the snapshot was found
+     * and deleted, `false` otherwise.
+     */
+    fun deleteSnapshot(workspaceId: String, snapshotId: String): Result<Boolean> {
+        val engine = snapshotEngine
+            ?: return Result.failure(WorkspaceError.SnapshotEngineNotConfigured("delete"))
+        if (byId[workspaceId] == null) {
+            return Result.failure(WorkspaceError.NotFound(workspaceId))
+        }
+        val deleted = engine.delete(snapshotId)
+        if (deleted) {
+            eventBus.publish(
+                RuntimeEvent.SnapshotDeletedEvent(
+                    atMs = clock(),
+                    workspaceId = workspaceId,
+                    snapshotId = snapshotId
+                )
+            )
+        }
+        return Result.success(deleted)
+    }
+
     private companion object {
         val nextCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
@@ -311,4 +470,6 @@ sealed class WorkspaceError(message: String) : RuntimeException(message) {
         WorkspaceError("Session $sessionId not found in workspace $workspaceId")
     data class CannotCloseEmpty(val workspaceId: String) :
         WorkspaceError("Cannot close workspace $workspaceId: it has no sessions")
+    data class SnapshotEngineNotConfigured(val operation: String) :
+        WorkspaceError("Snapshot operation '$operation' requires a SnapshotEngine; manager was constructed without one")
 }
