@@ -1,7 +1,13 @@
 package com.elysium.vanguard.core.runtime.workspaces
 
+import com.elysium.vanguard.core.runtime.bridge.MountEntry
 import com.elysium.vanguard.core.runtime.observability.RuntimeEvent
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
+import com.elysium.vanguard.core.runtime.policy.MountAuditEntry
+import com.elysium.vanguard.core.runtime.policy.MountAuditLog
+import com.elysium.vanguard.core.runtime.policy.MountEnforcementResult
+import com.elysium.vanguard.core.runtime.policy.MountPolicy
+import com.elysium.vanguard.core.runtime.policy.MountPolicyEnforcer
 import com.elysium.vanguard.core.runtime.snapshots.MountPlan
 import com.elysium.vanguard.core.runtime.snapshots.RollbackResult
 import com.elysium.vanguard.core.runtime.snapshots.SnapshotEngine
@@ -56,6 +62,8 @@ class WorkspaceManager(
     private val store: WorkspaceStore,
     private val eventBus: RuntimeEventBus,
     private val snapshotEngine: SnapshotEngine? = null,
+    private val mountPolicyEnforcer: MountPolicyEnforcer? = null,
+    private val mountAuditLog: MountAuditLog? = null,
     clock: () -> Long = Companion::systemClock
 ) {
     private val clock: () -> Long = clock
@@ -438,6 +446,150 @@ class WorkspaceManager(
             )
         }
         return Result.success(deleted)
+    }
+
+    // ---- Mount policy (Phase 50) ----
+
+    /**
+     * Apply [policy] to the proposed [mounts] for
+     * [sessionId] in [workspaceId]. The enforcer
+     * returns either a filtered list (the
+     * allowlist-intersected mounts) or a list of
+     * violations.
+     *
+     * Every decision is:
+     *
+     * 1. Recorded in the [MountAuditLog] (if
+     *    configured) — append-only NDJSON.
+     * 2. Published on the [RuntimeEventBus] as a
+     *    [RuntimeEvent.MountAllowedEvent] or
+     *    [RuntimeEvent.MountPolicyViolationEvent].
+     *
+     * The runner (Phase 51+) consumes the
+     * returned [MountEnforcementResult] to
+     * produce its proot `-b` flag list.
+     *
+     * If the manager was constructed without an
+     * enforcer (e.g. a unit test that does not
+     * care about the policy), the method returns
+     * `Allowed(proposed.toList())` and writes
+     * nothing — the runtime is "permissive" for
+     * backwards compatibility. Production
+     * (Hilt) wires the enforcer; tests that
+     * exercise the policy wire it explicitly.
+     *
+     * Errors:
+     * - `WorkspaceError.NotFound` if the
+     *   workspace id is unknown.
+     */
+    fun enforceMountPolicy(
+        workspaceId: String,
+        sessionId: String,
+        policy: MountPolicy,
+        mounts: List<MountEntry>
+    ): Result<MountEnforcementResult> {
+        if (byId[workspaceId] == null) {
+            return Result.failure(WorkspaceError.NotFound(workspaceId))
+        }
+        val enforcer = mountPolicyEnforcer
+            ?: return Result.success(
+                MountEnforcementResult.Allowed(filteredMounts = mounts.toList())
+            )
+        val result = enforcer.enforce(policy, mounts)
+        recordMountDecisions(workspaceId, sessionId, policy, result)
+        return Result.success(result)
+    }
+
+    /**
+     * Record every decision in [result] to the
+     * audit log + the bus. One audit entry per
+     * allowed / denied / tightened mount; one
+     * event per decision.
+     */
+    private fun recordMountDecisions(
+        workspaceId: String,
+        sessionId: String,
+        policy: MountPolicy,
+        result: MountEnforcementResult
+    ) {
+        val nowMs = clock()
+        when (result) {
+            is MountEnforcementResult.Allowed -> {
+                for (entry in result.filteredMounts) {
+                    mountAuditLog?.append(
+                        MountAuditEntry(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = entry.hostPath,
+                            guestPath = entry.guestPath,
+                            decision = MountAuditEntry.DECISION_ALLOWED,
+                            reason = "mount allowed by policy"
+                        )
+                    )
+                    eventBus.publish(
+                        RuntimeEvent.MountAllowedEvent(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = entry.hostPath,
+                            guestPath = entry.guestPath,
+                            readOnly = entry.readOnly
+                        )
+                    )
+                }
+            }
+            is MountEnforcementResult.Denied -> {
+                // Record the allowed subset.
+                for (entry in result.allowedMounts) {
+                    mountAuditLog?.append(
+                        MountAuditEntry(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = entry.hostPath,
+                            guestPath = entry.guestPath,
+                            decision = MountAuditEntry.DECISION_ALLOWED,
+                            reason = "mount allowed (with denied siblings)"
+                        )
+                    )
+                    eventBus.publish(
+                        RuntimeEvent.MountAllowedEvent(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = entry.hostPath,
+                            guestPath = entry.guestPath,
+                            readOnly = entry.readOnly
+                        )
+                    )
+                }
+                // Record each violation.
+                for (violation in result.violations) {
+                    mountAuditLog?.append(
+                        MountAuditEntry(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = violation.hostPath,
+                            guestPath = violation.guestPath,
+                            decision = MountAuditEntry.DECISION_DENIED,
+                            reason = violation.reason
+                        )
+                    )
+                    eventBus.publish(
+                        RuntimeEvent.MountPolicyViolationEvent(
+                            atMs = nowMs,
+                            workspaceId = workspaceId,
+                            sessionId = sessionId,
+                            hostPath = violation.hostPath,
+                            guestPath = violation.guestPath,
+                            reason = violation.reason
+                        )
+                    )
+                }
+            }
+        }
     }
 
     private companion object {

@@ -198,6 +198,26 @@ class RuntimeEventLog(
                 "workspaceId" to event.workspaceId,
                 "snapshotId" to event.snapshotId
             )
+        is RuntimeEvent.MountAllowedEvent ->
+            jsonObject(
+                "kind" to "MountAllowed",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "sessionId" to event.sessionId,
+                "hostPath" to event.hostPath,
+                "guestPath" to event.guestPath,
+                "readOnly" to event.readOnly
+            )
+        is RuntimeEvent.MountPolicyViolationEvent ->
+            jsonObject(
+                "kind" to "MountPolicyViolation",
+                "atMs" to event.atMs,
+                "workspaceId" to event.workspaceId,
+                "sessionId" to event.sessionId,
+                "hostPath" to event.hostPath,
+                "guestPath" to event.guestPath,
+                "reason" to event.reason
+            )
     }
 
     private fun jsonObject(vararg pairs: Pair<String, Any?>): String {
@@ -325,6 +345,22 @@ class RuntimeEventLog(
                 atMs = atMs,
                 workspaceId = map["workspaceId"] ?: "",
                 snapshotId = map["snapshotId"] ?: ""
+            )
+            "MountAllowed" -> RuntimeEvent.MountAllowedEvent(
+                atMs = atMs,
+                workspaceId = map["workspaceId"] ?: "",
+                sessionId = map["sessionId"] ?: "",
+                hostPath = map["hostPath"] ?: "",
+                guestPath = map["guestPath"] ?: "",
+                readOnly = map["readOnly"]?.toBooleanStrictOrNull() ?: false
+            )
+            "MountPolicyViolation" -> RuntimeEvent.MountPolicyViolationEvent(
+                atMs = atMs,
+                workspaceId = map["workspaceId"] ?: "",
+                sessionId = map["sessionId"] ?: "",
+                hostPath = map["hostPath"] ?: "",
+                guestPath = map["guestPath"] ?: "",
+                reason = map["reason"] ?: ""
             )
             else -> null
         }

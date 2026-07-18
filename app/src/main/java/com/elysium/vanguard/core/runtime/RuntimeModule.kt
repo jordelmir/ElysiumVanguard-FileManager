@@ -6,6 +6,9 @@ import com.elysium.vanguard.core.runtime.observability.BusToLogAdapter
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
 import com.elysium.vanguard.core.runtime.observability.RuntimeEventLog
 import com.elysium.vanguard.core.runtime.observability.SynchronizedEventBus
+import com.elysium.vanguard.core.runtime.policy.FileMountAuditLog
+import com.elysium.vanguard.core.runtime.policy.MountAuditLog
+import com.elysium.vanguard.core.runtime.policy.MountPolicyEnforcer
 import com.elysium.vanguard.core.runtime.runner.AndroidProcessLauncher
 import com.elysium.vanguard.core.runtime.runner.LinuxProotSessionRunner
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
@@ -96,11 +99,15 @@ object RuntimeModule {
         store: WorkspaceStore,
         eventBus: RuntimeEventBus,
         snapshotEngine: SnapshotEngine,
+        mountPolicyEnforcer: MountPolicyEnforcer,
+        mountAuditLog: MountAuditLog,
         @WallClock clock: () -> Long
     ): WorkspaceManager = WorkspaceManager(
         store = store,
         eventBus = eventBus,
         snapshotEngine = snapshotEngine,
+        mountPolicyEnforcer = mountPolicyEnforcer,
+        mountAuditLog = mountAuditLog,
         clock = clock
     )
 
@@ -122,6 +129,37 @@ object RuntimeModule {
             if (!exists()) mkdirs()
         }
         return FilesystemSnapshotEngine(baseDir = baseDir)
+    }
+
+    // --- Mount policy (Phase 50) ---
+
+    /**
+     * The mount policy enforcer is a stateless
+     * function over a [com.elysium.vanguard.core.runtime.policy.MountPolicy]
+     * + a list of proposed mounts. A single
+     * instance is safe to call from multiple
+     * coroutines; the Hilt scope is a process
+     * singleton.
+     */
+    @Provides
+    @Singleton
+    fun provideMountPolicyEnforcer(): MountPolicyEnforcer = MountPolicyEnforcer()
+
+    /**
+     * The on-disk mount audit log. Stores one
+     * JSON object per line at
+     * `<filesDir>/runtime/mount-audit.ndjson`.
+     * The runtime event log is at
+     * `<filesDir>/runtime/audit.ndjson`; the
+     * mount audit log is a separate file because
+     * the access pattern is different (per-mount
+     * queries vs. event-stream queries).
+     */
+    @Provides
+    @Singleton
+    fun provideMountAuditLog(@ApplicationContext context: Context): MountAuditLog {
+        val logFile = File(context.filesDir, "runtime/mount-audit.ndjson")
+        return FileMountAuditLog(logFile = logFile)
     }
 
     // --- Windows VMs (Phase 22 + Phase 23) ---

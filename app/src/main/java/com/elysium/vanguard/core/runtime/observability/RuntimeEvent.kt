@@ -144,4 +144,24 @@ sealed class RuntimeEvent {
         override val workspaceId: String,
         val snapshotId: String
     ) : RuntimeEvent()
+
+    // --- Mount policy (Phase 50) ---
+
+    data class MountAllowedEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val sessionId: String,
+        val hostPath: String,
+        val guestPath: String,
+        val readOnly: Boolean
+    ) : RuntimeEvent()
+
+    data class MountPolicyViolationEvent(
+        override val atMs: Long,
+        override val workspaceId: String,
+        val sessionId: String,
+        val hostPath: String,
+        val guestPath: String,
+        val reason: String
+    ) : RuntimeEvent()
 }
