@@ -30,6 +30,15 @@ data class WineSessionSpec(
     val environmentVariables: Map<String, String>,
     val prefix: WinePrefix,
     val box64: Box64Config,
+    /**
+     * Phase 55 — the optional GPU
+     * acceleration config. When non-null
+     * and [GpuAccelerationConfig.isEnabled]
+     * is true, the backend sets the
+     * DXVK / VKD3D-Proton env vars on the
+     * spawned process.
+     */
+    val gpuAcceleration: GpuAccelerationConfig? = null,
     val workspaceId: String? = null
 ) {
     init {
@@ -180,6 +189,16 @@ class InProcessWineSessionBackend(
         env["WINEARCH"] = prefix.architecture
         env["WINEDEBUG"] = "-all"
         env.putAll(spec.box64.toEnvironment())
+        // Phase 55: GPU acceleration
+        // (DXVK / VKD3D-Proton) is opt-in
+        // per session. The runner / spec
+        // builder sets the env vars only
+        // when the user enables it.
+        spec.gpuAcceleration?.let { gpu ->
+            if (gpu.isEnabled) {
+                env.putAll(gpu.toEnvironment())
+            }
+        }
         val command = buildList {
             add(box64Bin.absolutePath)
             add(wineBin.absolutePath)
