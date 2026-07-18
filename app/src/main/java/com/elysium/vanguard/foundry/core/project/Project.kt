@@ -27,6 +27,7 @@ data class Project(
     val ownerId: UserId,
     val status: ProjectStatus,
     val createdAt: Timestamp,
+    val version: Long = 0L,
 ) {
     init {
         require(name.isNotBlank()) { "Project name must not be blank" }

@@ -10,6 +10,8 @@ import org.junit.Test
 
 class ProjectServiceTest {
 
+    private val service = ProjectService()
+
     @Test
     fun `create project with valid name returns success`() {
         val service = ProjectService()
@@ -23,6 +25,7 @@ class ProjectServiceTest {
         assertEquals(ProjectStatus.DRAFT, project.status)
         assertNotNull(project.id)
         assertNotNull(project.createdAt)
+        assertEquals(0L, project.version)
     }
 
     @Test
@@ -70,5 +73,57 @@ class ProjectServiceTest {
         assertNotEquals(a.id, b.id)
         assertEquals("Alpha", a.name)
         assertEquals("Beta", b.name)
+    }
+
+    // --- rename ---
+
+    @Test
+    fun `rename with valid name increments version`() {
+        val project = service.createProject(UserId.random(), "Alpha").getOrThrow()
+        val renamed = service.rename(project, "Alpha v2", expectedVersion = 0L).getOrThrow()
+        assertEquals("Alpha v2", renamed.name)
+        assertEquals(1L, renamed.version)
+    }
+
+    @Test
+    fun `rename with stale version raises RevisionConflict`() {
+        val project = service.createProject(UserId.random(), "Alpha").getOrThrow()
+        val first = service.rename(project, "Alpha v2", expectedVersion = 0L).getOrThrow()
+        val conflict = service.rename(first, "Alpha v3", expectedVersion = 0L)
+        assertTrue(conflict.isFailure)
+        val error = conflict.exceptionOrNull()
+        assertTrue(
+            "expected RevisionConflict, got ${error?.javaClass}",
+            error is FoundryError.RevisionConflict,
+        )
+        error as FoundryError.RevisionConflict
+        assertEquals("Project", error.aggregateType)
+    }
+
+    @Test
+    fun `rename to the same name returns typed failure`() {
+        val project = service.createProject(UserId.random(), "Alpha").getOrThrow()
+        val result = service.rename(project, "Alpha", expectedVersion = 0L)
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is FoundryError.VehicleDefinitionInvalid)
+    }
+
+    // --- archive ---
+
+    @Test
+    fun `archive transitions to ARCHIVED and increments version`() {
+        val project = service.createProject(UserId.random(), "Alpha").getOrThrow()
+        val archived = service.archive(project, expectedVersion = 0L).getOrThrow()
+        assertEquals(ProjectStatus.ARCHIVED, archived.status)
+        assertEquals(1L, archived.version)
+    }
+
+    @Test
+    fun `archive on already archived returns typed failure`() {
+        val project = service.createProject(UserId.random(), "Alpha").getOrThrow()
+        val archived = service.archive(project, expectedVersion = 0L).getOrThrow()
+        val result = service.archive(archived, expectedVersion = 1L)
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is FoundryError.VehicleDefinitionInvalid)
     }
 }
