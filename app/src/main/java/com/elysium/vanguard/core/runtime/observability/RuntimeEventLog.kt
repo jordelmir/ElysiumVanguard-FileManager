@@ -218,6 +218,48 @@ class RuntimeEventLog(
                 "guestPath" to event.guestPath,
                 "reason" to event.reason
             )
+        is RuntimeEvent.AgentActionStartedEvent ->
+            jsonObject(
+                "kind" to "AgentActionStarted",
+                "atMs" to event.atMs,
+                "workspaceId" to (event.workspaceId ?: ""),
+                "planId" to event.planId,
+                "actionIndex" to event.actionIndex
+            )
+        is RuntimeEvent.AgentActionCompletedEvent ->
+            jsonObject(
+                "kind" to "AgentActionCompleted",
+                "atMs" to event.atMs,
+                "workspaceId" to (event.workspaceId ?: ""),
+                "planId" to event.planId,
+                "actionIndex" to event.actionIndex
+            )
+        is RuntimeEvent.AgentActionFailedEvent ->
+            jsonObject(
+                "kind" to "AgentActionFailed",
+                "atMs" to event.atMs,
+                "workspaceId" to (event.workspaceId ?: ""),
+                "planId" to event.planId,
+                "actionIndex" to event.actionIndex,
+                "error" to event.error
+            )
+        is RuntimeEvent.AgentActionRolledBackEvent ->
+            jsonObject(
+                "kind" to "AgentActionRolledBack",
+                "atMs" to event.atMs,
+                "workspaceId" to (event.workspaceId ?: ""),
+                "planId" to event.planId,
+                "actionIndex" to event.actionIndex,
+                "rolledBack" to event.rolledBack
+            )
+        is RuntimeEvent.AgentActionRefusedEvent ->
+            jsonObject(
+                "kind" to "AgentActionRefused",
+                "atMs" to event.atMs,
+                "workspaceId" to (event.workspaceId ?: ""),
+                "planId" to event.planId,
+                "reason" to event.reason
+            )
     }
 
     private fun jsonObject(vararg pairs: Pair<String, Any?>): String {

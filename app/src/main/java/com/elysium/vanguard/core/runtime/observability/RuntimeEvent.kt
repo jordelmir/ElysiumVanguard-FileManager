@@ -164,4 +164,43 @@ sealed class RuntimeEvent {
         val guestPath: String,
         val reason: String
     ) : RuntimeEvent()
+
+    // --- Agent (Phase 57) ---
+
+    data class AgentActionStartedEvent(
+        override val atMs: Long,
+        override val workspaceId: String?,
+        val planId: String,
+        val actionIndex: Int
+    ) : RuntimeEvent()
+
+    data class AgentActionCompletedEvent(
+        override val atMs: Long,
+        override val workspaceId: String?,
+        val planId: String,
+        val actionIndex: Int
+    ) : RuntimeEvent()
+
+    data class AgentActionFailedEvent(
+        override val atMs: Long,
+        override val workspaceId: String?,
+        val planId: String,
+        val actionIndex: Int,
+        val error: String
+    ) : RuntimeEvent()
+
+    data class AgentActionRolledBackEvent(
+        override val atMs: Long,
+        override val workspaceId: String?,
+        val planId: String,
+        val actionIndex: Int,
+        val rolledBack: Boolean
+    ) : RuntimeEvent()
+
+    data class AgentActionRefusedEvent(
+        override val atMs: Long,
+        override val workspaceId: String?,
+        val planId: String,
+        val reason: String
+    ) : RuntimeEvent()
 }
