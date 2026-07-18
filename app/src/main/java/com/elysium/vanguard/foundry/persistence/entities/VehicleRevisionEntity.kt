@@ -4,9 +4,11 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.elysium.vanguard.foundry.core.ontology.ids.ProjectId
+import com.elysium.vanguard.foundry.core.ontology.ids.ProvenanceRecordId
 import com.elysium.vanguard.foundry.core.ontology.ids.VehicleRevisionId
 import com.elysium.vanguard.foundry.core.ontology.primitives.ContentHash
 import com.elysium.vanguard.foundry.core.ontology.primitives.RepresentationLevel
+import com.elysium.vanguard.foundry.core.ontology.primitives.Signature
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
 import com.elysium.vanguard.foundry.core.provenance.ProvenanceRecord
 import com.elysium.vanguard.foundry.core.revision.VehicleRevision
@@ -19,13 +21,21 @@ import com.elysium.vanguard.foundry.core.scene.SceneManifest
  * of the frozen state.
  *
  * Per `docs/foundry/domain-ownership.md` section 2.3:
- * a `VehicleRevision` is the unit of
- * immutability. The `provenance` + the
- * `sceneManifest` are stored as JSON
- * (unit-separator-joined content-hash
- * strings) — the full reconstruction is
- * in the `FoundryRepository` (Phase 2
- * follow-up).
+ *   - A `VehicleRevision` is the unit of
+ *     immutability.
+ *   - The `provenance` + the `sceneManifest`
+ *     are stored as serialized snapshots.
+ *
+ * **Note** (Phase F1 closure): the entity
+ * previously dropped the `provenance.subjectId`
+ * (re-using the record id) and the
+ * `provenance.witnesses` list. The two new
+ * columns (`provenance_subject_id` +
+ * `provenance_witnesses`) close that gap so
+ * a round-trip `VehicleRevision -> Entity ->
+ * VehicleRevision` preserves the
+ * `isComplete` invariant of the embedded
+ * `ProvenanceRecord`.
  */
 @Entity(tableName = "vehicle_revisions")
 data class VehicleRevisionEntity(
@@ -42,11 +52,17 @@ data class VehicleRevisionEntity(
     @ColumnInfo(name = "provenance_id")
     val provenanceId: String,
 
+    @ColumnInfo(name = "provenance_subject_id")
+    val provenanceSubjectId: String,
+
     @ColumnInfo(name = "provenance_source")
     val provenanceSource: String,
 
     @ColumnInfo(name = "provenance_signature")
     val provenanceSignature: String,
+
+    @ColumnInfo(name = "provenance_witnesses")
+    val provenanceWitnesses: String, // unit-separator-joined signatures
 
     @ColumnInfo(name = "scene_manifest_components")
     val sceneManifestComponents: String, // unit-separator-joined "id:label" pairs
@@ -70,17 +86,19 @@ data class VehicleRevisionEntity(
      * Reconstruct the domain `VehicleRevision`.
      * The `provenance` and the `sceneManifest`
      * are reconstructed from the stored
-     * snapshots; the full `SignedEvent` chain
-     * is in the audit trail (Phase 2 follow-up).
+     * snapshots.
      */
     fun toDomain(): VehicleRevision {
         val contentHashDomain = ContentHash(contentHash)
         val provenance = ProvenanceRecord(
-            id = com.elysium.vanguard.foundry.core.ontology.ids.ProvenanceRecordId.from(provenanceId).getOrThrow(),
-            subjectId = provenanceId,
+            id = ProvenanceRecordId.from(provenanceId).getOrThrow(),
+            subjectId = provenanceSubjectId,
             source = provenanceSource,
-            signature = com.elysium.vanguard.foundry.core.ontology.primitives.Signature(provenanceSignature),
-            witnesses = emptyList(),
+            signature = Signature(provenanceSignature),
+            witnesses = provenanceWitnesses
+                .split("\u001F")
+                .filter { it.isNotEmpty() }
+                .map(::Signature),
             createdAt = Timestamp(createdAtEpochMs),
         )
         val sceneManifest = SceneManifest(
@@ -123,8 +141,11 @@ data class VehicleRevisionEntity(
             projectId = revision.projectId.value.toString(),
             contentHash = revision.contentHash.value,
             provenanceId = revision.provenance.id.value.toString(),
+            provenanceSubjectId = revision.provenance.subjectId,
             provenanceSource = revision.provenance.source,
             provenanceSignature = revision.provenance.signature.value,
+            provenanceWitnesses = revision.provenance.witnesses
+                .joinToString(separator = "\u001F") { it.value },
             sceneManifestComponents = revision.sceneManifest.components
                 .joinToString(separator = "\u001F") { "${it.id}:${it.label}" },
             sceneManifestLods = revision.sceneManifest.lods

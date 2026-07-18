@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.elysium.vanguard.foundry.persistence.entities.ProvenanceRecordEntity
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Room DAO for the `ProvenanceRecordEntity`.
@@ -26,6 +27,9 @@ interface ProvenanceRecordDao {
 
     @Query("SELECT * FROM provenance_records WHERE subject_id = :subjectId ORDER BY created_at_epoch_ms ASC")
     suspend fun getBySubject(subjectId: String): List<ProvenanceRecordEntity>
+
+    @Query("SELECT * FROM provenance_records ORDER BY created_at_epoch_ms ASC")
+    fun observeAll(): Flow<List<ProvenanceRecordEntity>>
 
     @Query("SELECT COUNT(*) FROM provenance_records")
     suspend fun count(): Int
