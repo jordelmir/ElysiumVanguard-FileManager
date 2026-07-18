@@ -17,6 +17,15 @@ package com.elysium.vanguard.foundry.core.ontology.primitives
  */
 enum class RepresentationLevel {
     /**
+     * Sentinel: the level is not set. Used as a default value
+     * + a "missing required field" indicator (per
+     * `.ai/STANDARDS.md` 4 — a `vehicle` without a
+     * `representationLevel` is rejected). The schema rejects
+     * this value at construction time.
+     */
+    UNKNOWN,
+
+    /**
      * The geometry has been validated against an OEM-shipped vehicle; the
      * units are correct; the coordinate system matches the OEM standard;
      * the part numbers are traceable. Requires an `OEM_VERIFIED`

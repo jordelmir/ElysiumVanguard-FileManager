@@ -67,18 +67,26 @@ class PrimitivesTest {
     // --- RepresentationLevel ---
 
     @Test
-    fun `representation level has five values`() {
-        assertEquals(5, RepresentationLevel.values().size)
+    fun `representation level has six values including UNKNOWN sentinel`() {
+        // The 6 values (per Phase F2 / schema):
+        //   0. UNKNOWN               — sentinel for "not set"
+        //   1. OEM_EXACT             — geometry validated against an OEM-shipped vehicle
+        //   2. OEM_PARTIAL           — most geometry validated; some surfaces parametric
+        //   3. PARAMETRIC_FUNCTIONAL — geometry defined parametrically (default)
+        //   4. CONCEPTUAL            — placeholder for an engineering concept
+        //   5. VISUAL_ONLY           — visual-only representation (no engineering claim)
+        assertEquals(6, RepresentationLevel.values().size)
     }
 
     @Test
     fun `representation level preserves enum order`() {
         val levels = RepresentationLevel.values()
-        assertEquals(RepresentationLevel.OEM_EXACT, levels[0])
-        assertEquals(RepresentationLevel.OEM_PARTIAL, levels[1])
-        assertEquals(RepresentationLevel.PARAMETRIC_FUNCTIONAL, levels[2])
-        assertEquals(RepresentationLevel.CONCEPTUAL, levels[3])
-        assertEquals(RepresentationLevel.VISUAL_ONLY, levels[4])
+        assertEquals(RepresentationLevel.UNKNOWN, levels[0])
+        assertEquals(RepresentationLevel.OEM_EXACT, levels[1])
+        assertEquals(RepresentationLevel.OEM_PARTIAL, levels[2])
+        assertEquals(RepresentationLevel.PARAMETRIC_FUNCTIONAL, levels[3])
+        assertEquals(RepresentationLevel.CONCEPTUAL, levels[4])
+        assertEquals(RepresentationLevel.VISUAL_ONLY, levels[5])
     }
 
     // --- Timestamp ---
