@@ -1,0 +1,52 @@
+{
+  "apiVersion": "elysium.workspace/v1",
+  "id": "blender-linux",
+  "name": "Blender on Linux",
+  "description": "Blender 3D on Elysium Vanguard Linux (Phase 66 sample)",
+  "runtime": "LINUX_PROOT",
+  "mounts": [
+    {
+      "hostPath": "/sdcard/ElysiumVanguard/workspaces/blender-linux/projects",
+      "containerPath": "/workspace/projects",
+      "readOnly": false,
+      "description": "User's Blender project files"
+    },
+    {
+      "hostPath": "/sdcard/ElysiumVanguard/workspaces/blender-linux/cache",
+      "containerPath": "/workspace/cache",
+      "readOnly": false,
+      "description": "Blender's render cache (writable; user owns the cache)"
+    },
+    {
+      "hostPath": "/sdcard/ElysiumVanguard/workspaces/blender-linux/assets",
+      "containerPath": "/usr/share/blender/assets",
+      "readOnly": true,
+      "description": "Shared Blender assets (read-only)"
+    }
+  ],
+  "env": [
+    {
+      "name": "DISPLAY",
+      "value": ":0",
+      "secret": false
+    },
+    {
+      "name": "BLENDER_USER_SCRIPTS",
+      "value": "/workspace/projects/scripts",
+      "secret": false
+    }
+  ],
+  "launcher": {
+    "command": "/usr/bin/blender",
+    "args": [
+      "--background"
+    ],
+    "workingDirectory": "/workspace/projects",
+    "environmentPassthrough": false
+  },
+  "resources": {
+    "maxMemoryMb": 4096,
+    "cpuPriority": 75
+  },
+  "createdAtMs": 1700000000000
+}
