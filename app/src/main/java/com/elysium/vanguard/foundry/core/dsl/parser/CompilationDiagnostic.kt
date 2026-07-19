@@ -179,6 +179,34 @@ sealed class CompilationDiagnostic(
     )
 
     /**
+     * A spec has a value combination that violates a
+     * **cross-aggregate invariant** — the validator
+     * (Phase 2 / I-2.4) catches what the data-class
+     * `init` blocks don't (e.g. `ELECTRIC` +
+     * `INLINE_4`, `V12` + `FWD`, `COUPE` + 4 doors).
+     *
+     * The `ruleCode` is the stable identifier of
+     * the [com.elysium.vanguard.foundry.core.dsl.validator.SpecRule]
+     * that fired; the `paths` are the JSON paths
+     * the rule references; the `reason` is the
+     * human-readable explanation.
+     *
+     * Phase 2 / I-2.4 — new variant.
+     */
+    data class CrossAggregateInvariantViolation(
+        val ruleCode: String,
+        val reason: String,
+        val jsonPaths: List<String>,
+        val diagnosticSeverity: Severity = Severity.HARD,
+    ) : CompilationDiagnostic(
+        message = "Cross-aggregate invariant violation " +
+            "($ruleCode): $reason",
+        code = "VCOMP-CROSS-008",
+        severity = diagnosticSeverity,
+        paths = jsonPaths,
+    )
+
+    /**
      * Convert the diagnostic to a `FoundryError` envelope.
      * The `code` is preserved; the `message` is the diagnostic
      * message; the `retryClassification` is `NON_RETRYABLE`
