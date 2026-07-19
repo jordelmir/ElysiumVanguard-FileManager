@@ -18,8 +18,21 @@ import com.elysium.vanguard.foundry.core.ontology.primitives.ContentHash
  *
  * The compilation is **immutable** (data class + no setters); the
  * `VehicleRevision` is the persistent record of the compilation.
+ *
+ * Phase 2 / I-2.7 — the `report` field carries the detailed
+ * [CompilationReport] when the 18-step pipeline ran. The field
+ * is nullable for backward compatibility with the Phase 1
+ * `DeterministicVehicleCompiler` (which doesn't run the
+ * pipeline; it just hashes the canonical form).
  */
 data class Compilation(
     val contentHash: ContentHash,
     val warnings: List<String> = emptyList(),
+    /**
+     * Phase 2 / I-2.7 — the detailed compilation report
+     * (errors + warnings + info notes + per-step results).
+     * `null` when the compiler didn't run the 18-step
+     * pipeline (the Phase 1 SHA-256 stub).
+     */
+    val report: CompilationReport? = null,
 )
