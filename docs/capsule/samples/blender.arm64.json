@@ -1,0 +1,25 @@
+{
+  "apiVersion": "elysium.capsule/v1",
+  "id": "com.elysium.blender.arm64",
+  "name": "Blender 3D for ARM64",
+  "version": "4.2.0",
+  "description": "Blender 3D on Elysium Vanguard Linux (Phase 68 sample — matches the master vision's literal example).",
+  "runtime": "LINUX",
+  "architecture": "ARM64",
+  "distribution": "elysium-linux-1",
+  "entrypoint": {
+    "executable": "/usr/bin/blender",
+    "args": [],
+    "workingDirectory": "/workspace/projects"
+  },
+  "gpu": {
+    "api": "VULKAN",
+    "driver": "TURNIP"
+  },
+  "permissions": {
+    "network": false,
+    "storage": ["USER_SELECTED"]
+  },
+  "signature": "sig-sample-blender-arm64-not-for-production",
+  "contentHash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+}
