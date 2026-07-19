@@ -149,4 +149,23 @@ sealed class FoundryError(
         code = "COMPILATION_NON_DETERMINISTIC",
         retryClassification = RetryClassification.NON_RETRYABLE,
     )
+
+    /**
+     * A content-addressed artifact's integrity failed. The
+     * artifact's content does not match the declared hash
+     * (a corrupted download) OR the signature is invalid
+     * (a tampered artifact). The artifact is rejected.
+     *
+     * Phase 3 / I-3.1 — the Scene Manifest + the 3D
+     * pipeline use this error for content-addressed asset
+     * verification + signature verification.
+     */
+    data class ArtifactIntegrityFailure(
+        val artifactId: String,
+        val reason: String,
+    ) : FoundryError(
+        message = "Artifact integrity failure for $artifactId: $reason",
+        code = "ARTIFACT_INTEGRITY_FAILURE",
+        retryClassification = RetryClassification.NON_RETRYABLE,
+    )
 }

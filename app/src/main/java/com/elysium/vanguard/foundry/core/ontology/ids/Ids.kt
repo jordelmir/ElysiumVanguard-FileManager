@@ -212,3 +212,44 @@ value class RepairActionId(val value: UUID) {
         }
     }
 }
+
+/**
+ * A typed 3D asset id. The asset id is the content
+ * hash of the asset's geometry (per
+ * `.ai/skills/06-3d-cad-asset-pipeline/SKILL.md`
+ * section 4 — content-addressed assets). The value
+ * class wraps a `String` (not a `UUID`); the value
+ * IS the content hash.
+ *
+ * Phase 3 / I-3.1 — new value class.
+ */
+@JvmInline
+value class AssetId(val value: String) {
+    init {
+        require(value.isNotBlank()) {
+            "AssetId.value must not be blank"
+        }
+    }
+
+    companion object {
+        /** The empty / unknown sentinel (used for tests + error paths). */
+        val UNKNOWN: AssetId = AssetId("__unknown__")
+
+        /**
+         * Build an `AssetId` from a content hash. The
+         * hash is a SHA-256 hex string (64 chars).
+         * The asset id is the hash; no transformation.
+         */
+        fun fromHash(hash: String): Result<AssetId> {
+            if (hash.length != 64 || !hash.all { it.isDigit() || it in 'a'..'f' }) {
+                return Result.failure(
+                    FoundryError.ArtifactIntegrityFailure(
+                        artifactId = hash,
+                        reason = "expected 64-char SHA-256 hex, got: $hash",
+                    ),
+                )
+            }
+            return Result.success(AssetId(hash))
+        }
+    }
+}
