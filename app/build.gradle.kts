@@ -26,6 +26,24 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // PHASE 76 (App signature check): the Security Zero Trust
+        // surface needs the actual publisher's signing certificate
+        // SHA-256 digest at build time. The default value (empty
+        // string + PRODUCTION_BUILD = false) is the "dev mode"
+        // config — the integrity checker's signature path accepts
+        // the actual signature as valid if one is present.
+        //
+        // To publish a real release: set the `release` build type's
+        // `buildConfigField` for `EXPECTED_PUBLISHER_SIG_SHA256` to
+        // the actual publisher's digest (query with `apksigner
+        // verify --print-certs <apk>`) and flip `PRODUCTION_BUILD`
+        // to `true`. The `DeviceIntegrityConfig.init` block fails
+        // fast at construction time if PRODUCTION_BUILD = true is
+        // shipped without an expected — that's the fail-secure
+        // default.
+        buildConfigField("String", "EXPECTED_PUBLISHER_SIG_SHA256", "\"\"")
+        buildConfigField("boolean", "PRODUCTION_BUILD", "false")
     }
 
     testOptions {

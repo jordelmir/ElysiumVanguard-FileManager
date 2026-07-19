@@ -39,6 +39,7 @@ import javax.inject.Singleton
 @Singleton
 class DeviceIntegrityChecker @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val config: DeviceIntegrityConfig,
 ) {
     /**
      * Compute the device's integrity state.
@@ -49,7 +50,7 @@ class DeviceIntegrityChecker @Inject constructor(
     fun check(): DeviceIntegrity {
         val rooted = checkRooted()
         val debugger = checkDebuggerAttached()
-        val (signatureValid, signatureDigest) = checkAppSignature()
+        val (signatureValid, signatureDigest) = checkAppSignature(config)
         return DeviceIntegrity(
             isRooted = rooted,
             isDebuggerAttached = debugger,
@@ -58,6 +59,32 @@ class DeviceIntegrityChecker @Inject constructor(
             appSignatureDigest = signatureDigest,
         )
     }
+
+    /**
+     * Phase 76 — the pure-comparison function the
+     * signature check delegates to. Exposed as
+     * `internal` on a separate top-level function
+     * (not on the [DeviceIntegrityChecker] class)
+     * so the test suite can drive every
+     * combination of (actual, expected, dev/prod)
+     * without standing up the Android
+     * [PackageManager] or the [Context] the
+     * checker's constructor requires. The
+     * production path uses the same function; the
+     * testability is the only reason it's not
+     * `private` to the file.
+     *
+     * Returns a `(valid, observed)` pair:
+     * - `valid = true` when the comparison passed
+     *   (or dev-mode + actual present)
+     * - `observed` is the actual digest the
+     *   checker recorded (used for the audit log
+     *   and the human-readable integrity report).
+     */
+    internal fun compareSignatureDigests(
+        actualDigest: String?,
+        config: DeviceIntegrityConfig,
+    ): Pair<Boolean, String?> = compareSignatureDigestsInternal(actualDigest, config)
 
     /**
      * Heuristic rooted check: the device is
@@ -115,16 +142,27 @@ class DeviceIntegrityChecker @Inject constructor(
      * implementation reads the APK's
      * signature from the `PackageManager` +
      * compares it to the expected publisher's
-     * signature digest.
+     * signature digest (from [DeviceIntegrityConfig]).
      *
-     * Phase 1: returns `(false, null)` until
-     * the expected publisher signature is
-     * configured. Phase 2: reads the expected
-     * signature from a Hilt-injected config.
+     * Phase 76 — the comparison is now real:
+     *  - When [DeviceIntegrityConfig.expectedPublisherSignatureSha256]
+     *    is set, the actual APK signing certificate's
+     *    SHA-256 digest must match it (case-insensitive).
+     *    A mismatch (or a missing actual signature) fails
+     *    the check.
+     *  - When `expectedPublisherSignatureSha256` is `null`,
+     *    the checker is in dev mode: it accepts the
+     *    actual signature as valid if one is present.
+     *  - When [DeviceIntegrityConfig.productionBuild] is
+     *    `true` and `expectedPublisherSignatureSha256`
+     *    is `null`, the [DeviceIntegrityConfig.init]
+     *    fails fast at construction time (so this
+     *    branch is unreachable in a properly-configured
+     *    release build).
      */
-    private fun checkAppSignature(): Pair<Boolean, String?> {
+    private fun checkAppSignature(config: DeviceIntegrityConfig): Pair<Boolean, String?> {
         val pm = context.packageManager
-        val signatures = try {
+        val actualDigest: String? = try {
             @Suppress("DEPRECATION")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val info = pm.getPackageInfo(
@@ -143,11 +181,37 @@ class DeviceIntegrityChecker @Inject constructor(
         } catch (e: Exception) {
             return false to null
         }
-        // Phase 1: no expected signature configured; treat as valid
-        // to keep the development flow unblocked. Phase 2 wires the
-        // expected publisher's signature + verifies against it.
-        return (signatures != null) to signatures
+        return compareSignatureDigestsInternal(actualDigest, config)
     }
+}
+
+/**
+ * Phase 76 — the top-level pure comparison
+ * function. Kept as a free function (not a
+ * [DeviceIntegrityChecker] member) so the JVM
+ * test suite can call it without instantiating
+ * the Android [Context]-bound checker.
+ *
+ * The logic is identical to the checker's
+ * private path; both call sites converge here
+ * so a single test suite covers both.
+ */
+internal fun compareSignatureDigestsInternal(
+    actualDigest: String?,
+    config: DeviceIntegrityConfig,
+): Pair<Boolean, String?> {
+    val expected = config.expectedPublisherSignatureSha256
+    if (expected == null) {
+        // Dev mode — no expected signature. Accept
+        // the actual signature as valid if one is
+        // present (the production-build check would
+        // have failed at config construction time).
+        return (actualDigest != null) to actualDigest
+    }
+    // Production mode — compare to expected.
+    val valid = actualDigest != null &&
+        actualDigest.equals(expected, ignoreCase = true)
+    return valid to actualDigest
 }
 
 /**
