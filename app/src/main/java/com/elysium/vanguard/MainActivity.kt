@@ -98,11 +98,27 @@ class MainActivity : ComponentActivity() {
                             onNavigateToWord = { navController.navigate("editor_word_new") },
                             onNavigateToSheet = { navController.navigate("editor_sheet_new") },
                             onNavigateToColors = { navController.navigate("color_customization") },
-                            onNavigateToCommandCore = { navController.navigate("command_core") }
+                            onNavigateToCommandCore = { navController.navigate("command_core") },
+                            onNavigateToLocalAgent = { navController.navigate("local_agent") }
                         )
                     }
                     composable("command_core") {
                         com.elysium.vanguard.features.commandcore.AgentCommandScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    // PHASE 73 — the rule-based
+                    // Vanguard AI surface. Parallel
+                    // to `command_core` (which is the
+                    // HTTP-gateway Command Core); the
+                    // two systems coexist. The
+                    // local-agent surface is the
+                    // rule-based, on-device, no-LLM
+                    // path. The user can choose
+                    // either route from the
+                    // dashboard.
+                    composable("local_agent") {
+                        com.elysium.vanguard.features.agent.LocalAgentScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }

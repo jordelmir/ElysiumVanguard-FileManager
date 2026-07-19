@@ -73,7 +73,8 @@ fun DashboardScreen(
     onNavigateToWord: (() -> Unit)? = null,
     onNavigateToSheet: (() -> Unit)? = null,
     onNavigateToColors: (() -> Unit)? = null,
-    onNavigateToCommandCore: (() -> Unit)? = null
+    onNavigateToCommandCore: (() -> Unit)? = null,
+    onNavigateToLocalAgent: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -170,6 +171,18 @@ fun DashboardScreen(
             neonColor = TitanColors.NeonCyan,
             onClick = onNavigateToCommandCore ?: {},
             gradientBg = moduleSurface(TitanColors.NeonCyan)
+        ),
+        // PHASE 73 — the rule-based local agent
+        // (parallel to the HTTP-gateway Command
+        // Core; the two systems coexist and the
+        // user picks which one to talk to).
+        PortalItem(
+            title = "LOCAL AGENT",
+            subtitle = "RULE-BASED · ON-DEVICE",
+            icon = Icons.Default.Psychology,
+            neonColor = TitanColors.NeonRed,
+            onClick = onNavigateToLocalAgent ?: {},
+            gradientBg = moduleSurface(TitanColors.NeonRed)
         )
     )
 
