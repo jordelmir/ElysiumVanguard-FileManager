@@ -166,4 +166,22 @@ class InMemoryProotBackend : ProotBackend {
         restores.add(RestoreInvocation(workspaceId, session.id))
         return Result.success(Unit)
     }
+
+    /**
+     * Phase 72 — return the pre-canned writes the
+     * simulated process made. The orchestrator
+     * calls this after `stop` and before
+     * `restoreSnapshot` to populate the audit
+     * log; step 9 then asserts every write is
+     * within the authorized mount list.
+     *
+     * Backward-compat: this returns the same list
+     * the launch result used to carry, so the
+     * existing tests (which set `nextWrites` and
+     * expect step 9 to detect it) keep working
+     * without changes.
+     */
+    override fun writes(workspaceId: String, session: WorkspaceSession): List<String> {
+        return nextWrites
+    }
 }

@@ -165,11 +165,20 @@ class CriticalE2EOrchestrator(
 
         // Step 6: Launch the binary via the proot
         // backend. The backend records the launch
-        // (the entrypoint + the mounts + the env).
+        // (the entrypoint + the mounts + the env)
+        // AND starts the [WriteCapture] watching
+        // the bind-mounted host paths.
         // Phase 71: the orchestrator now also passes
         // the workspaceId so the real backend
         // (ProotBackendReal) can look up the
         // Workspace + call the SessionRunner.
+        //
+        // Phase 72: the writes from `launchResult.writes`
+        // are typically empty (the proot process has
+        // just spawned and hasn't done any I/O yet).
+        // The orchestrator reads the **final** writes
+        // via `prootBackend.writes(...)` after `stop`
+        // and before `restoreSnapshot` (see step 7.5).
         val launchResult = prootBackend.launch(
             workspaceId = workspace.id,
             session = session,
@@ -191,18 +200,6 @@ class CriticalE2EOrchestrator(
             "launch",
             "exec:${plan.launchCommand.executable}",
         )
-        // The binary's execution writes to its
-        // working directory. The proot backend
-        // records the writes. The audit log gets
-        // each write so step 9 can verify the
-        // mount policy.
-        for (write in launchResult.getOrThrow().writes) {
-            auditLog.record(
-                "proot:${session.id}",
-                "write",
-                write,
-            )
-        }
 
         // Step 7: Stop the process.
         val stopResult = prootBackend.stop(workspace.id, session)
@@ -214,6 +211,23 @@ class CriticalE2EOrchestrator(
             )
         }
         auditLog.record("proot:${session.id}", "stop", "exit:0")
+
+        // Step 7.5 (Phase 72): read the writes the
+        // capture recorded during the session and
+        // record each one to the audit log. Step 9
+        // then asserts every write is within an
+        // authorized mount. This step MUST run
+        // after `stop` (the process is done) and
+        // before `restoreSnapshot` (which stops
+        // the capture).
+        val capturedWrites = prootBackend.writes(workspace.id, session)
+        for (write in capturedWrites) {
+            auditLog.record(
+                "proot:${session.id}",
+                "write",
+                write,
+            )
+        }
 
         // Step 8: Restore the snapshot.
         val restoreResult = prootBackend.restoreSnapshot(workspace.id, session)

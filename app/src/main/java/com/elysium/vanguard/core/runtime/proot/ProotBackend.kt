@@ -90,4 +90,29 @@ interface ProotBackend {
      * the snapshot.
      */
     fun restoreSnapshot(workspaceId: String, session: WorkspaceSession): Result<Unit>
+
+    /**
+     * Phase 72 — return the host paths the process
+     * wrote to during the session. The orchestrator
+     * calls this **after** [stop] and **before**
+     * [restoreSnapshot] to populate the audit log;
+     * step 9 of the E2E then asserts every write
+     * is within the authorized mount list.
+     *
+     * The production impl ([ProotBackendReal])
+     * delegates to the [WriteCapture] that was
+     * started in [launch] and stopped in
+     * [restoreSnapshot]. The in-memory impl
+     * ([com.elysium.vanguard.core.runtime.critical_e2e.InMemoryProotBackend])
+     * returns the pre-canned [nextWrites] list
+     * (the simulated process's writes).
+     *
+     * Calling [writes] without a prior [launch]
+     * returns an empty list (no writes were ever
+     * captured). Calling [writes] after
+     * [restoreSnapshot] returns the final list
+     * (the capture is stopped, but the captured
+     * writes are preserved).
+     */
+    fun writes(workspaceId: String, session: WorkspaceSession): List<String>
 }

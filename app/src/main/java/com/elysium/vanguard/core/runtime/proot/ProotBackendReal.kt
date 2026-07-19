@@ -40,24 +40,43 @@ import java.util.concurrent.ConcurrentHashMap
  *   6. Spawn the process via the [ProcessLauncher] and
  *      remember the [LaunchedProcess] handle so `stop`
  *      can find it.
+ *   7. (Phase 72) Start a [WriteCapture] watching the
+ *      bind-mounted host paths BEFORE the spawn. The
+ *      capture records every file create / modify /
+ *      move-in / close-write to those paths. The
+ *      orchestrator reads the capture after `stop` (via
+ *      [writes]) to populate the audit log; step 9 of
+ *      the E2E then asserts every write is within an
+ *      authorized mount.
  *
  * The `writes` list on the returned [ProotBackend.LaunchResult]
- * is empty for now. Phase 72 wires a `FileObserver` so
- * the real device captures the actual writes; the
- * `CriticalE2EOrchestrator`'s audit step is exercised
- * by the JVM-side test (which uses [com.elysium.vanguard.core.runtime.critical_e2e.InMemoryProotBackend]
- * with a controlled writes list).
+ * is a snapshot at the moment the spawn returned (typically
+ * empty — the proot process hasn't done any I/O yet). The
+ * orchestrator reads the **final** writes via [writes] after
+ * `stop` and before `restoreSnapshot` (see
+ * `CriticalE2EOrchestrator.run`).
  *
  * Thread-safety: the `handles` + `rootfsBySession` maps
  * are `ConcurrentHashMap`s; the [ProcessLauncher] is
  * assumed thread-safe (it is on Android — `ProcessBuilder`
  * is internally synchronized; the test impl is a
- * 5-line hand-rolled stub).
+ * 5-line hand-rolled stub). The [WriteCapture] is shared
+ * across sequential sessions of the same backend; the
+ * capture resets on each [launch] via `start(watching)`,
+ * which clears the previous watch set + writes list.
  */
 class ProotBackendReal(
     private val backend: DistroSessionBackend,
     private val processLauncher: ProcessLauncher,
     private val workspaceManager: WorkspaceManager,
+    /**
+     * Phase 72 — the write capture (defaults to an
+     * in-memory recorder; production wires
+     * [AndroidFileObserverWriteCapture] via Hilt). The
+     * capture is the audit half of the master vision's
+     * Definition of Done.
+     */
+    private val writeCapture: WriteCapture = InMemoryWriteCapture(),
 ) : ProotBackend {
 
     private data class SessionKey(val workspaceId: String, val sessionId: String)
@@ -66,11 +85,18 @@ class ProotBackendReal(
     private val rootfsBySession = ConcurrentHashMap<SessionKey, File>()
 
     /**
-     * Phase 71 — the [launch] translation. See the class
+     * Phase 71/72 — the [launch] translation. See the class
      * doc for the full step list. Returns
      * [ProotBackend.LaunchResult] with the spawned pid;
-     * the `writes` list is empty (Phase 72 wires
-     * `FileObserver`).
+     * the `writes` field is a snapshot of the capture
+     * at the moment the spawn returned (typically
+     * empty). The orchestrator reads the **final**
+     * writes via [writes] after `stop`.
+     *
+     * Phase 72 addition: the bind-mounted host paths
+     * are passed to [WriteCapture.start] BEFORE the
+     * spawn, so the capture is live before the proot
+     * process does any I/O.
      */
     override fun launch(
         workspaceId: String,
@@ -118,11 +144,22 @@ class ProotBackendReal(
         val launcherEnv = pick.launcher.environmentVariables(rootfsDir)
         val mergedEnv = mergeEnvironment(launcherEnv, environment)
 
-        // Step 6: spawn.
+        // Step 6.5 (Phase 72): start the write capture
+        // BEFORE the spawn, watching every host path the
+        // orchestrator authorized. The capture clears
+        // any previous watch set + writes list.
+        val watchedHostPaths = bindMounts.map { it.hostPath }.toSet()
+        writeCapture.start(watchedHostPaths)
+
+        // Step 7: spawn.
         val key = SessionKey(workspaceId, session.id)
         val launched: LaunchedProcess = try {
             processLauncher.start(command = command, env = mergedEnv, cwd = rootfsDir)
         } catch (io: IOException) {
+            // The capture was started but the spawn
+            // failed — stop it so the next launch
+            // starts clean.
+            writeCapture.stop()
             return Result.failure(
                 IllegalStateException(
                     "ProotBackendReal: failed to spawn process: " +
@@ -137,7 +174,10 @@ class ProotBackendReal(
             ProotBackend.LaunchResult(
                 pid = launched.pid,
                 exitCode = 0,
-                writes = emptyList(),
+                // Snapshot at spawn time; typically empty.
+                // The orchestrator reads the final list
+                // via [writes] after `stop`.
+                writes = writeCapture.writes(),
             )
         )
     }
@@ -146,6 +186,12 @@ class ProotBackendReal(
      * Stop the process. The handle is removed
      * atomically (so a concurrent `stop` sees no
      * handle and is a no-op).
+     *
+     * Phase 72: the [WriteCapture] is **not** stopped
+     * here. The orchestrator calls [writes] next to
+     * read the captured writes; [restoreSnapshot] is
+     * the "session is fully over" signal that stops
+     * the capture.
      */
     override fun stop(workspaceId: String, session: WorkspaceSession): Result<Unit> {
         val key = SessionKey(workspaceId, session.id)
@@ -159,6 +205,10 @@ class ProotBackendReal(
      * recent snapshot. The manager is the orchestrator
      * for the snapshot engine; the backend delegates
      * to it.
+     *
+     * Phase 72: the [WriteCapture] is stopped here
+     * (the session is fully over — the orchestrator
+     * has already read the writes via [writes]).
      */
     override fun restoreSnapshot(workspaceId: String, session: WorkspaceSession): Result<Unit> {
         val key = SessionKey(workspaceId, session.id)
@@ -186,7 +236,28 @@ class ProotBackendReal(
             snapshotId = latest.id,
             liveRootfsPath = rootfsDir.absolutePath,
         )
+        // Stop the capture (session is over). Wrapped in
+        // a try/finally-style: even if rollback failed,
+        // we still want the capture stopped.
+        writeCapture.stop()
         return result.map { }
+    }
+
+    /**
+     * Phase 72 — return the writes the capture
+     * recorded during the current session. Called
+     * by the orchestrator after [stop] and before
+     * [restoreSnapshot] to populate the audit log.
+     *
+     * If no [launch] was called, the capture was
+     * never started, so the returned list is empty.
+     * If [restoreSnapshot] was called, the capture
+     * is stopped, but the captured writes are
+     * preserved (the [WriteCapture] contract is
+     * "stop preserves the captured list").
+     */
+    override fun writes(workspaceId: String, session: WorkspaceSession): List<String> {
+        return writeCapture.writes()
     }
 
     // ----------------------------------------------------------------
