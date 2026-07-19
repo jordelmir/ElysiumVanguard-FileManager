@@ -726,9 +726,17 @@ fun StorageMetricsBar(stats: StorageStats) {
         glassAlpha = 0.0f,
         glowRadius = 24.dp
     ) {
+        // PHASE 10.10 — was `Modifier.fillMaxSize()`, which made the
+        // metrics bar consume all remaining vertical space in the outer
+        // Column (the `SovereignCard` doesn't constrain height). With
+        // `fillMaxSize()`, the bar pushed the search bar, breadcrumbs,
+        // and file list off-screen — the user saw a single giant
+        // "STORAGE CENTRAL" card. `fillMaxWidth()` keeps the colored
+        // background full-bleed while letting the column collapse to
+        // its natural content height (~96dp).
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .background(statusColor.copy(alpha = 0.16f))
                 .padding(16.dp)
         ) {
