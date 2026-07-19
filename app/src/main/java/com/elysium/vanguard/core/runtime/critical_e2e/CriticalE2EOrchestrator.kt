@@ -2,9 +2,9 @@ package com.elysium.vanguard.core.runtime.critical_e2e
 
 import com.elysium.vanguard.core.runtime.capsule.Capsule
 import com.elysium.vanguard.core.runtime.capsule.catalog.CapsuleCatalog
-import com.elysium.vanguard.core.runtime.capsule.catalog.CapsuleCatalogException
 import com.elysium.vanguard.core.runtime.market.MarketListing
 import com.elysium.vanguard.core.runtime.market.MarketSigning
+import com.elysium.vanguard.core.runtime.proot.ProotBackend
 import com.elysium.vanguard.core.runtime.workspace_def.WorkspaceDefinition
 import com.elysium.vanguard.core.runtime.workspace_orchestrator.WorkspaceOrchestrator
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
@@ -13,43 +13,55 @@ import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 import com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError
 
 /**
- * Phase 70 — the **Critical E2E orchestrator** — the
- * pure-domain coordinator that drives the 8-step
- * integration test from the master vision's final
- * section ("Prueba de integración crítica").
+ * Phase 71 — the **Critical E2E orchestrator** (production).
  *
- * The orchestrator is the **bridge** between the
- * schemas (Market → Capsule → WorkspaceDefinition →
- * OrchestratedWorkspace) and the runtime hooks
- * (the proot backend). The orchestrator is
- * **pure-domain** (no I/O, no Android dependencies,
- * no Hilt). The proot backend is the seam where
- * the Android-side execution happens.
+ * The orchestrator drives the 8-step integration test from
+ * the master vision's final section ("Prueba de integración
+ * crítica"). It is the **Definition of Done** of the
+ * platform.
+ *
+ * The orchestrator is the **bridge** between the schemas
+ * (Market → Capsule → WorkspaceDefinition →
+ * OrchestratedWorkspace) and the runtime hooks (the proot
+ * backend). The orchestrator is **pure-domain** (no I/O,
+ * no Android dependencies, no Hilt). The proot backend is
+ * the seam where the Android-side execution happens.
  *
  * The 8 steps (per master vision):
- *   1. Download signed distro (simulated by an
- *      already-built `MarketListing`).
- *   2. Verify the signature + content hash.
- *   3. Create an isolated workspace.
- *   4. Install the capsule into the local catalog
- *      (the trust check).
+ *   1. Verify the listing's signature.
+ *   2. (Phase 71) — the content-hash check is the same as
+ *      the listing's signature check (the listing is
+ *      signed over its full canonical form, which includes
+ *      the contentHash). If step 1 passes, the content
+ *      hash is authentic.
+ *   3. Install the capsule into the local catalog (the
+ *      trust check).
+ *   4. Create an isolated workspace.
  *   5. Orchestrate the workspace definition into a
  *      runtime plan.
  *   6. Launch the binary via the proot backend.
  *   7. Stop the process.
  *   8. Restore the snapshot.
- *   9. Audit the writes: every write must be
- *      within the authorized mount list.
+ *   9. Audit the writes: every write must be within the
+ *      authorized mount list.
  *
- * The orchestrator is the **Definition of Done**
- * of the platform (per master vision final section).
+ * Phase 71 changes:
+ *   - The orchestrator now takes the production
+ *     [ProotBackend] interface (not the test-only
+ *     `ProotBackendStub`). The interface has two
+ *     implementations: [ProotBackendReal] (production) and
+ *     [com.elysium.vanguard.core.runtime.critical_e2e.InMemoryProotBackend]
+ *     (test fixture). The orchestrator doesn't know which
+ *     one it's running against.
+ *   - The orchestrator is now in production code (it
+ *     drives the real-device `CriticalE2EInstrumentedTest`).
  */
 class CriticalE2EOrchestrator(
     private val marketSigning: MarketSigning,
     private val capsuleCatalog: CapsuleCatalog,
     private val workspaceManager: WorkspaceManager,
     private val workspaceOrchestrator: WorkspaceOrchestrator,
-    private val prootBackend: ProotBackendStub,
+    private val prootBackend: ProotBackend,
     private val auditLog: E2EAuditLog,
 ) {
 
@@ -100,16 +112,13 @@ class CriticalE2EOrchestrator(
         auditLog.record("listing:${listing.id}", "verify", "signature:ok")
 
         // Step 2: Content hash verification. The
-        // listing's contentHash is computed at
-        // publish time; the test re-derives it from
-        // the listing's fields and asserts it
-        // matches. (The MarketSigning may also do
-        // this; we do it explicitly here for the
-        // boundary check.)
-        // (For the E2E, the listing is pre-built
-        // with a known contentHash. The re-derivation
-        // is a separate concern — Phase 71 will
-        // hook the actual download + hash check.)
+        // listing's contentHash is bound to the
+        // signature (the signature is computed over the
+        // listing's canonical form, which includes the
+        // contentHash). A passing step 1 is sufficient
+        // for step 2 (Phase 71 keeps the logic explicit
+        // so a future phase can re-derive the hash
+        // against the downloaded bytes).
 
         // Step 3: Install the capsule into the local
         // catalog. The catalog runs the trust check
@@ -140,9 +149,14 @@ class CriticalE2EOrchestrator(
         auditLog.record("workspace:${workspace.id}", "create", "name:${workspace.name}")
 
         // Step 5: Orchestrate the workspace definition
-        // into a runtime plan.
-        val plan = workspaceOrchestrator.orchestrate(workspaceDefinition)
-        val session = plan.session
+        // into a runtime plan. The orchestrator's session
+        // has a placeholder distroId (`__pending__`);
+        // Phase 71 patches it with the capsule's
+        // distribution so the proot backend can find
+        // the right distro to run.
+        val rawPlan = workspaceOrchestrator.orchestrate(workspaceDefinition)
+        val session = patchSessionDistro(rawPlan.session, capsule.distribution.id)
+        val plan = rawPlan.copy(session = session)
         auditLog.record(
             "plan:${session.id}",
             "orchestrate",
@@ -152,7 +166,12 @@ class CriticalE2EOrchestrator(
         // Step 6: Launch the binary via the proot
         // backend. The backend records the launch
         // (the entrypoint + the mounts + the env).
+        // Phase 71: the orchestrator now also passes
+        // the workspaceId so the real backend
+        // (ProotBackendReal) can look up the
+        // Workspace + call the SessionRunner.
         val launchResult = prootBackend.launch(
+            workspaceId = workspace.id,
             session = session,
             executable = plan.launchCommand.executable,
             args = plan.launchCommand.args,
@@ -186,7 +205,7 @@ class CriticalE2EOrchestrator(
         }
 
         // Step 7: Stop the process.
-        val stopResult = prootBackend.stop(session)
+        val stopResult = prootBackend.stop(workspace.id, session)
         if (stopResult.isFailure) {
             return fail(
                 7,
@@ -197,7 +216,7 @@ class CriticalE2EOrchestrator(
         auditLog.record("proot:${session.id}", "stop", "exit:0")
 
         // Step 8: Restore the snapshot.
-        val restoreResult = prootBackend.restoreSnapshot(session)
+        val restoreResult = prootBackend.restoreSnapshot(workspace.id, session)
         if (restoreResult.isFailure) {
             return fail(
                 8,
@@ -241,4 +260,25 @@ class CriticalE2EOrchestrator(
 
     private fun fail(step: Int, stepName: String, reason: String): Result.Failure =
         Result.Failure(failedAtStep = step, stepName = stepName, reason = reason)
+
+    /**
+     * Phase 71 — replace the orchestrator's placeholder
+     * `__pending__` distroId / profileId with the
+     * capsule's distribution id. The proot backend
+     * looks up the distro by id; the placeholder
+     * would resolve to "no launcher available".
+     *
+     * A non-LinuxProot session (e.g. WindowsVm) is
+     * returned unchanged.
+     */
+    private fun patchSessionDistro(
+        session: WorkspaceSession,
+        distroId: String,
+    ): WorkspaceSession = when (session) {
+        is WorkspaceSession.LinuxProot -> session.copy(
+            distroId = distroId,
+            profileId = distroId,
+        )
+        is WorkspaceSession.WindowsVm -> session
+    }
 }

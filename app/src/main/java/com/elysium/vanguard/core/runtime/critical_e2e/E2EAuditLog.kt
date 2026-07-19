@@ -5,9 +5,9 @@ import kotlin.concurrent.read
 import kotlin.concurrent.write
 
 /**
- * Phase 70 — the E2E audit log.
+ * Phase 71 — the E2E audit log (production).
  *
- * The E2E test needs to record every step + every
+ * The E2E orchestrator needs to record every step + every
  * write + every mount decision. The full
  * `SecurityAudit` (Phase 63) has a more complex
  * `SecurityAuditEvent` shape that's overkill for the
@@ -21,6 +21,13 @@ import kotlin.concurrent.write
  * The log is **thread-safe** (per `.ai/AGENTS.md` 24.1):
  * the `record` method is guarded by an exclusive lock;
  * the read methods are guarded by a shared lock.
+ *
+ * Originally introduced in Phase 70 in the test sources.
+ * Phase 71 promotes the log to production because the
+ * real-device `CriticalE2EInstrumentedTest` runs the
+ * orchestrator against the production `ProotBackendReal`,
+ * which means the audit log is now part of the runtime
+ * path (not a test fixture).
  */
 class E2EAuditLog {
 

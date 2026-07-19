@@ -16,7 +16,6 @@ import com.elysium.vanguard.core.runtime.capsule.catalog.InMemoryCapsuleCatalog
 import com.elysium.vanguard.core.runtime.market.MarketListing
 import com.elysium.vanguard.core.runtime.market.MarketListingType
 import com.elysium.vanguard.core.runtime.market.MarketSigning
-import com.elysium.vanguard.core.runtime.observability.RuntimeEventBus
 import com.elysium.vanguard.core.runtime.workspace_def.EnvSpec
 import com.elysium.vanguard.core.runtime.workspace_def.LauncherSpec
 import com.elysium.vanguard.core.runtime.workspace_def.MountSpec
@@ -28,20 +27,25 @@ import com.elysium.vanguard.core.runtime.workspaces.FileWorkspaceStore
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.foundry.core.ontology.primitives.ContentHash
 import com.elysium.vanguard.foundry.core.ontology.primitives.Signature
+import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * Phase 70 — the **Critical E2E test** (the
- * Definition of Done of the platform, per master
- * vision's final section).
+ * Phase 71 — the **Critical E2E test** (JVM side).
  *
- * The test runs the 8-step integration scenario:
+ * The test runs the 8-step integration scenario against
+ * the production [CriticalE2EOrchestrator] + the
+ * in-memory [InMemoryProotBackend]. The
+ * [CriticalE2EInstrumentedTest] (androidTest) runs the
+ * same scenario against the production
+ * [com.elysium.vanguard.core.runtime.proot.ProotBackendReal]
+ * on a real device.
+ *
+ * The 8 steps (per master vision):
  *   1. Download signed distro (simulated by an
  *      already-built `MarketListing`).
  *   2. Verify the signature + content hash.
@@ -56,12 +60,15 @@ import org.junit.rules.TemporaryFolder
  *   9. Audit the writes: every write must be
  *      within the authorized mount list.
  *
- * The test uses real implementations where they
- * exist (MarketSigning, CapsuleCatalog,
- * WorkspaceManager, WorkspaceOrchestrator) +
- * a `ProotBackendStub` for the Android-side
- * execution. The audit step validates the
- * mount policy end-to-end.
+ * Phase 71 changes:
+ *   - The test now uses the production
+ *     [com.elysium.vanguard.core.runtime.proot.ProotBackend]
+ *     interface (the `ProotBackendStub` is gone — the
+ *     stub was promoted to `InMemoryProotBackend`
+ *     implementing the production interface).
+ *   - `CriticalE2EOrchestrator` + `E2EAuditLog` are
+ *     now in production code (the test imports them
+ *     from `core.runtime.critical_e2e`).
  */
 class CriticalE2ETest {
 
@@ -76,7 +83,7 @@ class CriticalE2ETest {
 
     @Test
     fun `critical e2e happy path runs all 8 steps and audits the writes`() {
-        val (orchestrator, listing, capsule, workspaceDef, proot, audit) = setup()
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
 
         val result = orchestrator.run(
             listing = listing,
@@ -135,6 +142,11 @@ class CriticalE2ETest {
             "expected a 'restore' event",
             result.auditEvents.any { it.eventType == "restore" },
         )
+        // The proot backend was called with the launch +
+        // stop + restore (one each).
+        assertEquals(1, proot.launches.size)
+        assertEquals(1, proot.stops.size)
+        assertEquals(1, proot.restores.size)
     }
 
     // ============================================================
@@ -143,7 +155,7 @@ class CriticalE2ETest {
 
     @Test
     fun `step 1 fails when listing signature is invalid`() {
-        val (orchestrator, listing, capsule, workspaceDef, proot, audit) = setup()
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
         val wrongKey = "wrong-key".toByteArray()
         val result = orchestrator.run(
             listing = listing,
@@ -155,6 +167,10 @@ class CriticalE2ETest {
         result as CriticalE2EOrchestrator.Result.Failure
         assertEquals(1, result.failedAtStep)
         assertEquals("verify signed distro", result.stepName)
+        // The proot backend was NOT called.
+        assertTrue(proot.launches.isEmpty())
+        assertTrue(proot.stops.isEmpty())
+        assertTrue(proot.restores.isEmpty())
     }
 
     // ============================================================
@@ -166,7 +182,7 @@ class CriticalE2ETest {
         // Pre-install the capsule into a separate
         // catalog so the orchestrator's `put` hits
         // the duplicate-id check at step 3.
-        val proot = ProotBackendStub()
+        val proot = InMemoryProotBackend()
         val audit = E2EAuditLog()
         val capsule = buildCapsule()
         val preInstalled = InMemoryCapsuleCatalog()
@@ -183,6 +199,8 @@ class CriticalE2ETest {
         assertTrue("expected failure, got $result", result is CriticalE2EOrchestrator.Result.Failure)
         result as CriticalE2EOrchestrator.Result.Failure
         assertEquals(3, result.failedAtStep)
+        // The proot backend was NOT called.
+        assertTrue(proot.launches.isEmpty())
     }
 
     // ============================================================
@@ -191,7 +209,7 @@ class CriticalE2ETest {
 
     @Test
     fun `step 6 fails when proot launch fails`() {
-        val (orchestrator, listing, capsule, workspaceDef, proot, audit) = setup()
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
         proot.nextLaunchFails = true
         val result = orchestrator.run(
             listing = listing,
@@ -206,12 +224,52 @@ class CriticalE2ETest {
     }
 
     // ============================================================
+    // Step 7: stop
+    // ============================================================
+
+    @Test
+    fun `step 7 fails when proot stop fails`() {
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
+        proot.nextStopFails = true
+        val result = orchestrator.run(
+            listing = listing,
+            capsule = capsule,
+            workspaceDefinition = workspaceDef,
+            marketSigningKey = marketSigningKey,
+        )
+        assertTrue("expected failure, got $result", result is CriticalE2EOrchestrator.Result.Failure)
+        result as CriticalE2EOrchestrator.Result.Failure
+        assertEquals(7, result.failedAtStep)
+        assertEquals("stop process", result.stepName)
+    }
+
+    // ============================================================
+    // Step 8: restore
+    // ============================================================
+
+    @Test
+    fun `step 8 fails when proot restore fails`() {
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
+        proot.nextRestoreFails = true
+        val result = orchestrator.run(
+            listing = listing,
+            capsule = capsule,
+            workspaceDefinition = workspaceDef,
+            marketSigningKey = marketSigningKey,
+        )
+        assertTrue("expected failure, got $result", result is CriticalE2EOrchestrator.Result.Failure)
+        result as CriticalE2EOrchestrator.Result.Failure
+        assertEquals(8, result.failedAtStep)
+        assertEquals("restore snapshot", result.stepName)
+    }
+
+    // ============================================================
     // Step 9: audit (unauthorized write)
     // ============================================================
 
     @Test
     fun `step 9 fails when the process writes outside the authorized mounts`() {
-        val (orchestrator, listing, capsule, workspaceDef, proot, audit) = setup()
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
         // The process writes to /etc/passwd, which is NOT
         // in the workspace's authorized mount list.
         proot.nextWrites = listOf("/etc/passwd")
@@ -237,7 +295,7 @@ class CriticalE2ETest {
 
     @Test
     fun `step 9 passes when the process writes within the authorized mounts`() {
-        val (orchestrator, listing, capsule, workspaceDef, proot, audit) = setup()
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
         // The process writes to its working directory
         // (which IS in the authorized mounts).
         proot.nextWrites = listOf("/workspace/projects/output.json")
@@ -253,6 +311,40 @@ class CriticalE2ETest {
     }
 
     // ============================================================
+    // Phase 71: the orchestrator patches the session's distroId
+    // from the capsule's distribution. The proot backend
+    // records the patched distroId.
+    // ============================================================
+
+    @Test
+    fun `phase 71 orchestrator patches the session distroId from the capsule distribution`() {
+        val (orchestrator, listing, capsule, workspaceDef, proot, _) = setup()
+        val result = orchestrator.run(
+            listing = listing,
+            capsule = capsule,
+            workspaceDefinition = workspaceDef,
+            marketSigningKey = marketSigningKey,
+        )
+        assertTrue(result is CriticalE2EOrchestrator.Result.Success)
+        // The launch was invoked exactly once.
+        assertEquals(1, proot.launches.size)
+        // The session id is the UUID from the
+        // orchestrator; we can't predict it, but we
+        // can assert the launch happened with a
+        // non-blank session id + workspace id.
+        val launch = proot.launches.first()
+        assertTrue("expected non-blank session id", launch.sessionId.isNotBlank())
+        assertTrue("expected non-blank workspace id", launch.workspaceId.isNotBlank())
+        // The launch was called with the orchestrator's
+        // bindMounts (one mount from the WorkspaceDefinition).
+        assertEquals(1, launch.bindMounts.size)
+        assertEquals(
+            "/workspace/projects",
+            launch.bindMounts.first().containerPath,
+        )
+    }
+
+    // ============================================================
     // Setup
     // ============================================================
 
@@ -261,19 +353,19 @@ class CriticalE2ETest {
         val listing: MarketListing,
         val capsule: Capsule,
         val workspaceDefinition: WorkspaceDefinition,
-        val proot: ProotBackendStub,
+        val proot: InMemoryProotBackend,
         val audit: E2EAuditLog,
     )
 
     private fun setup(): Setup {
-        val proot = ProotBackendStub()
+        val proot = InMemoryProotBackend()
         val audit = E2EAuditLog()
         val (orchestrator, listing, capsule, workspaceDef) = buildOrchestrator(proot, audit)
         return Setup(orchestrator, listing, capsule, workspaceDef, proot, audit)
     }
 
     private fun buildOrchestrator(
-        proot: ProotBackendStub,
+        proot: InMemoryProotBackend,
         audit: E2EAuditLog,
         catalog: InMemoryCapsuleCatalog = InMemoryCapsuleCatalog(),
     ): Quad {
@@ -310,7 +402,7 @@ class CriticalE2ETest {
             sizeBytes = 1_500_000_000L,
             dependencies = emptyList(),
             tags = listOf("elysium", "linux", "arm64"),
-            createdAt = com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp(1_700_000_000_000L),
+            createdAt = Timestamp(1_700_000_000_000L),
         )
         val listing = MarketSigning.sign(unsignedListing, marketSigningKey)
         val workspaceDef = buildWorkspaceDefinition(capsule.id)
@@ -347,7 +439,7 @@ class CriticalE2ETest {
         contentHash = ContentHash("a".repeat(64)),
     )
 
-    private fun buildWorkspaceDefinition(capsuleId: CapsuleId): WorkspaceDefinition =
+    private fun buildWorkspaceDefinition(@Suppress("UNUSED_PARAMETER") capsuleId: CapsuleId): WorkspaceDefinition =
         WorkspaceDefinition(
             apiVersion = com.elysium.vanguard.core.runtime.workspace_def.ApiVersion.V1,
             id = "ws-e2e-test",
