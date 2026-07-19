@@ -8,6 +8,7 @@ import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
 import com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
+import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,34 +21,24 @@ import kotlinx.coroutines.flow.update
  * machine + the focus invariant + the z-order
  * invariant.
  *
- * Invariants enforced by the ViewModel:
- *   - The focused window is always on top
- *     (highest zOrder).
- *   - The zOrder is monotonically increasing
- *     (no two windows share a zOrder).
- *   - A `MAXIMIZED` window's bounds are the
- *     desktop bounds.
- *   - Closing a window removes it from the
- *     windows list AND removes the
- *     corresponding `RUNNING_WINDOW` dock
- *     item.
- *
- * The session state is exposed as a `StateFlow`
- * for Compose consumption.
+ * **Instantiation**: the ViewModel does NOT use
+ * `@HiltViewModel` because the constructor
+ * needs an explicit `MutableStateFlow` and
+ * `clock` (the test seam). The Hilt graph
+ * provides a `ViewModelProvider.Factory` (see
+ * [DesktopShellViewModelFactory]) that creates
+ * the production instance with
+ * [defaultInitialState] + the platform's
+ * monotonic wall clock. Tests instantiate the
+ * ViewModel directly.
  */
-class DesktopShellViewModel(
-    initialState: DesktopSessionState,
-    private val clock: Timestamp.Companion.TimestampSource = Timestamp.monotonicWallClock(),
-) {
-
-    private val _state = MutableStateFlow(initialState)
+open class DesktopShellViewModel(
+    initialStateFlow: MutableStateFlow<DesktopSessionState>,
+    private val clock: Timestamp.Companion.TimestampSource,
+) : ViewModel() {
+    private val _state: MutableStateFlow<DesktopSessionState> = initialStateFlow
     val state: StateFlow<DesktopSessionState> = _state.asStateFlow()
 
-    /**
-     * Open a new window. The new window is focused
-     * (on top of the z-order). The new window's
-     * bounds are a default centered rect.
-     */
     fun openWindow(
         id: String,
         title: String,
@@ -65,7 +56,7 @@ class DesktopShellViewModel(
         }
         _state.update { current ->
             if (current.windows.any { it.id == id }) {
-                return@update current // no-op if window already open
+                return@update current
             }
             val newZOrder = current.nextZOrder
             val centeredX = (current.desktopBounds.width - defaultWidth) / 2
@@ -99,11 +90,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Close a window. The window is removed from
-     * the windows list + the corresponding
-     * `RUNNING_WINDOW` dock item is removed.
-     */
     fun closeWindow(id: String): Result<Unit> {
         _state.update { current ->
             if (current.windows.none { it.id == id }) {
@@ -112,7 +98,6 @@ class DesktopShellViewModel(
             current.copy(
                 windows = current.windows.filterNot { it.id == id },
                 focusedWindowId = if (current.focusedWindowId == id) {
-                    // Focus the top-most remaining window
                     current.windows
                         .filterNot { it.id == id }
                         .maxByOrNull { it.zOrder }
@@ -128,11 +113,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Focus a window. The window is brought to the
-     * top (highest zOrder). If the window was
-     * minimized, it's restored to NORMAL.
-     */
     fun focusWindow(id: String): Result<Unit> {
         _state.update { current ->
             val target = current.windows.firstOrNull { it.id == id }
@@ -152,12 +132,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Minimize a window. The window's state is set
-     * to MINIMIZED; the focused window is
-     * unchanged (or moves to the next visible
-     * window).
-     */
     fun minimizeWindow(id: String): Result<Unit> {
         _state.update { current ->
             val target = current.windows.firstOrNull { it.id == id }
@@ -182,11 +156,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Maximize a window. The window's state is set
-     * to MAXIMIZED; the bounds are set to the
-     * desktop bounds.
-     */
     fun maximizeWindow(id: String): Result<Unit> {
         _state.update { current ->
             val target = current.windows.firstOrNull { it.id == id }
@@ -207,11 +176,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Restore a window from MAXIMIZED or MINIMIZED
-     * to NORMAL. The bounds are NOT changed (the
-     * previous NORMAL bounds are preserved).
-     */
     fun restoreWindow(id: String): Result<Unit> {
         _state.update { current ->
             val target = current.windows.firstOrNull { it.id == id }
@@ -228,25 +192,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Phase 78 — update a window's bounds.
-     * Called by the desktop shell's drag
-     * modifier when the user drags a
-     * window's title bar. The new bounds
-     * are clamped by [WindowDragMath.applyDrag]
-     * before this method is called; the
-     * ViewModel just persists the result.
-     *
-     * The bounds are updated for the
-     * `NORMAL` state only. `MAXIMIZED`
-     * windows ignore the update (the
-     * desktop bounds are the only valid
-     * position when maximized). `MINIMIZED`
-     * windows ignore the update too (a
-     * minimized window has no visible
-     * position; the dock is its
-     * position).
-     */
     fun updateWindowBounds(id: String, newBounds: WindowBounds): Result<Unit> {
         _state.update { current ->
             val target = current.windows.firstOrNull { it.id == id }
@@ -265,11 +210,6 @@ class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
-    /**
-     * Pin an app to the dock. The app is added as
-     * a `PINNED_APP` dock item. If the app is
-     * already pinned, the call is a no-op.
-     */
     fun pinApp(iconKey: String, label: String): Result<Unit> {
         if (iconKey.isBlank() || label.isBlank()) {
             return Result.failure(
@@ -298,5 +238,41 @@ class DesktopShellViewModel(
     companion object {
         const val DEFAULT_WINDOW_WIDTH = 800
         const val DEFAULT_WINDOW_HEIGHT = 600
+        const val DEFAULT_DESKTOP_WIDTH = 1920
+        const val DEFAULT_DESKTOP_HEIGHT = 1080
+
+        fun defaultInitialState(): DesktopSessionState = DesktopSessionState(
+            windows = emptyList(),
+            focusedWindowId = null,
+            dockItems = listOf(
+                DockItem("terminal", "Terminal", DockItemKind.PINNED_APP, null),
+                DockItem("files", "Files", DockItemKind.PINNED_APP, null),
+                DockItem("settings", "Settings", DockItemKind.PINNED_APP, null),
+                DockItem("notes", "Notes", DockItemKind.PINNED_APP, null),
+            ),
+            desktopBounds = WindowBounds(0, 0, DEFAULT_DESKTOP_WIDTH, DEFAULT_DESKTOP_HEIGHT),
+        )
+    }
+}
+
+/**
+ * The factory Compose uses to instantiate the
+ * [DesktopShellViewModel]. The factory
+ * constructs the production default state
+ * (4 pinned apps, 1920x1080 desktop bounds) +
+ * the platform's monotonic wall clock.
+ */
+object DesktopShellViewModelFactory : androidx.lifecycle.ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass.isAssignableFrom(DesktopShellViewModel::class.java)) {
+            "DesktopShellViewModelFactory cannot create $modelClass"
+        }
+        return DesktopShellViewModel(
+            initialStateFlow = kotlinx.coroutines.flow.MutableStateFlow(
+                DesktopShellViewModel.defaultInitialState()
+            ),
+            clock = com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp.monotonicWallClock(),
+        ) as T
     }
 }

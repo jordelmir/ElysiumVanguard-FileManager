@@ -74,7 +74,8 @@ fun DashboardScreen(
     onNavigateToSheet: (() -> Unit)? = null,
     onNavigateToColors: (() -> Unit)? = null,
     onNavigateToCommandCore: (() -> Unit)? = null,
-    onNavigateToLocalAgent: (() -> Unit)? = null
+    onNavigateToLocalAgent: (() -> Unit)? = null,
+    onNavigateToDesktop: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -183,6 +184,18 @@ fun DashboardScreen(
             neonColor = TitanColors.NeonRed,
             onClick = onNavigateToLocalAgent ?: {},
             gradientBg = moduleSurface(TitanColors.NeonRed)
+        ),
+        // PHASE 79 — the Universal Desktop Shell. Windows-11-style
+        // windowing surface for the sovereign runtime: Terminal,
+        // Files, Notes, Settings as draggable windows on a shared
+        // desktop, with a real taskbar at the bottom.
+        PortalItem(
+            title = "DESKTOP",
+            subtitle = "WINDOWS · DOCK · MULTITASK",
+            icon = Icons.Default.DesktopWindows,
+            neonColor = TitanColors.NeonCyan,
+            onClick = onNavigateToDesktop ?: {},
+            gradientBg = moduleSurface(TitanColors.NeonCyan)
         )
     )
 

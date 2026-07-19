@@ -19,7 +19,10 @@ class DesktopShellViewModelTest {
         dockItems = emptyList(),
         desktopBounds = WindowBounds(0, 0, 1920, 1080),
     )
-    private val viewModel = DesktopShellViewModel(initialState)
+    private val viewModel = DesktopShellViewModel(
+        initialStateFlow = kotlinx.coroutines.flow.MutableStateFlow(initialState),
+        clock = com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp.monotonicWallClock(),
+    )
 
     @Test
     fun `initial state is empty`() {

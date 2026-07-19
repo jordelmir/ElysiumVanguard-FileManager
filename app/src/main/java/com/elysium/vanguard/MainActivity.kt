@@ -99,7 +99,8 @@ class MainActivity : ComponentActivity() {
                             onNavigateToSheet = { navController.navigate("editor_sheet_new") },
                             onNavigateToColors = { navController.navigate("color_customization") },
                             onNavigateToCommandCore = { navController.navigate("command_core") },
-                            onNavigateToLocalAgent = { navController.navigate("local_agent") }
+                            onNavigateToLocalAgent = { navController.navigate("local_agent") },
+                            onNavigateToDesktop = { navController.navigate("desktop_shell") }
                         )
                     }
                     composable("command_core") {
@@ -241,6 +242,13 @@ class MainActivity : ComponentActivity() {
                     // adds the "Open" affordance for Running Linux
                     // sessions — tapping it navigates to the
                     // terminal screen with the distro pre-loaded.
+                    composable("desktop_shell") {
+                        com.elysium.vanguard.features.desktop.DesktopShellScreen(
+                            viewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                factory = com.elysium.vanguard.features.desktop.DesktopShellViewModelFactory,
+                            )
+                        )
+                    }
                     composable("runtime_main") {
                         com.elysium.vanguard.core.runtime.ui.MainScreen(
                             onBack = { navController.popBackStack() },

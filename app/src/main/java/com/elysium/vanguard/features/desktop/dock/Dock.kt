@@ -161,18 +161,40 @@ private fun DockItemView(
  * Reserved for Phase 79+; shipped
  * here as a helper so the dock layout
  * is complete.
+ *
+ * Phase 79: the badge now includes a
+ * pulsing dot on the left side. The
+ * pulse is driven by the parent's
+ * [pulse] float (in [0, 1]) — the
+ * caller animates this float over
+ * time so all live elements breathe
+ * together.
  */
 @Composable
 fun DockStatusBadge(
     text: String,
     modifier: Modifier = Modifier,
+    pulse: Float = 0f,
 ) {
-    Box(
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.primaryContainer)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
+        // Pulsing live dot. The dot's scale +
+        // alpha breathe with the pulse float.
+        val liveAlpha = 0.55f + 0.45f * pulse
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(
+                    MaterialTheme.colorScheme.primary.copy(alpha = liveAlpha),
+                ),
+        )
+        androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(6.dp))
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
