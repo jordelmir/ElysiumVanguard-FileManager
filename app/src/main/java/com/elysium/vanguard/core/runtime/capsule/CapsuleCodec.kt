@@ -79,6 +79,44 @@ object CapsuleCodec {
             cause = e,
         )
     }
+
+    /**
+     * Read + decode from a file path. Convenience
+     * for the file-backed catalog.
+     */
+    fun decodeFromFile(path: java.io.File): Capsule = try {
+        decode(path.readText(Charsets.UTF_8))
+    } catch (e: java.io.FileNotFoundException) {
+        throw CapsuleCodecException(
+            message = "file not found: ${path.absolutePath}",
+        )
+    } catch (e: java.io.IOException) {
+        throw CapsuleCodecException(
+            message = "I/O error reading ${path.absolutePath}: ${e.message}",
+            cause = e,
+        )
+    }
+
+    /**
+     * Encode + write to a file path atomically (via
+     * a temp file + rename).
+     */
+    fun encodeToFile(capsule: Capsule, path: java.io.File) {
+        val tmp = java.io.File(path.parentFile, path.name + ".tmp")
+        try {
+            tmp.writeText(encode(capsule), Charsets.UTF_8)
+            if (!tmp.renameTo(path)) {
+                path.writeText(tmp.readText(Charsets.UTF_8), Charsets.UTF_8)
+                tmp.delete()
+            }
+        } catch (e: java.io.IOException) {
+            tmp.delete()
+            throw CapsuleCodecException(
+                message = "I/O error writing ${path.absolutePath}: ${e.message}",
+                cause = e,
+            )
+        }
+    }
 }
 
 /**
