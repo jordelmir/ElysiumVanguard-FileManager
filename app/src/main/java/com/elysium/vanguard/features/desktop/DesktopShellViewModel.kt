@@ -229,6 +229,43 @@ class DesktopShellViewModel(
     }
 
     /**
+     * Phase 78 — update a window's bounds.
+     * Called by the desktop shell's drag
+     * modifier when the user drags a
+     * window's title bar. The new bounds
+     * are clamped by [WindowDragMath.applyDrag]
+     * before this method is called; the
+     * ViewModel just persists the result.
+     *
+     * The bounds are updated for the
+     * `NORMAL` state only. `MAXIMIZED`
+     * windows ignore the update (the
+     * desktop bounds are the only valid
+     * position when maximized). `MINIMIZED`
+     * windows ignore the update too (a
+     * minimized window has no visible
+     * position; the dock is its
+     * position).
+     */
+    fun updateWindowBounds(id: String, newBounds: WindowBounds): Result<Unit> {
+        _state.update { current ->
+            val target = current.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            if (target.state != WindowState.NORMAL) {
+                return@update current
+            }
+            val updated = target.copy(
+                bounds = newBounds,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            current.copy(
+                windows = current.windows.map { if (it.id == id) updated else it },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
      * Pin an app to the dock. The app is added as
      * a `PINNED_APP` dock item. If the app is
      * already pinned, the call is a no-op.
