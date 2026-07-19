@@ -11,6 +11,8 @@ import com.elysium.vanguard.core.runtime.runner.LaunchedProcess
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
 import com.elysium.vanguard.core.runtime.snapshots.MountPlan
 import com.elysium.vanguard.core.runtime.snapshots.WorkspaceSnapshot
+import com.elysium.vanguard.core.runtime.windows.WindowsVmError
+import com.elysium.vanguard.core.runtime.windows.WindowsVmManager
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
@@ -72,12 +74,14 @@ class RealAgentCollaboratorsTest {
         localBuildRunner: LocalBuildRunner = mock(),
         toolchainRegistry: ToolchainRegistry = mock(),
         processLauncher: ProcessLauncher = mock(),
+        windowsVmManager: WindowsVmManager = mock(),
     ): RealAgentCollaborators = RealAgentCollaborators(
         distroManager = distroManager,
         workspaceManager = workspaceManager,
         localBuildRunner = localBuildRunner,
         toolchainRegistry = toolchainRegistry,
         processLauncher = processLauncher,
+        windowsVmManager = windowsVmManager,
     )
 
     // ============================================================
@@ -121,17 +125,98 @@ class RealAgentCollaboratorsTest {
     // ============================================================
 
     @Test
-    fun `createWindowsEnvironment returns a typed Phase-74 failure`() {
-        val collaborators = newCollaborators()
+    fun `createWindowsEnvironment returns Success when the VM starts`() {
+        val windowsVmManager = mock<WindowsVmManager>()
+        whenever(
+            windowsVmManager.installFromBinary(
+                binaryPath = "/sdcard/Downloads/setup.exe",
+                runtimeKind = "QEMU_VM",
+            )
+        ).thenReturn(
+            Result.success(
+                com.elysium.vanguard.core.runtime.windows.WindowsVmState.Running(
+                    pid = 12345,
+                    qmpPort = 4444,
+                    monitorPort = null,
+                    vncPort = 5901,
+                )
+            )
+        )
+        val collaborators = newCollaborators(windowsVmManager = windowsVmManager)
+
         val result = collaborators.createWindowsEnvironment(
             binaryPath = "/sdcard/Downloads/setup.exe",
+            runtimeKind = "QEMU_VM",
+        )
+        assertTrue("expected Success, got $result", result is AgentStepResult.Success)
+        result as AgentStepResult.Success
+        assertTrue(
+            "expected the message to mention the VM state, got: ${result.message}",
+            result.message.contains("Running"),
+        )
+        assertTrue(
+            "expected the message to mention the binary path, got: ${result.message}",
+            result.message.contains("setup.exe"),
+        )
+    }
+
+    @Test
+    fun `createWindowsEnvironment returns Failure when the binary is missing`() {
+        val windowsVmManager = mock<WindowsVmManager>()
+        whenever(
+            windowsVmManager.installFromBinary(any(), any())
+        ).thenReturn(Result.failure(WindowsVmError.BinaryNotFound("/missing.exe")))
+        val collaborators = newCollaborators(windowsVmManager = windowsVmManager)
+
+        val result = collaborators.createWindowsEnvironment(
+            binaryPath = "/missing.exe",
+            runtimeKind = "QEMU_VM",
+        )
+        assertTrue("expected Failure, got $result", result is AgentStepResult.Failure)
+        result as AgentStepResult.Failure
+        assertTrue(
+            "expected the message to mention the binary path, got: ${result.message}",
+            result.message.contains("/missing.exe"),
+        )
+    }
+
+    @Test
+    fun `createWindowsEnvironment returns Failure when the runtime kind is Wine`() {
+        val windowsVmManager = mock<WindowsVmManager>()
+        whenever(
+            windowsVmManager.installFromBinary(any(), any())
+        ).thenReturn(Result.failure(WindowsVmError.WineRuntimeNotSupported("WINE_BOX64")))
+        val collaborators = newCollaborators(windowsVmManager = windowsVmManager)
+
+        val result = collaborators.createWindowsEnvironment(
+            binaryPath = "/sdcard/setup.exe",
             runtimeKind = "WINE_BOX64",
         )
         assertTrue("expected Failure, got $result", result is AgentStepResult.Failure)
         result as AgentStepResult.Failure
         assertTrue(
-            "expected the message to mention Phase 74, got: ${result.message}",
-            result.message.contains("Phase 74"),
+            "expected the message to mention Wine runtime, got: ${result.message}",
+            result.message.contains("Wine"),
+        )
+    }
+
+    @Test
+    fun `createWindowsEnvironment returns Failure when no spec matches the runtime kind`() {
+        val windowsVmManager = mock<WindowsVmManager>()
+        whenever(
+            windowsVmManager.installFromBinary(any(), any())
+        ).thenReturn(Result.failure(WindowsVmError.NoSpecForRuntimeKind("UNKNOWN")))
+        val collaborators = newCollaborators(windowsVmManager = windowsVmManager)
+
+        val result = collaborators.createWindowsEnvironment(
+            binaryPath = "/sdcard/setup.exe",
+            runtimeKind = "UNKNOWN",
+        )
+        assertTrue("expected Failure, got $result", result is AgentStepResult.Failure)
+        result as AgentStepResult.Failure
+        assertTrue(
+            "expected the message to mention 'No Windows VM spec', got: ${result.message}",
+            result.message.contains("No Windows VM spec"),
         )
     }
 

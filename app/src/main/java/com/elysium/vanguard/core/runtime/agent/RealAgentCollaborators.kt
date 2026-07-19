@@ -5,6 +5,7 @@ import com.elysium.vanguard.core.runtime.build.ToolchainRegistry
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
 import com.elysium.vanguard.core.runtime.snapshots.MountPlan
+import com.elysium.vanguard.core.runtime.windows.WindowsVmManager
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
@@ -84,6 +85,7 @@ class RealAgentCollaborators @Inject constructor(
     private val localBuildRunner: LocalBuildRunner,
     private val toolchainRegistry: ToolchainRegistry,
     private val processLauncher: ProcessLauncher,
+    private val windowsVmManager: WindowsVmManager,
 ) : AgentCollaborators {
 
     /**
@@ -115,27 +117,42 @@ class RealAgentCollaborators @Inject constructor(
     }
 
     /**
-     * Phase 73 — stub. The Windows environment
-     * creation seam
-     * ([com.elysium.vanguard.core.runtime.windows.WindowsVmManager])
-     * doesn't yet expose a `createEnvironment(binaryPath, runtimeKind)`
-     * method; the master vision's "create
-     * windows" plan is wired into the parser +
-     * executor, but the production install path
-     * is Phase 74 work. The method returns a
-     * typed failure so the executor's audit log
-     * records "windows environment not yet wired"
-     * instead of silently succeeding.
+     * Phase 75 — delegates to
+     * [WindowsVmManager.installFromBinary], which:
+     *  1. Resolves the binary on disk (the `binaryPath`
+     *     is a host path).
+     *  2. Maps the `runtimeKind` to a [com.elysium.vanguard.core.runtime.windows.WindowsVmSpec]
+     *     via [com.elysium.vanguard.core.runtime.windows.WindowsVmCatalog.findByRuntimeKind].
+     *  3. Stages the binary to the VM's staging directory.
+     *  4. Asks the backend to start the VM.
+     *
+     * The typed errors (binary missing, Wine runtime
+     * not supported, no spec for the runtime kind,
+     * staging failed) are converted to a
+     * [AgentStepResult.Failure] with a human-readable
+     * message so the executor's audit log records
+     * what went wrong.
      */
     override fun createWindowsEnvironment(
         binaryPath: String,
         runtimeKind: String
     ): AgentStepResult {
-        return AgentStepResult.Failure(
-            "Windows environment creation is not yet wired in the rule-based " +
-                "agent (Phase 74). binary='$binaryPath' runtime='$runtimeKind'. " +
-                "Use the HTTP-gateway Command Core (Phase 58) or the runtime's " +
-                "manual Windows VM flow for now."
+        val result = windowsVmManager.installFromBinary(
+            binaryPath = binaryPath,
+            runtimeKind = runtimeKind,
+        )
+        return result.fold(
+            onSuccess = { state ->
+                AgentStepResult.Success(
+                    "Windows environment created: VM is in state '${state.javaClass.simpleName}' " +
+                        "with binary '$binaryPath' staged for install"
+                )
+            },
+            onFailure = { error ->
+                AgentStepResult.Failure(
+                    error.message ?: "Windows environment creation failed"
+                )
+            },
         )
     }
 

@@ -23,6 +23,24 @@ class WindowsVmCatalog {
 
     fun find(id: String): WindowsVmSpec? = byId[id]
 
+    /**
+     * Phase 75 — find the first spec whose
+     * [WindowsVmSpec.runtimeKind] matches the given
+     * runtime kind. The agent's `createWindowsEnvironment`
+     * passes values like `QEMU_VM`, `WINE_BOX64`, or
+     * `WINE_FEX`; the catalog returns the first matching
+     * spec (the catalog's order is sorted by id).
+     *
+     * The lookup is case-insensitive. Specs without an
+     * explicit `runtimeKind` default to `QEMU_VM`.
+     */
+    fun findByRuntimeKind(runtimeKind: String): WindowsVmSpec? {
+        val needle = runtimeKind.trim().uppercase()
+        return byId.values.firstOrNull { spec ->
+            spec.runtimeKind.trim().uppercase() == needle
+        }
+    }
+
     fun size(): Int = byId.size
 
     fun clear() = byId.clear()

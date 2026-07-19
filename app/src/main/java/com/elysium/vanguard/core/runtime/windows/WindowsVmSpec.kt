@@ -40,6 +40,27 @@ data class WindowsVmSpec(
      * and to surface the version in the catalog UI.
      */
     val version: String,
+    /**
+     * Phase 75 — the runtime kind the agent's
+     * `createWindowsEnvironment` parses from the user's
+     * goal text. The values mirror the master vision
+     * section 3 ("Wine + Box64", "Wine + FEX", "QEMU VM").
+     *
+     * - `QEMU_VM` (the default for all current
+     *   `WindowsVmSpec`s) — the runtime launches a
+     *   QEMU-backed Windows VM. The agent stages the
+     *   binary to the VM's directory and starts the
+     *   VM; the user installs + runs the binary
+     *   manually inside the guest.
+     * - `WINE_BOX64` / `WINE_FEX` — not currently
+     *   supported by any spec; the catalog's
+     *   `findByRuntimeKind` returns null and the
+     *   manager returns a typed "Wine runtime not
+     *   supported" failure. A future phase adds
+     *   Wine-aware specs (these are Linux guests with
+     *   Wine, not real Windows VMs).
+     */
+    val runtimeKind: String = "QEMU_VM",
     /** Minimum RAM in MiB; the runtime refuses to start the
      *  VM below this. */
     val minRamMb: Int,

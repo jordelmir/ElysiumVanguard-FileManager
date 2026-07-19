@@ -225,6 +225,101 @@ class WindowsVmManager(
         states[specId] = fresh
         return fresh
     }
+
+    /**
+     * Phase 75 — install (stage) a Windows binary into a
+     * Windows VM environment and start the VM.
+     *
+     * The flow the master vision section 3 names:
+     *
+     *   1. The agent parses "create windows env for
+     *      setup.exe via qemu" and dispatches an
+     *      `AgentAction.CreateWindowsEnvironment` with
+     *      `binaryPath = setup.exe` and
+     *      `runtimeKind = "QEMU_VM"`.
+     *   2. The executor calls
+     *      [RealAgentCollaborators.createWindowsEnvironment],
+     *      which delegates to this method.
+     *   3. The manager:
+     *      a. Resolves the binary on disk (the
+     *         `binaryPath` is a host path — the runtime's
+     *         own filesystem, e.g. `/sdcard/Downloads/setup.exe`).
+     *      b. Maps the `runtimeKind` to a
+     *         [WindowsVmSpec] via
+     *         [WindowsVmCatalog.findByRuntimeKind].
+     *      c. Stages the binary to the VM's staging
+     *         directory (`<baseDir>/staging/<specId>/<binary.name>`).
+     *         The user installs the binary manually
+     *         inside the running guest (the runtime does
+     *         not try to install in-headless — that
+     *         requires an unattended install answer
+     *         file, which the platform does not yet
+     *         author).
+     *      d. Asks the [WindowsVmBackend] to start the
+     *         VM. The backend transitions to
+     *         [WindowsVmState.Booting] (typical) or
+     *         [WindowsVmState.Running] (fast-boot image).
+     *      e. The manager's `states` map caches the new
+     *         state so the runtime UI shows the VM as
+     *         "live" on the next refresh.
+     *
+     * The result is a typed [Result]. Errors are
+     * classified in [WindowsVmError] (binary missing,
+     * Wine runtime not supported, no spec for the
+     * runtime kind, staging failed).
+     */
+    fun installFromBinary(
+        binaryPath: String,
+        runtimeKind: String
+    ): Result<WindowsVmState> {
+        val binary = File(binaryPath)
+        if (!binary.isFile) {
+            return Result.failure(WindowsVmError.BinaryNotFound(binaryPath))
+        }
+        // Wine runtimes are Linux-guest runtimes, not
+        // Windows VMs. The master vision section 3 names
+        // them alongside the QEMU VM path, but the
+        // platform's Windows VM manager is the
+        // `QEMU_VM` route. A future phase adds a
+        // separate Wine installer seam (it would
+        // install into a Linux guest, not a Windows
+        // VM).
+        val needle = runtimeKind.trim().uppercase()
+        if (needle.startsWith("WINE_")) {
+            return Result.failure(WindowsVmError.WineRuntimeNotSupported(runtimeKind))
+        }
+        val spec = catalog.findByRuntimeKind(runtimeKind)
+            ?: return Result.failure(WindowsVmError.NoSpecForRuntimeKind(runtimeKind))
+        // Stage the binary to the VM's directory so the
+        // user can manually install + run it once the
+        // guest boots.
+        val stagingDir = File(baseDir, "staging/${spec.id}")
+        if (!stagingDir.isDirectory && !stagingDir.mkdirs()) {
+            return Result.failure(
+                WindowsVmError.StagingFailed(
+                    binaryPath = binaryPath,
+                    reason = "could not create staging directory: ${stagingDir.absolutePath}"
+                )
+            )
+        }
+        val staged = File(stagingDir, binary.name)
+        try {
+            binary.copyTo(staged, overwrite = true)
+        } catch (io: java.io.IOException) {
+            return Result.failure(
+                WindowsVmError.StagingFailed(
+                    binaryPath = binaryPath,
+                    reason = io.message ?: "could not copy binary to staging"
+                )
+            )
+        }
+        // Ask the backend to start the VM. The backend's
+        // contract returns the initial state; the
+        // manager caches it.
+        val initial = backend.start(spec)
+        states[spec.id] = initial
+        return Result.success(initial)
+    }
 }
 
 /**
@@ -249,4 +344,31 @@ sealed class WindowsVmError(message: String) : RuntimeException(message) {
         val operation: String,
         val vmId: String
     ) : WindowsVmError("Windows VM backend refused $operation for $vmId")
+
+    /** Phase 75 — the binary at the given host path
+     *  is missing or not a regular file. */
+    data class BinaryNotFound(val binaryPath: String) :
+        WindowsVmError("Windows binary not found: $binaryPath")
+
+    /** Phase 75 — the agent's parsed runtime kind is a
+     *  Wine runtime (`WINE_BOX64` / `WINE_FEX`). The
+     *  Windows VM manager is the `QEMU_VM` route; Wine
+     *  runtimes need a separate install path (a future
+     *  phase adds a Wine-aware installer). */
+    data class WineRuntimeNotSupported(val runtimeKind: String) :
+        WindowsVmError("Wine runtimes are not supported by the Windows VM manager (use the QEMU_VM route for Windows). runtime='$runtimeKind'")
+
+    /** Phase 75 — the catalog has no spec whose
+     *  [WindowsVmSpec.runtimeKind] matches the given
+     *  runtime kind. The caller chose a runtime kind
+     *  the runtime does not ship (yet). */
+    data class NoSpecForRuntimeKind(val runtimeKind: String) :
+        WindowsVmError("No Windows VM spec for runtime kind: $runtimeKind")
+
+    /** Phase 75 — staging the binary to the VM's
+     *  directory failed (the host filesystem rejected
+     *  the create or copy). The error message is the
+     *  underlying I/O error. */
+    data class StagingFailed(val binaryPath: String, val reason: String) :
+        WindowsVmError("Could not stage binary '$binaryPath' to the VM's directory: $reason")
 }

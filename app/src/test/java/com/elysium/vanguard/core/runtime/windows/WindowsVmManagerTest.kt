@@ -299,6 +299,113 @@ class WindowsVmManagerTest {
         assertNull(manager.vncPortFor("never-started"))
     }
 
+    // --- installFromBinary (Phase 75) ---
+
+    @Test
+    fun `installFromBinary returns Failure when the binary path does not exist`() {
+        val result = manager.installFromBinary(
+            binaryPath = "/tmp/elysium-does-not-exist-${System.nanoTime()}.exe",
+            runtimeKind = "QEMU_VM",
+        )
+        assertTrue("expected failure, got $result", result.isFailure)
+        val error = result.exceptionOrNull()
+        assertTrue(
+            "expected BinaryNotFound, got $error",
+            error is WindowsVmError.BinaryNotFound,
+        )
+    }
+
+    @Test
+    fun `installFromBinary returns Failure when the runtime kind is Wine`() {
+        val binary = File.createTempFile("elysium-wine-", ".exe", baseDir)
+        try {
+            val result = manager.installFromBinary(
+                binaryPath = binary.absolutePath,
+                runtimeKind = "WINE_BOX64",
+            )
+            assertTrue("expected failure, got $result", result.isFailure)
+            val error = result.exceptionOrNull()
+            assertTrue(
+                "expected WineRuntimeNotSupported, got $error",
+                error is WindowsVmError.WineRuntimeNotSupported,
+            )
+        } finally {
+            binary.delete()
+        }
+    }
+
+    @Test
+    fun `installFromBinary returns Failure when no spec matches the runtime kind`() {
+        val binary = File.createTempFile("elysium-unknown-", ".exe", baseDir)
+        try {
+            val result = manager.installFromBinary(
+                binaryPath = binary.absolutePath,
+                runtimeKind = "QEMU_VM_UNKNOWN",
+            )
+            assertTrue("expected failure, got $result", result.isFailure)
+            val error = result.exceptionOrNull()
+            assertTrue(
+                "expected NoSpecForRuntimeKind, got $error",
+                error is WindowsVmError.NoSpecForRuntimeKind,
+            )
+        } finally {
+            binary.delete()
+        }
+    }
+
+    @Test
+    fun `installFromBinary stages the binary and starts the VM on success`() {
+        val catalog = WindowsVmCatalog()
+        catalog.register(
+            testSpec(id = "win-test-install", runtimeKind = "QEMU_VM")
+        )
+        val installManager = WindowsVmManager(baseDir, InMemoryWindowsVmBackend(), catalog)
+        val binary = File.createTempFile("setup-", ".exe", baseDir)
+        try {
+            val result = installManager.installFromBinary(
+                binaryPath = binary.absolutePath,
+                runtimeKind = "QEMU_VM",
+            )
+            assertTrue("expected success, got $result", result.isSuccess)
+            // The binary was staged to the VM's directory.
+            val staged = File(baseDir, "staging/win-test-install/${binary.name}")
+            assertTrue("expected staged file at $staged", staged.isFile)
+            // The staged content matches the source.
+            assertEquals(
+                binary.readBytes().size,
+                staged.readBytes().size,
+            )
+            // The manager's state map recorded the VM as
+            // either Booting (typical) or Running (fast-boot).
+            val state = installManager.getState("win-test-install")
+            assertTrue(
+                "expected Booting or Running, got $state",
+                state is WindowsVmState.Booting || state is WindowsVmState.Running,
+            )
+        } finally {
+            binary.delete()
+        }
+    }
+
+    @Test
+    fun `installFromBinary is case-insensitive on the runtime kind`() {
+        val catalog = WindowsVmCatalog()
+        catalog.register(
+            testSpec(id = "win-test-case", runtimeKind = "QEMU_VM")
+        )
+        val installManager = WindowsVmManager(baseDir, InMemoryWindowsVmBackend(), catalog)
+        val binary = File.createTempFile("setup-", ".exe", baseDir)
+        try {
+            val result = installManager.installFromBinary(
+                binaryPath = binary.absolutePath,
+                runtimeKind = "qemu_vm",  // lowercase
+            )
+            assertTrue("expected success, got $result", result.isSuccess)
+        } finally {
+            binary.delete()
+        }
+    }
+
     // --- helpers ---
 
     private fun testSpec(
@@ -307,7 +414,8 @@ class WindowsVmManagerTest {
         recommendedRamMb: Int = 8192,
         minCpuCores: Int = 2,
         bootIsoUrl: String = "https://example.com/iso.iso",
-        virtioIsoUrl: String = "https://example.com/virtio.iso"
+        virtioIsoUrl: String = "https://example.com/virtio.iso",
+        runtimeKind: String = "QEMU_VM",
     ): WindowsVmSpec = WindowsVmSpec(
         id = id,
         displayName = "Test $id",
@@ -321,6 +429,7 @@ class WindowsVmManagerTest {
         recommendedCpuCores = 4,
         bootIsoUrl = bootIsoUrl,
         virtioIsoUrl = virtioIsoUrl,
+        runtimeKind = runtimeKind,
         signature = "0".repeat(192)
     )
 }
