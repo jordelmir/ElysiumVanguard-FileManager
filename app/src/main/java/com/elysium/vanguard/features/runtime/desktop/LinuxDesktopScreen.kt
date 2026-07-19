@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AppShortcut
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.BackHand
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Circle
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.filled.ScreenshotMonitor
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material3.Card
@@ -81,6 +83,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -88,6 +91,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -1009,8 +1013,49 @@ private fun LiveDesktopWorkspace(
         label = "live_pulse",
     )
     var showKeyboard by remember { mutableStateOf(false) }
+    // Phase 75 — trackpad state for the live
+    // indicator. Drives the toolbar's "1F / 2F
+    // DRAG / 3F" badge.
+    var trackpadState by remember { mutableStateOf(TrackpadIndicatorState.Idle) }
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
 
-    Box(modifier = modifier.background(Color.Black)) {
+    Box(
+        modifier = modifier
+            .background(Color.Black)
+            // Phase 75 — trackpad gestures. The
+            // modifier intercepts pointer events
+            // before they reach the
+            // [RfbSurfaceView] underneath and
+            // dispatches RFB pointer events via
+            // the [RfbSession]. The state machine
+            // distinguishes 1-finger move, 2-finger
+            // tap (left click), 2-finger drag (left
+            // click + drag), and 3-finger tap
+            // (right click).
+            .trackpadGestures(
+                renderedSize = viewSize,
+                serverWidth = state.server.width,
+                serverHeight = state.server.height,
+                onMove = { x, y -> session.sendPointer(x, y, TrackpadDispatcher.BUTTON_NONE) },
+                onLeftDown = { x, y -> session.sendPointer(x, y, TrackpadDispatcher.BUTTON_LEFT) },
+                onLeftUp = { x, y -> session.sendPointer(x, y, TrackpadDispatcher.BUTTON_NONE) },
+                onRightClick = { x, y ->
+                    // The RFB spec models a click as
+                    // a `down` event + an `up` event
+                    // (with the same coordinates).
+                    // Two consecutive `sendPointer`
+                    // calls (one with the button mask
+                    // set, one with `0`) deliver the
+                    // pair to the session's input
+                    // queue; the session serializes
+                    // them on the wire.
+                    session.sendPointer(x, y, TrackpadDispatcher.BUTTON_RIGHT)
+                    session.sendPointer(x, y, TrackpadDispatcher.BUTTON_NONE)
+                },
+                onStateChange = { state -> trackpadState = state },
+            )
+            .onSizeChanged { viewSize = it }
+    ) {
         RfbHost(modifier = Modifier.fillMaxSize(), session = session)
 
         // Top floating glass toolbar.
@@ -1099,6 +1144,24 @@ private fun LiveDesktopWorkspace(
             }
         }
 
+        // Phase 75 — trackpad indicator. A small
+        // floating chip that mirrors the gesture
+        // state machine so the user can see what
+        // the trackpad detector is currently
+        // interpreting (1 finger / 2F drag / 3F).
+        // Fades in on a non-idle state, fades out
+        // when the gesture ends.
+        AnimatedVisibility(
+            visible = trackpadState != TrackpadIndicatorState.Idle,
+            enter = fadeIn(animationSpec = tween(120)),
+            exit = fadeOut(animationSpec = tween(220)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 80.dp)
+        ) {
+            TrackpadIndicatorChip(state = trackpadState)
+        }
+
         // Bottom helper bar (keyboard hint or info).
         AnimatedVisibility(
             visible = showKeyboard,
@@ -1183,6 +1246,54 @@ private fun ToolbarIconButton(
             contentDescription = contentDescription,
             tint = tint,
             modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+/**
+ * Phase 75 — the small floating chip that mirrors the
+ * trackpad gesture state so the user can see what
+ * the detector is currently interpreting. The chip
+ * fades in when a non-idle gesture starts and fades
+ * out when the gesture ends (the parent uses
+ * [AnimatedVisibility] for the fade).
+ *
+ *  - `1F MOVE` (cyan) — single-finger drag (cursor)
+ *  - `2F DRAG` (yellow) — two-finger drag (left click + drag)
+ *  - `3F CLICK` (red) — three-finger tap (right click)
+ */
+@Composable
+private fun TrackpadIndicatorChip(state: TrackpadIndicatorState) {
+    val (label, accent, icon) = when (state) {
+        TrackpadIndicatorState.OneFingerMove ->
+            Triple("1F MOVE", Color(0xFF00E5FF), Icons.Default.TouchApp)
+        TrackpadIndicatorState.TwoFingerDrag ->
+            Triple("2F DRAG", Color(0xFFFFE600), Icons.Default.TouchApp)
+        TrackpadIndicatorState.ThreeFingerPending ->
+            Triple("3F CLICK", Color(0xFFFF3D71), Icons.Default.BackHand)
+        TrackpadIndicatorState.Idle -> return
+    }
+    Row(
+        modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(50))
+            .border(1.dp, accent.copy(alpha = 0.6f), RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = label,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            color = accent,
+            letterSpacing = 1.2.sp,
         )
     }
 }
