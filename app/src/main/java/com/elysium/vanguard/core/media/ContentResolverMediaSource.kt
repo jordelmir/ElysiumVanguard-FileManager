@@ -112,6 +112,9 @@ class ContentResolverMediaSource(
                 val pathColumn = cursor.getColumnIndexOrThrow(
                     MediaStore.MediaColumns.RELATIVE_PATH,
                 )
+                val mimeColumn = cursor.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns.MIME_TYPE,
+                )
                 while (cursor.moveToNext()) {
                     val mediaId = cursor.getLong(idColumn)
                     val itemUri = ContentUris.withAppendedId(
@@ -129,6 +132,7 @@ class ContentResolverMediaSource(
                             relativePath = cursor.getString(pathColumn) ?: "",
                             sizeBytes = size,
                             dateModifiedMs = cursor.getLong(dateColumn) * 1000L,
+                            mimeType = cursor.getString(mimeColumn) ?: "",
                             contentHash = contentHash,
                         ),
                     )

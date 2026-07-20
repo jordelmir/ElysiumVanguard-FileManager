@@ -356,7 +356,7 @@ interface NetworkRuleDao {
         NetworkRuleEntity::class,
         com.elysium.vanguard.core.database.media.MediaIndexEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class RuntimeDatabase : RoomDatabase() {

@@ -234,6 +234,10 @@ sealed interface MediaSource {
  *   - **`sizeBytes`** — the file size.
  *   - **`dateModifiedMs`** — the file's
  *     last-modified timestamp.
+ *   - **`mimeType`** — the file's MIME
+ *     type (e.g. `image/jpeg`,
+ *     `audio/mp3`); empty string when
+ *     the type is unknown.
  *   - **`contentHash`** — the SHA-256
  *     of the first 4 KiB + the file
  *     size (a fast fingerprint; not
@@ -247,6 +251,7 @@ data class DiscoveredMedia(
     val relativePath: String,
     val sizeBytes: Long,
     val dateModifiedMs: Long,
+    val mimeType: String = "",
     val contentHash: String? = null,
 ) {
     init {
@@ -330,6 +335,7 @@ class DefaultMediaIndexer(
                         relativePath = item.relativePath,
                         sizeBytes = item.sizeBytes,
                         dateModifiedMs = item.dateModifiedMs,
+                        mimeType = item.mimeType,
                         contentHash = item.contentHash,
                         discoveredAtMs = nowMs,
                         lastSeenAtMs = nowMs,

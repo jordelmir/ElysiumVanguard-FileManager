@@ -2,6 +2,8 @@ package com.elysium.vanguard.core.database.runtime
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -13,6 +15,26 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object RuntimeDatabaseModule {
 
+    /**
+     * Phase 94 — the migration that adds the
+     * `mime_type` column to the `media_index`
+     * table. The migration is a typed
+     * `ALTER TABLE` that adds the column
+     * with a `NOT NULL DEFAULT ''`
+     * constraint (the empty string is the
+     * "MIME type unknown" sentinel; the
+     * indexer's next scan will fill in the
+     * real value for existing rows).
+     */
+    private val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE media_index " +
+                    "ADD COLUMN mime_type TEXT NOT NULL DEFAULT ''"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideRuntimeDatabase(@ApplicationContext context: Context): RuntimeDatabase {
@@ -21,13 +43,11 @@ object RuntimeDatabaseModule {
             RuntimeDatabase::class.java,
             "elysium_runtime.db"
         )
-        // Section 25 of the master order prohibits destructive migration
-        // in production. We rely on Room's default behavior: any schema
-        // version mismatch without a registered Migration is a hard
-        // IllegalStateException, which is the correct production posture.
-        // A future migration to schemaVersion=2 must add a Migration(1,2)
-        // and register it via addMigrations(...) below — never via
-        // fallbackToDestructiveMigration().
+            // Section 25 of the master order prohibits destructive migration
+            // in production. Every schema bump MUST add a Migration(N, N+1)
+            // and register it via addMigrations(...) below — never via
+            // fallbackToDestructiveMigration().
+            .addMigrations(MIGRATION_1_2)
         return builder.build()
     }
 

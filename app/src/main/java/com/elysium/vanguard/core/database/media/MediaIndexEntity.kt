@@ -108,6 +108,8 @@ data class MediaIndexEntity(
     val sizeBytes: Long,
     @ColumnInfo(name = "date_modified_ms")
     val dateModifiedMs: Long,
+    @ColumnInfo(name = "mime_type")
+    val mimeType: String = "",
     @ColumnInfo(name = "content_hash")
     val contentHash: String? = null,
     @ColumnInfo(name = "discovered_at_ms")
