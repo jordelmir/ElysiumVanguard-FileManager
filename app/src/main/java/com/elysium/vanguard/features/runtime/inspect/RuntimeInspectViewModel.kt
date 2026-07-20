@@ -53,7 +53,27 @@ class RuntimeInspectViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { loadAll() }
+            withContext(Dispatchers.IO) {
+                // PHASE 96 — defensive try/catch around the
+                // initial load. The previous version surfaced
+                // uncaught exceptions to the default
+                // `viewModelScope` handler which closed the
+                // screen ("al tocar inspect se cierra"). The
+                // introspector reads `var/lib/dpkg/status`
+                // and walks the rootfs — both can throw on
+                // partial installs / missing files. We catch
+                // every exception, set the state to a safe
+                // empty value, and let the user see the
+                // "—" + "loading…" UI rather than a black
+                // screen.
+                try {
+                    loadAll()
+                } catch (e: Exception) {
+                    installation.value = null
+                    snapshot.value = null
+                    snapshots.value = emptyList()
+                }
+            }
         }
     }
 
@@ -70,6 +90,10 @@ class RuntimeInspectViewModel @Inject constructor(
                     manager.captureSnapshot(distroId)
                     refreshSnapshots()
                 }
+            } catch (_: Exception) {
+                // PHASE 96 — don't crash the screen on a
+                // snapshot failure. The UI shows the
+                // progress spinner + dismisses on done.
             } finally {
                 _isBusy.value = false
             }
@@ -79,7 +103,12 @@ class RuntimeInspectViewModel @Inject constructor(
     fun removeSnapshot(snapshotId: String) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                manager.removeSnapshot(snapshotId)
+                try {
+                    manager.removeSnapshot(snapshotId)
+                } catch (_: Exception) {
+                    // PHASE 96 — defensive: a failed remove
+                    // shouldn't crash the screen.
+                }
                 refreshSnapshots()
             }
         }
@@ -89,10 +118,25 @@ class RuntimeInspectViewModel @Inject constructor(
         val install = manager.findInstalled(distroId)
         installation.value = install
         if (install != null && install.isHealthy) {
-            manager.introspect(distroId) { snap ->
-                snapshot.value = snap
+            try {
+                manager.introspect(distroId) { snap ->
+                    snapshot.value = snap
+                }
+            } catch (_: Exception) {
+                // PHASE 96 — the introspector can throw on
+                // a partial install (missing os-release,
+                // permission errors on rootfs walk, etc).
+                // Set the snapshot to a safe empty value
+                // and continue; the user still sees the
+                // installation header + a "no snapshot"
+                // placeholder.
+                snapshot.value = null
             }
-            refreshSnapshots()
+            try {
+                refreshSnapshots()
+            } catch (_: Exception) {
+                snapshots.value = emptyList()
+            }
         } else {
             snapshot.value = null
             snapshots.value = emptyList()
