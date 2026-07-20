@@ -176,6 +176,16 @@ class SecretStore(
     }
 
     /**
+     * Delete every secret. The deletion is
+     * **not** audited individually (a wipe
+     * produces one audit event at the
+     * kill-switch level, not N events).
+     */
+    fun clear() {
+        lock.write { secrets.clear() }
+    }
+
+    /**
      * The number of stored secrets. Used by
      * the monitoring + the test suite.
      */

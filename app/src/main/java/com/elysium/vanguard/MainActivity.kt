@@ -565,6 +565,13 @@ class MainActivity : ComponentActivity() {
                             onBack = { navController.popBackStack() }
                         )
                     }
+                    // PHASE 100 — Kill switch (emergency wipe).
+                    composable("kill_switch") {
+                        com.elysium.vanguard.features.killswitch.KillSwitchScreen(
+                            onBack = { navController.popBackStack() },
+                            onCompleted = { navController.popBackStack() }
+                        )
+                    }
                     composable(
                         route = "album_detail/{albumName}",
                         arguments = listOf(navArgument("albumName") { type = NavType.StringType })

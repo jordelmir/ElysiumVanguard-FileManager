@@ -1,10 +1,14 @@
 package com.elysium.vanguard.core.security
 
+import android.content.Context
 import com.elysium.vanguard.BuildConfig
+import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
 import javax.inject.Singleton
 
 /**
@@ -95,4 +99,90 @@ object SecurityModule {
             .takeIf { it.isNotEmpty() },
         productionBuild = BuildConfig.PRODUCTION_BUILD,
     )
+
+    /**
+     * Phase 100 — the list of on-disk directories
+     * the kill switch wipes. The list is
+     * derived from the [Context.filesDir] sub-
+     * directories the runtime uses. The list
+     * is **writable** so tests can override it.
+     */
+    @Provides
+    @Singleton
+    fun provideWipeableDirectories(
+        @ApplicationContext context: Context,
+    ): WipeableDirectories = WipeableDirectories(
+        listOf(
+            File(context.filesDir, "workspaces"),
+            File(context.filesDir, "distros"),
+            File(context.filesDir, "fileaction-scratch"),
+            File(context.filesDir, "elysium-vault"),
+        )
+    )
+
+    /**
+     * Phase 100 — the kill switch's process
+     * inventory provider. The production
+     * default returns an empty list (the
+     * [com.elysium.vanguard.core.runtime.runner.ProcessWatcher]
+     * is the canonical source; it lives in
+     * Phase 100+ integration work). The kill
+     * switch stops whatever the provider
+     * returns before wiping the database +
+     * directories.
+     */
+    @Provides
+    @Singleton
+    fun provideLaunchedProcessHandlesProvider(): LaunchedProcessHandlesProvider =
+        LaunchedProcessHandlesProvider { emptyList() }
+
+    /**
+     * Phase 100 — the security audit log
+     * (singleton; append-only). The kill
+     * switch records its trigger here.
+     */
+    @Provides
+    @Singleton
+    fun provideSecurityAudit(): SecurityAudit = SecurityAudit()
+
+    /**
+     * Phase 100 — the secret store. The kill
+     * switch calls `clear()` on this to wipe
+     * the Tink-encrypted keys.
+     */
+    @Provides
+    @Singleton
+    fun provideSecretStore(audit: SecurityAudit): SecretStore = SecretStore(audit = audit)
+
+    /**
+     * Phase 100 — the production
+     * [RuntimeDataWiper]. The class wraps the
+     * Room database; the kill switch consumes
+     * the interface.
+     */
+    @Provides
+    @Singleton
+    fun provideRuntimeDataWiper(
+        database: com.elysium.vanguard.core.database.runtime.RuntimeDatabase,
+    ): RuntimeDataWiper = RuntimeDataWiperImpl(database = database)
+}
+
+/**
+ * Phase 100 — typed wrapper around the list of
+ * on-disk directories the kill switch wipes.
+ * A typed wrapper is needed because Hilt can't
+ * bind `List<File>` (Hilt erases the element
+ * type at injection time).
+ */
+data class WipeableDirectories(val dirs: List<File>)
+
+/**
+ * Phase 100 — typed wrapper around the
+ * callback the kill switch uses to discover
+ * the running processes. A typed wrapper is
+ * needed because Hilt can't bind `Function0`
+ * with a covariant return type.
+ */
+fun interface LaunchedProcessHandlesProvider {
+    fun handles(): List<com.elysium.vanguard.core.runtime.runner.LaunchedProcess>
 }

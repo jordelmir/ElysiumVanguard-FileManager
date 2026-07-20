@@ -259,8 +259,9 @@ class SecurityZeroTrustTest {
     }
 
     @Test
-    fun `secret event type has 5 values`() {
-        assertEquals(5, SecurityEventType.values().size)
+    fun `secret event type has 6 values`() {
+        // Phase 100 added KILL_SWITCH_TRIGGERED.
+        assertEquals(6, SecurityEventType.values().size)
     }
 
     @Test

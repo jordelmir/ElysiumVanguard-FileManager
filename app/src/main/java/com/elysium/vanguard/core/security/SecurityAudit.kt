@@ -110,6 +110,15 @@ enum class SecurityEventType {
 
     /** A CVE detection was performed. */
     CVE_DETECTION,
+
+    /**
+     * Phase 100 — the kill switch was triggered.
+     * The event is the last thing recorded
+     * before the platform's runtime data is
+     * wiped; it is the only trace left of the
+     * trigger.
+     */
+    KILL_SWITCH_TRIGGERED,
 }
 
 enum class SecurityEventOutcome {
@@ -142,5 +151,19 @@ sealed class SecurityEventDetails {
         val cveId: String,
         val severity: String,
         val affectedComponent: String,
+    ) : SecurityEventDetails()
+
+    /**
+     * Phase 100 — the details of a kill switch
+     * trigger. The event is the last thing
+     * recorded before the runtime data is wiped;
+     * the details carry the reason + the
+     * inventory of what was wiped (for the
+     * post-mortem).
+     */
+    data class KillSwitchDetails(
+        val reason: String,
+        val wipedTables: List<String>,
+        val wipedDirectories: List<String>,
     ) : SecurityEventDetails()
 }
