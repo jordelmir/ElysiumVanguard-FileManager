@@ -10,6 +10,9 @@ import com.elysium.vanguard.core.fileactions.handlers.GitCloneResult
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageHandler
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageResult
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
 import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroFamily
@@ -185,11 +188,13 @@ class FileActionViewModelTest {
         gitCloneRunner: GitCloneRunner = RecordingGitCloneRunner(),
         diskImageBackend: DiskImageBackend = RecordingDiskImageBackend(),
         gitCloneHandler: GitCloneHandler = GitCloneHandler(gitCloneRunner),
+        networkShareHandler: NetworkShareHandler = NetworkShareHandler(RecordingNetworkShareMounter()),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
         gitCloneHandler = gitCloneHandler,
         diskImageBackend = diskImageBackend,
+        networkShareHandler = networkShareHandler,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(
@@ -263,4 +268,18 @@ private class RecordingDiskImageBackend(
         format: DiskImageFormat,
         preferredVmId: String?,
     ) = DiskImageResult.VmBooted(vmId = "test-vm", format = format)
+}
+
+private class RecordingNetworkShareMounter(
+    private val expectedResult: NetworkShareMountResult = NetworkShareMountResult.Failure(
+        message = "no test result configured"
+    ),
+) : NetworkShareMounter {
+    override suspend fun mount(
+        url: String,
+        protocol: com.elysium.vanguard.core.fileactions.NetworkProtocol,
+        username: String?,
+        password: String?,
+        descriptorName: String,
+    ): NetworkShareMountResult = expectedResult
 }

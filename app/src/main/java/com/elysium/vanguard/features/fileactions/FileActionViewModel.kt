@@ -15,6 +15,8 @@ import com.elysium.vanguard.core.fileactions.handlers.GitCloneHandler
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneResult
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageHandler
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageResult
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +53,7 @@ class FileActionViewModel @Inject constructor(
     private val installPackageHandler: InstallPackageHandler,
     private val gitCloneHandler: GitCloneHandler,
     private val diskImageBackend: DiskImageBackend,
+    private val networkShareHandler: NetworkShareHandler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -156,9 +159,17 @@ class FileActionViewModel @Inject constructor(
                     )
                 }
             }
-            is FileAction.MountNetworkShare -> FileActionOutcome.Success(
-                message = "Mount ${action.protocol} from ${action.url} (queued)"
-            )
+            is FileAction.MountNetworkShare -> {
+                val result = networkShareHandler.mount(action)
+                when (result) {
+                    is NetworkShareMountResult.Mounted -> FileActionOutcome.Success(
+                        message = "Mounted ${result.protocol.name} at ${result.mountPoint}"
+                    )
+                    is NetworkShareMountResult.Failure -> FileActionOutcome.Failure(
+                        message = result.message
+                    )
+                }
+            }
             is FileAction.InspectUsbOtgDevice -> FileActionOutcome.Success(
                 message = "Inspect ${action.blockDevice} (queued)"
             )

@@ -3,9 +3,11 @@ package com.elysium.vanguard.core.fileactions
 import android.content.Context
 import com.elysium.vanguard.core.fileactions.handlers.DiskImageBackend
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
+import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherDiskImageBackend
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherGitCloneRunner
+import com.elysium.vanguard.core.fileactions.production.ProcessLauncherNetworkShareMounter
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherPackageInstaller
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
@@ -44,6 +46,12 @@ import javax.inject.Singleton
  *   the production [ProcessLauncher];
  *   `mount -o ro,loop` for ISO / IMG,
  *   `qemu-img convert` for QCOW2)
+ *
+ * - [NetworkShareMounter] → (Phase 97)
+ *   [ProcessLauncherNetworkShareMounter]
+ *   (wraps the production [ProcessLauncher];
+ *   `mount -t cifs` for SMB, `mount -t davfs`
+ *   for WebDAV, `mount -t fuse.sshfs` for SFTP)
  *
  * - [FileActionEnvironment] → an
  *   `DefaultFileActionEnvironment` that
@@ -84,6 +92,21 @@ object FileActionModule {
         processLauncher: ProcessLauncher,
         @ApplicationContext context: Context,
     ): DiskImageBackend = ProcessLauncherDiskImageBackend(
+        processLauncher = processLauncher,
+        scratchDir = File(context.filesDir, "fileaction-scratch"),
+    )
+
+    /**
+     * Phase 97 — the network share mounter. The scratch
+     * dir is shared with the disk image backend (both
+     * live under `<filesDir>/fileaction-scratch/`).
+     */
+    @Provides
+    @Singleton
+    fun provideNetworkShareMounter(
+        processLauncher: ProcessLauncher,
+        @ApplicationContext context: Context,
+    ): NetworkShareMounter = ProcessLauncherNetworkShareMounter(
         processLauncher = processLauncher,
         scratchDir = File(context.filesDir, "fileaction-scratch"),
     )
