@@ -152,7 +152,22 @@ class DistroManager(
     }
 
     fun refreshInstalled() {
-        _installed.value = loadInstalled()
+    }
+
+    /**
+     * Phase 94 — return the list of currently
+     * installed distros. The list is read from
+     * the storage backend; a refresh is
+     * triggered lazily if the cached list is
+     * empty.
+     */
+    fun listInstalled(): List<DistroInstallation> {
+        val cached = loadInstalled()
+        if (cached.isEmpty()) {
+            refreshInstalled()
+            return loadInstalled()
+        }
+        return cached
     }
 
     override fun findInstalled(id: String): DistroInstallation? =

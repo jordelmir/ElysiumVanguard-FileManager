@@ -199,6 +199,16 @@ class WindowsVmManager(
     /** List the catalog ids the runtime ships. */
     fun listSpecIds(): List<String> = catalog.all.map { it.id }
 
+    /**
+     * Phase 94 — return the list of all known
+     * Windows VM specs (each with its id +
+     * display name). The list is the union of
+     * the static catalog + the user's custom
+     * specs. Used by the [com.elysium.vanguard.features.fileactions.FileActionViewModel]
+     * to build the [com.elysium.vanguard.core.fileactions.FileActionContext].
+     */
+    fun listSpecs(): List<WindowsVmSpec> = catalog.all.toList()
+
     /** List the VMs the manager currently tracks as running. */
     fun listRunning(): List<String> = states.entries
         .filter { (_, s) -> s is WindowsVmState.Running }

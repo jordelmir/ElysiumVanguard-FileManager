@@ -39,7 +39,7 @@ import java.io.File
  * + the distro's rootfs path); tests pass a
  * fake.
  */
-class InstallPackageHandler(
+class InstallPackageHandler @javax.inject.Inject constructor(
     private val installer: PackageInstaller,
 ) {
 

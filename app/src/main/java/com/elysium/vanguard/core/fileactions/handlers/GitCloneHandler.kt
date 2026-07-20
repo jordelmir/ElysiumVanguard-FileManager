@@ -33,7 +33,7 @@ import java.io.File
  * constructor; production uses the real
  * runner; tests use a fake.
  */
-class GitCloneHandler(
+class GitCloneHandler @javax.inject.Inject constructor(
     private val runner: GitCloneRunner,
 ) {
 

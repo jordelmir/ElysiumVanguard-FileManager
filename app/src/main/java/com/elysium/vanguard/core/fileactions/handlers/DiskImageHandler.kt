@@ -36,7 +36,7 @@ import java.io.File
  * constructor; production uses the real
  * backend; tests use a fake.
  */
-class DiskImageHandler(
+class DiskImageHandler @javax.inject.Inject constructor(
     private val backend: DiskImageBackend,
 ) {
 
