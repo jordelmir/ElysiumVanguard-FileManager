@@ -564,4 +564,69 @@ sealed class ProcessLauncherError(
             "${handleId.value}",
         code = "HANDLE_NOT_STARTED",
     )
+
+    /**
+     * The executable was not found on the
+     * host. The process could not be
+     * launched because the executable path
+     * does not exist (or is not
+     * executable).
+     *
+     * Raised by the production
+     * [AndroidProcessLauncher] when
+     * `ProcessBuilder.start()` throws an
+     * `IOException` (the executable was
+     * not found).
+     */
+    data class ExecutableNotFound(
+        val executable: String,
+    ) : ProcessLauncherError(
+        message = "Executable not found: $executable",
+        code = "EXECUTABLE_NOT_FOUND",
+    )
+
+    /**
+     * The process could not be launched
+     * for an unspecified reason (a
+     * permission denied, a working
+     * directory not found, etc.).
+     *
+     * Raised by the production
+     * [AndroidProcessLauncher] when
+     * `ProcessBuilder.start()` throws an
+     * exception that is not an
+     * `IOException` (the launch failed
+     * for a reason other than the
+     * executable not being found).
+     */
+    data class LaunchFailed(
+        val reason: String,
+    ) : ProcessLauncherError(
+        message = "Process launch failed: $reason",
+        code = "LAUNCH_FAILED",
+    )
+
+    /**
+     * The `markExited` or `markFailed`
+     * method was called on the production
+     * [AndroidProcessLauncher]. The
+     * production launcher observes the
+     * process lifecycle via
+     * `Process.onExit()` (async); manual
+     * `mark*` calls are not supported in
+     * production.
+     *
+     * The `mark*` methods are
+     * **test-only** (used by the
+     * `InMemoryProcessLauncher` to
+     * simulate the process lifecycle
+     * synchronously).
+     */
+    data object UnsupportedManualMark : ProcessLauncherError(
+        message = "markExited / markFailed are test-only " +
+            "operations; the production " +
+            "AndroidProcessLauncher observes the process " +
+            "lifecycle via Process.onExit()",
+        code = "UNSUPPORTED_MANUAL_MARK",
+    )
 }
