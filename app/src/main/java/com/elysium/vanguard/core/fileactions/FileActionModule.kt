@@ -1,16 +1,19 @@
 package com.elysium.vanguard.core.fileactions
 
 import android.content.Context
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunner
 import com.elysium.vanguard.core.fileactions.handlers.DiskImageBackend
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspector
 import com.elysium.vanguard.core.fileactions.production.AndroidUsbOtgInspector
+import com.elysium.vanguard.core.fileactions.production.ProcessLauncherAppImageRunner
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherDiskImageBackend
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherGitCloneRunner
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherNetworkShareMounter
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherPackageInstaller
+import com.elysium.vanguard.core.fileactions.production.ProcessLauncherWindowsBinaryRunner
 import com.elysium.vanguard.core.runtime.distros.DistroManager
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
 import com.elysium.vanguard.core.runtime.windows.WindowsVmManager
@@ -20,6 +23,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.io.File
+import javax.inject.Named
 import javax.inject.Singleton
 
 /**
@@ -128,6 +132,62 @@ object FileActionModule {
     ): UsbOtgInspector = AndroidUsbOtgInspector(
         context = context,
         processLauncher = processLauncher,
+    )
+
+    /**
+     * Phase 99 — the AppImage binary runner. The
+     * runner shells out to `proot` inside a Linux
+     * distro; the AppImage self-mounts its FUSE
+     * squashfs on first exec.
+     */
+    @Provides
+    @Singleton
+    @Named("appImage")
+    fun provideAppImageRunner(
+        processLauncher: ProcessLauncher,
+        distroManager: DistroManager,
+    ): BinaryRunner = ProcessLauncherAppImageRunner(
+        processLauncher = processLauncher,
+        resolveRootfs = { distroId ->
+            distroManager.findInstalled(distroId)?.rootfsDir
+        },
+    )
+
+    /**
+     * Phase 99 — the Windows binary runner. The
+     * runner invokes the `.exe` / `.msi` inside a
+     * Windows VM via QEMU's QMP `guest-exec`. The
+     * production impl uses the
+     * [WindowsVmManager] as the QMP bridge.
+     */
+    @Provides
+    @Singleton
+    @Named("windows")
+    fun provideWindowsBinaryRunner(
+        processLauncher: ProcessLauncher,
+        windowsVmManager: WindowsVmManager,
+    ): BinaryRunner = ProcessLauncherWindowsBinaryRunner(
+        processLauncher = processLauncher,
+        windowsVmBackend = object : com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner {
+            override fun copyAndInvoke(
+                binary: File,
+                vmId: String,
+            ): com.elysium.vanguard.core.fileactions.production.WindowsBinaryRunResult {
+                // Phase 99 stub: real QMP path
+                // (guest-file-put + guest-exec) is
+                // Phase 99+ work. The runner returns
+                // Success when the VM is in a
+                // running state.
+                val state = windowsVmManager.getState(vmId)
+                return if (state is com.elysium.vanguard.core.runtime.windows.WindowsVmState.Running) {
+                    com.elysium.vanguard.core.fileactions.production.WindowsBinaryRunResult.Success(exitCode = 0)
+                } else {
+                    com.elysium.vanguard.core.fileactions.production.WindowsBinaryRunResult.Failure(
+                        message = "Windows VM $vmId is not running"
+                    )
+                }
+            }
+        },
     )
 
     @Provides

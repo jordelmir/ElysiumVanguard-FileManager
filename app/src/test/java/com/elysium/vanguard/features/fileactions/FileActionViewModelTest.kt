@@ -10,6 +10,9 @@ import com.elysium.vanguard.core.fileactions.handlers.GitCloneResult
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageHandler
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageResult
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunner
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
@@ -195,6 +198,10 @@ class FileActionViewModelTest {
         gitCloneHandler: GitCloneHandler = GitCloneHandler(gitCloneRunner),
         networkShareHandler: NetworkShareHandler = NetworkShareHandler(RecordingNetworkShareMounter()),
         usbOtgHandler: UsbOtgHandler = UsbOtgHandler(RecordingUsbOtgInspector()),
+        binaryRunnerHandler: BinaryRunnerHandler = BinaryRunnerHandler(
+            RecordingBinaryRunner(),
+            RecordingBinaryRunner(),
+        ),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
@@ -202,6 +209,7 @@ class FileActionViewModelTest {
         diskImageBackend = diskImageBackend,
         networkShareHandler = networkShareHandler,
         usbOtgHandler = usbOtgHandler,
+        binaryRunnerHandler = binaryRunnerHandler,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(
@@ -300,4 +308,16 @@ private class RecordingUsbOtgInspector(
     override fun findByBlockPath(blockPath: String): UsbDeviceSummary? = null
     override fun firstReadablePartition(device: UsbDeviceSummary): UsbPartition? = null
     override suspend fun mountReadOnly(partition: UsbPartition): UsbOtgInspectResult = expectedResult
+}
+
+private class RecordingBinaryRunner(
+    private val expectedResult: BinaryRunResult = BinaryRunResult.Failure(
+        message = "no test result configured"
+    ),
+) : BinaryRunner {
+    override suspend fun run(
+        binary: File,
+        targetId: String,
+        runtimeLabel: String,
+    ): BinaryRunResult = expectedResult
 }

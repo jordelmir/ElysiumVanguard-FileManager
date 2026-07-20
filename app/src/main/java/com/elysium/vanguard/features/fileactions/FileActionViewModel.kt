@@ -19,6 +19,8 @@ import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgHandler
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspectResult
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
+import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,6 +59,7 @@ class FileActionViewModel @Inject constructor(
     private val diskImageBackend: DiskImageBackend,
     private val networkShareHandler: NetworkShareHandler,
     private val usbOtgHandler: UsbOtgHandler,
+    private val binaryRunnerHandler: BinaryRunnerHandler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -109,10 +112,28 @@ class FileActionViewModel @Inject constructor(
                     )
                 }
             }
-            is FileAction.RunAppImage,
-            is FileAction.RunWindowsBinary -> FileActionOutcome.Success(
-                message = "${action.label} (launch queued)"
-            )
+            is FileAction.RunAppImage -> {
+                val result = binaryRunnerHandler.run(action)
+                when (result) {
+                    is BinaryRunResult.Launched -> FileActionOutcome.Success(
+                        message = "Launched ${action.appImagePath} in ${action.targetDistroName}"
+                    )
+                    is BinaryRunResult.Failure -> FileActionOutcome.Failure(
+                        message = result.message
+                    )
+                }
+            }
+            is FileAction.RunWindowsBinary -> {
+                val result = binaryRunnerHandler.run(action)
+                when (result) {
+                    is BinaryRunResult.Launched -> FileActionOutcome.Success(
+                        message = "Launched ${action.binaryPath} in ${action.targetVmName}"
+                    )
+                    is BinaryRunResult.Failure -> FileActionOutcome.Failure(
+                        message = result.message
+                    )
+                }
+            }
             is FileAction.GitClone -> {
                 val result = gitCloneHandler.clone(action)
                 when (result) {
