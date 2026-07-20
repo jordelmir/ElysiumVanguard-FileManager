@@ -5,6 +5,8 @@ import com.elysium.vanguard.core.fileactions.handlers.DiskImageBackend
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspector
+import com.elysium.vanguard.core.fileactions.production.AndroidUsbOtgInspector
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherDiskImageBackend
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherGitCloneRunner
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherNetworkShareMounter
@@ -109,6 +111,23 @@ object FileActionModule {
     ): NetworkShareMounter = ProcessLauncherNetworkShareMounter(
         processLauncher = processLauncher,
         scratchDir = File(context.filesDir, "fileaction-scratch"),
+    )
+
+    /**
+     * Phase 98 — the USB OTG inspector. Wraps Android's
+     * [android.hardware.usb.UsbManager] + the production
+     * [ProcessLauncher]. The inspector enumerates the
+     * attached USB mass-storage devices, finds the
+     * first readable partition, and mounts it read-only.
+     */
+    @Provides
+    @Singleton
+    fun provideUsbOtgInspector(
+        @ApplicationContext context: Context,
+        processLauncher: ProcessLauncher,
+    ): UsbOtgInspector = AndroidUsbOtgInspector(
+        context = context,
+        processLauncher = processLauncher,
     )
 
     @Provides

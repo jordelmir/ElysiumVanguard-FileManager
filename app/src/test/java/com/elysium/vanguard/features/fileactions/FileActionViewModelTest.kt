@@ -14,6 +14,11 @@ import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
+import com.elysium.vanguard.core.fileactions.handlers.UsbDeviceSummary
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgHandler
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspectResult
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspector
+import com.elysium.vanguard.core.fileactions.handlers.UsbPartition
 import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroFamily
 import com.elysium.vanguard.core.runtime.distros.DistroInstallation
@@ -189,12 +194,14 @@ class FileActionViewModelTest {
         diskImageBackend: DiskImageBackend = RecordingDiskImageBackend(),
         gitCloneHandler: GitCloneHandler = GitCloneHandler(gitCloneRunner),
         networkShareHandler: NetworkShareHandler = NetworkShareHandler(RecordingNetworkShareMounter()),
+        usbOtgHandler: UsbOtgHandler = UsbOtgHandler(RecordingUsbOtgInspector()),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
         gitCloneHandler = gitCloneHandler,
         diskImageBackend = diskImageBackend,
         networkShareHandler = networkShareHandler,
+        usbOtgHandler = usbOtgHandler,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(
@@ -282,4 +289,15 @@ private class RecordingNetworkShareMounter(
         password: String?,
         descriptorName: String,
     ): NetworkShareMountResult = expectedResult
+}
+
+private class RecordingUsbOtgInspector(
+    private val expectedResult: UsbOtgInspectResult = UsbOtgInspectResult.Failure(
+        message = "no test result configured"
+    ),
+) : UsbOtgInspector {
+    override fun findFirstMassStorageDevice(): UsbDeviceSummary? = null
+    override fun findByBlockPath(blockPath: String): UsbDeviceSummary? = null
+    override fun firstReadablePartition(device: UsbDeviceSummary): UsbPartition? = null
+    override suspend fun mountReadOnly(partition: UsbPartition): UsbOtgInspectResult = expectedResult
 }

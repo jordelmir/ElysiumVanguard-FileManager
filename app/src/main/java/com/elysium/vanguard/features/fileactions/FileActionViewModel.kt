@@ -17,6 +17,8 @@ import com.elysium.vanguard.core.fileactions.handlers.InstallPackageHandler
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageResult
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgHandler
+import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspectResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +56,7 @@ class FileActionViewModel @Inject constructor(
     private val gitCloneHandler: GitCloneHandler,
     private val diskImageBackend: DiskImageBackend,
     private val networkShareHandler: NetworkShareHandler,
+    private val usbOtgHandler: UsbOtgHandler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -170,9 +173,20 @@ class FileActionViewModel @Inject constructor(
                     )
                 }
             }
-            is FileAction.InspectUsbOtgDevice -> FileActionOutcome.Success(
-                message = "Inspect ${action.blockDevice} (queued)"
-            )
+            is FileAction.InspectUsbOtgDevice -> {
+                val result = usbOtgHandler.inspect(action)
+                when (result) {
+                    is UsbOtgInspectResult.Mounted -> FileActionOutcome.Success(
+                        message = "Mounted ${result.partition.blockPath} at ${result.mountPoint}"
+                    )
+                    is UsbOtgInspectResult.Unmounted -> FileActionOutcome.Success(
+                        message = "Found ${result.partitions.size} partition(s) on ${result.device.productName} (none auto-mounted)"
+                    )
+                    is UsbOtgInspectResult.Failure -> FileActionOutcome.Failure(
+                        message = result.message
+                    )
+                }
+            }
         }
 
     private fun buildContext(): FileActionContext {
