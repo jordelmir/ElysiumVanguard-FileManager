@@ -353,7 +353,8 @@ interface NetworkRuleDao {
         HardwareAccessAuditEntity::class,
         DiagnosticEventEntity::class,
         WorkspaceEntity::class,
-        NetworkRuleEntity::class
+        NetworkRuleEntity::class,
+        com.elysium.vanguard.core.database.media.MediaIndexEntity::class,
     ],
     version = 1,
     exportSchema = false
@@ -366,4 +367,5 @@ abstract class RuntimeDatabase : RoomDatabase() {
     abstract fun diagnosticEventDao(): DiagnosticEventDao
     abstract fun workspaceDao(): WorkspaceDao
     abstract fun networkRuleDao(): NetworkRuleDao
+    abstract fun mediaIndexDao(): com.elysium.vanguard.core.database.media.MediaIndexDao
 }

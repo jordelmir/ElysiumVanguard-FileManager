@@ -51,4 +51,8 @@ object RuntimeDatabaseModule {
 
     @Provides
     fun provideNetworkRuleDao(db: RuntimeDatabase): NetworkRuleDao = db.networkRuleDao()
+
+    @Provides
+    fun provideMediaIndexDao(db: RuntimeDatabase): com.elysium.vanguard.core.database.media.MediaIndexDao =
+        db.mediaIndexDao()
 }
