@@ -77,6 +77,13 @@ import kotlinx.coroutines.launch
 import com.elysium.vanguard.ui.theme.SectionColorManager
 import com.elysium.vanguard.ui.components.ColorCustomizerIcon
 import com.elysium.vanguard.ui.components.ColorSelectionDialog
+import com.elysium.vanguard.features.fileactions.FileActionViewModel
+import com.elysium.vanguard.features.fileactions.FileActionSheet
+import com.elysium.vanguard.features.fileactions.FileActionOutcome
+import com.elysium.vanguard.core.fileactions.FileAction
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -87,6 +94,7 @@ import java.util.*
  * THE OMNI-CORE INTERFACE
  * The master orchestration layer for the Titan Glass File Manager.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileManagerScreen(
     viewModel: FileManagerViewModel,
@@ -135,6 +143,27 @@ fun FileManagerScreen(
     val scope = rememberCoroutineScope()
 
     val uiState by viewModel.uiState.collectAsState()
+
+    // PHASE 95 — wire the contextual FileActionSheet (the bottom sheet
+    // that offers "Install in Debian 12" / "Mount as ISO" / "Clone repo"
+    // etc). The ViewModel is Hilt-injected via hiltViewModel() so we
+    // don't need to thread a new param through. The selected file is
+    // tracked locally; the sheet itself is shown via ModalBottomSheet
+    // at the bottom of the screen.
+    val actionViewModel: FileActionViewModel = hiltViewModel()
+    val actionState by actionViewModel.state.collectAsState()
+    var fileForActions: TitanFile? by remember { mutableStateOf(null) }
+    // Auto-dismiss the sheet when the user taps an action (the VM
+    // closes itself, but we also clear the local file pointer).
+    LaunchedEffect(actionState.lastOutcome) {
+        actionState.lastOutcome?.let { outcome ->
+            val msg = when (outcome) {
+                is FileActionOutcome.Success -> outcome.message
+                is FileActionOutcome.Failure -> outcome.message
+            }
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // PHASE 10.2: state for the "Grant full access" banner. Recomputed on
     // every ON_RESUME so the banner disappears the moment the user flips
@@ -562,6 +591,15 @@ fun FileManagerScreen(
                                                             showOptions = false
                                                             if (action == "DETAILS") {
                                                                 fileForDetails = file
+                                                            } else if (action == "CONTEXTUAL") {
+                                                                // PHASE 95 — open the contextual
+                                                                // file action sheet (install
+                                                                // .deb / mount .iso / clone
+                                                                // .git, etc).
+                                                                fileForActions = file
+                                                                actionViewModel.openActionSheet(
+                                                                    java.io.File(file.path)
+                                                                )
                                                             } else {
                                                                 handleFileAction(action, file, viewModel, scope, currentPath) { f -> fileToRename = f }
                                                             }
@@ -618,6 +656,15 @@ fun FileManagerScreen(
                                                             showOptions = false
                                                             if (action == "DETAILS") {
                                                                 fileForDetails = file
+                                                            } else if (action == "CONTEXTUAL") {
+                                                                // PHASE 95 — open the contextual
+                                                                // file action sheet (install
+                                                                // .deb / mount .iso / clone
+                                                                // .git, etc).
+                                                                fileForActions = file
+                                                                actionViewModel.openActionSheet(
+                                                                    java.io.File(file.path)
+                                                                )
                                                             } else {
                                                                 handleFileAction(action, file, viewModel, scope, currentPath) { f -> fileToRename = f }
                                                             }
@@ -699,6 +746,38 @@ fun FileManagerScreen(
                     },
                     progress = progressState
                 )
+            }
+
+            // PHASE 95 — Contextual FileActionSheet. The bottom sheet
+            // appears when the user picks "Contextual actions" from the
+            // long-press menu. The VM resolves the actions for the
+            // selected file; the sheet renders them. Tapping an action
+            // dispatches it via the VM (which runs the production
+            // proot/apt/dnf/pacman/git/mount/qemu path) and emits a
+            // toast with the outcome.
+            val fileForActionsValue = fileForActions
+            if (fileForActionsValue != null && actionState.sheetVisible) {
+                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                ModalBottomSheet(
+                    onDismissRequest = {
+                        fileForActions = null
+                        actionViewModel.closeActionSheet()
+                    },
+                    sheetState = sheetState,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ) {
+                    FileActionSheet(
+                        fileName = fileForActionsValue.name,
+                        actions = actionState.actions,
+                        onActionClick = { action ->
+                            actionViewModel.execute(action)
+                        },
+                        onDismiss = {
+                            fileForActions = null
+                            actionViewModel.closeActionSheet()
+                        },
+                    )
+                }
             }
         }
     }
@@ -1395,6 +1474,18 @@ fun SovereignOptionsDialog(
                 OptionItem(Icons.Default.Edit, "Rename", Color.White) { onAction("RENAME") }
                 OptionItem(Icons.Default.Info, "Details", Color.White) { onAction("DETAILS") }
                 OptionItem(Icons.Default.Share, "Share", Color.White) { onAction("SHARE") }
+                // PHASE 95 — contextual actions (install in distro, mount
+                // ISO, clone repo, etc). Only shown for files (not
+                // folders); the VM returns an empty list for folders +
+                // unrecognized extensions, so the bottom sheet shows the
+                // "no actions" placeholder.
+                if (!file.isFolder) {
+                    OptionItem(
+                        Icons.Default.MoreVert,
+                        "Contextual actions",
+                        GlobalColors.primary
+                    ) { onAction("CONTEXTUAL") }
+                }
                 Divider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 8.dp))
                 OptionItem(Icons.Default.Delete, "Delete", TitanColors.NeonRed) { onAction("DELETE") }
 
