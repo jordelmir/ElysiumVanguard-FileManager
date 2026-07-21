@@ -2,6 +2,8 @@ package com.elysium.vanguard.core.runtime.network.firewall
 
 import com.elysium.vanguard.core.runtime.network.policy.NetworkMode
 import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicySpecBridge
+import com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec
 
 /**
  * Phase 15 — translates a [NetworkPolicy] into a
@@ -37,6 +39,24 @@ import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
  *     directions; published ports are informational.
  */
 class NetworkPolicyFirewall {
+
+    /**
+     * PHASE 105 — the **workspace-aware** entry point.
+     * The caller passes a [NetworkPolicySpec] (the
+     * typed value carried by the workspace JSON); the
+     * firewall calls [NetworkPolicySpecBridge] to
+     * translate it to a [NetworkPolicy] and then
+     * delegates to the existing [compile] method.
+     *
+     * This is the entry point the launch path should
+     * use. The pre-Phase 105 [compile] method is
+     * retained for callers that already have a
+     * [NetworkPolicy] in hand (e.g. test fakes).
+     */
+    fun compileFromSpec(sessionId: String, spec: NetworkPolicySpec): FirewallState {
+        val policy = NetworkPolicySpecBridge.toSessionPolicy(spec)
+        return compile(sessionId = sessionId, policy = policy)
+    }
 
     /**
      * Compile [policy] for the session identified by [sessionId]
