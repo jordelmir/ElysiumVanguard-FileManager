@@ -163,6 +163,16 @@ private object WorkspaceDefinitionAdapter : JsonSerializer<WorkspaceDefinition>,
         obj.add("env", context.serialize(src.env))
         obj.add("launcher", context.serialize(src.launcher))
         obj.add("resources", context.serialize(src.resources))
+        // Phase 104 — the three new policy fields.
+        // Each is serialized as a nested object (Gson
+        // uses the data class's declared property names
+        // + the registered type adapters for the
+        // nested enum types). When [GpuAccessSpec.NONE]
+        // is the default we still emit it explicitly so
+        // the JSON round-trip is byte-stable.
+        obj.add("gpu", context.serialize(src.gpu))
+        obj.add("network", context.serialize(src.network))
+        obj.add("backup", context.serialize(src.backup))
         obj.addProperty("createdAtMs", src.createdAtMs)
         return obj
     }
@@ -188,6 +198,21 @@ private object WorkspaceDefinitionAdapter : JsonSerializer<WorkspaceDefinition>,
         )
         val launcher: LauncherSpec = context.deserialize(obj.get("launcher"), LauncherSpec::class.java)
         val resources: ResourceSpec = context.deserialize(obj.get("resources"), ResourceSpec::class.java)
+        // Phase 104 — the three policy fields.
+        // We manually parse + construct so the data
+        // class `init` blocks run (Gson's reflection
+        // deserializer uses JDK Unsafe, which
+        // bypasses the constructor). An invalid
+        // combination (e.g. DENY_ALL + allowedHosts)
+        // throws IllegalArgumentException from the
+        // constructor; the codec's outer try/catch
+        // wraps it in [WorkspaceDefinitionCodecException].
+        val gpu = if (obj.has("gpu")) decodeGpu(obj.get("gpu").asJsonObject)
+            else GpuAccessSpec.NONE
+        val network = if (obj.has("network")) decodeNetwork(obj.get("network").asJsonObject)
+            else NetworkPolicySpec.DEFAULT
+        val backup = if (obj.has("backup")) decodeBackup(obj.get("backup").asJsonObject)
+            else BackupPolicySpec.NONE
         val createdAtMs = obj.get("createdAtMs").asLong
         return WorkspaceDefinition(
             apiVersion = apiVersion,
@@ -199,7 +224,66 @@ private object WorkspaceDefinitionAdapter : JsonSerializer<WorkspaceDefinition>,
             env = env,
             launcher = launcher,
             resources = resources,
+            gpu = gpu,
+            network = network,
+            backup = backup,
             createdAtMs = createdAtMs,
+        )
+    }
+
+    private fun decodeGpu(obj: JsonObject): GpuAccessSpec {
+        val kind = GpuAccessKind.valueOf(obj.get("kind").asString)
+        val vendor = if (obj.has("vendor") && !obj.get("vendor").isJsonNull) {
+            GpuVendor.valueOf(obj.get("vendor").asString)
+        } else {
+            null
+        }
+        val envOverrides = if (obj.has("driverEnvOverrides")) {
+            val map = LinkedHashMap<String, String>()
+            for ((k, v) in obj.get("driverEnvOverrides").asJsonObject.entrySet()) {
+                map[k] = v.asString
+            }
+            map
+        } else {
+            emptyMap()
+        }
+        // Constructor runs the init block; invalid
+        // combinations (NONE + vendor, NONE +
+        // driverEnvOverrides) throw here.
+        return GpuAccessSpec(kind = kind, vendor = vendor, driverEnvOverrides = envOverrides)
+    }
+
+    private fun decodeNetwork(obj: JsonObject): NetworkPolicySpec {
+        val mode = NetworkAccessMode.valueOf(obj.get("mode").asString)
+        val hosts = if (obj.has("allowedHosts")) {
+            obj.get("allowedHosts").asJsonArray.map { it.asString }
+        } else {
+            emptyList()
+        }
+        val ports = if (obj.has("allowedPorts")) {
+            obj.get("allowedPorts").asJsonArray.map { it.asInt }.toSet()
+        } else {
+            emptySet()
+        }
+        val dnsAllowed = if (obj.has("dnsAllowed")) obj.get("dnsAllowed").asBoolean else false
+        return NetworkPolicySpec(
+            mode = mode,
+            allowedHosts = hosts,
+            allowedPorts = ports,
+            dnsAllowed = dnsAllowed,
+        )
+    }
+
+    private fun decodeBackup(obj: JsonObject): BackupPolicySpec {
+        val strategy = BackupStrategy.valueOf(obj.get("strategy").asString)
+        val interval = obj.get("scheduleIntervalMinutes").asInt
+        val maxSnapshots = obj.get("maxSnapshotCount").asInt
+        val compress = if (obj.has("compress")) obj.get("compress").asBoolean else true
+        return BackupPolicySpec(
+            strategy = strategy,
+            scheduleIntervalMinutes = interval,
+            maxSnapshotCount = maxSnapshots,
+            compress = compress,
         )
     }
 }
