@@ -111,19 +111,58 @@ object DistroModule {
      * The launcher registry used by the resolution path; exposed so
      * future launchers (Termux-style binary detection, etc.) can be
      * registered here at install time instead of touching the manager.
+     *
+     * PHASE 102 — the registry now also includes the
+     * [NamespacedDistroLauncher] when the [RootedModeProbe] reports
+     * the device is rooted. The launcher self-reports
+     * `isAvailable == false` on non-rooted devices, so it's safe to
+     * pass the probe unconditionally; the resolver falls through to
+     * the proot / direct-exec / jailed chain automatically.
      */
     @Provides
     @Singleton
     fun provideLauncherRegistry(
-        nativeProotLauncher: com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher
+        nativeProotLauncher: com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher,
+        rootedLauncher: com.elysium.vanguard.core.runtime.distros.launcher.NamespacedDistroLauncher,
     ): DistroLauncherRegistry {
         return DistroLauncherRegistry(
             listOf(
+                rootedLauncher,
                 nativeProotLauncher,
                 com.elysium.vanguard.core.runtime.distros.launcher.DirectExecDistroLauncher(),
                 com.elysium.vanguard.core.runtime.distros.launcher.JailedDistroLauncher()
             )
         )
+    }
+
+    /**
+     * PHASE 102 — the **rooted `unshare + chroot + cgexec` launcher**.
+     * Always provided; its [com.elysium.vanguard.core.runtime.distros.launcher.NamespacedDistroLauncher.isAvailable]
+     * returns false on non-rooted devices, so the resolver falls
+     * through to the proot chain.
+     */
+    @Provides
+    @Singleton
+    fun provideNamespacedLauncher(
+        probe: com.elysium.vanguard.core.runtime.distros.launcher.RootedModeProbe,
+    ): com.elysium.vanguard.core.runtime.distros.launcher.NamespacedDistroLauncher {
+        return com.elysium.vanguard.core.runtime.distros.launcher.NamespacedDistroLauncher(
+            probe = probe,
+            namespaceSpec = com.elysium.vanguard.core.runtime.distros.launcher.NamespaceSpec.FULL_SANDBOX,
+            cgroupSpec = com.elysium.vanguard.core.runtime.distros.launcher.CgroupSpec.NONE,
+        )
+    }
+
+    /**
+     * PHASE 102 — the root-status probe. Hilt selects the
+     * Android production impl at install time.
+     */
+    @Provides
+    @Singleton
+    fun provideRootedModeProbe(
+        @ApplicationContext context: Context
+    ): com.elysium.vanguard.core.runtime.distros.launcher.RootedModeProbe {
+        return com.elysium.vanguard.core.runtime.distros.launcher.AndroidRootedModeProbe(context)
     }
 
     /**

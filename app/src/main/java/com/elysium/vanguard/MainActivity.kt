@@ -572,6 +572,12 @@ class MainActivity : ComponentActivity() {
                             onCompleted = { navController.popBackStack() }
                         )
                     }
+                    // PHASE 102 — Rooted Mode settings (unshare + chroot + cgexec).
+                    composable("rooted_mode") {
+                        com.elysium.vanguard.features.rooted.RootedModeScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
                     composable(
                         route = "album_detail/{albumName}",
                         arguments = listOf(navArgument("albumName") { type = NavType.StringType })

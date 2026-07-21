@@ -4,24 +4,34 @@ import java.io.File
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
 
 /**
- * PHASE 9.6.3 — Picks the best [DistroLauncher] for a given rootfs.
+ * PHASE 9.6.3 / 102 — Picks the best [DistroLauncher] for a given rootfs.
  *
- * Resolution order:
+ * Resolution order (PHASE 102):
  *
- *   1. If `libproot.so` is present in any known location AND the binary
+ *   1. If the device is rooted + `unshare(1)` is on PATH + the user
+ *      has toggled Rooted Mode ON, use [NamespacedDistroLauncher]
+ *      (true chroot + namespace + cgroup isolation).
+ *   2. If `libproot.so` is present in any known location AND the binary
  *      has been registered with a [NativeProotLauncher], use that.
- *   2. Otherwise fall back to [JailedDistroLauncher].
+ *   3. Otherwise fall back to [DirectExecDistroLauncher] (the rootfs's
+ *      own shell, with the host's loader).
+ *   4. Last resort: [JailedDistroLauncher] (the rootfs as cwd of
+ *      `/system/bin/sh`, no ELF execution).
  *
  * The resolution is intentionally a pure function over the inputs so it
  * can be unit-tested without touching the filesystem: tests pass a fake
  * [DistroLauncherRegistry] and verify selection.
  *
- * Why this lives in its own object: Phase 9.6.3.1 will add a third
- * launcher type (Termux-side binary detection), and we want the
- * selection logic to be in one obvious place rather than spread across
- * DistroManager and DistroScreen.
+ * Why this lives in its own object: a refactor that splits the
+ * "try rooted → try proot → try direct-exec → fallback" decision into
+ * separate locations invites regressions (e.g. the rooted launcher
+ * getting selected on a non-rooted device). One object, one ordering.
  *
  * Phase 9.6.3 — first build; intentionally minimal.
+ * Phase 102 — added [NamespacedDistroLauncher] at the top of the
+ *   resolution order. The launcher self-reports `isAvailable == false`
+ *   on non-rooted devices via the MISSING_SENTINEL pattern, so the
+ *   resolution falls through automatically.
  */
 object LauncherResolution {
 
@@ -66,6 +76,9 @@ data class LauncherPick(
  * real one with the right ABIs. Tests inject a custom instance.
  *
  * Phase 9.6.3 — first build; intentionally minimal.
+ * Phase 102 — added optional [NamespacedDistroLauncher] as the first
+ *   candidate. When `null` (the default in tests), the registry
+ *   behaves as before.
  */
 class DistroLauncherRegistry(
     private val launchers: List<DistroLauncher>
@@ -104,20 +117,50 @@ class DistroLauncherRegistry(
             prootTmpDir: File?,
             mountsProvider: (File) -> List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
             guestDnsConfigProvider: GuestDnsConfigProvider
-        ): DistroLauncherRegistry =
-            DistroLauncherRegistry(
-                listOf(
-                    NativeProotLauncher(
-                        bundledAbis = supportedAbis,
-                        nativeLibrary = nativeLibrary,
-                        runtimeTmpDir = prootTmpDir,
-                        additionalMountsProvider = mountsProvider,
-                        guestDnsConfigProvider = guestDnsConfigProvider
-                    ),
-                    DirectExecDistroLauncher(),
-                    JailedDistroLauncher()
-                )
+        ): DistroLauncherRegistry = production(
+            supportedAbis = supportedAbis,
+            nativeLibrary = nativeLibrary,
+            prootTmpDir = prootTmpDir,
+            mountsProvider = mountsProvider,
+            guestDnsConfigProvider = guestDnsConfigProvider,
+            rootedLauncher = null,
+        )
+
+        /**
+         * Phase 102 — production registry with the **rooted
+         * `unshare + chroot + cgexec` launcher** wired in.
+         *
+         * When [rootedLauncher] is non-null and the probe reports
+         * the device is rooted + `unshare(1)` is on PATH, this
+         * registry picks the namespaced launcher first. The
+         * launcher self-reports `isAvailable == false` on
+         * non-rooted devices, so it's safe to pass it
+         * unconditionally; the resolver falls through to the
+         * proot / direct-exec / jailed chain automatically.
+         */
+        fun production(
+            supportedAbis: Set<String>,
+            nativeLibrary: ProotNativeLibrary?,
+            prootTmpDir: File?,
+            mountsProvider: (File) -> List<com.elysium.vanguard.core.runtime.bridge.MountEntry>,
+            guestDnsConfigProvider: GuestDnsConfigProvider,
+            rootedLauncher: NamespacedDistroLauncher?,
+        ): DistroLauncherRegistry {
+            val launchers = ArrayList<DistroLauncher>(4)
+            if (rootedLauncher != null) {
+                launchers += rootedLauncher
+            }
+            launchers += NativeProotLauncher(
+                bundledAbis = supportedAbis,
+                nativeLibrary = nativeLibrary,
+                runtimeTmpDir = prootTmpDir,
+                additionalMountsProvider = mountsProvider,
+                guestDnsConfigProvider = guestDnsConfigProvider
             )
+            launchers += DirectExecDistroLauncher()
+            launchers += JailedDistroLauncher()
+            return DistroLauncherRegistry(launchers)
+        }
 
         /** Explicit five-argument overload for runtime-only services such as guest DNS. */
         fun production(
