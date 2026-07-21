@@ -149,9 +149,30 @@ class ProcessLauncherWindowsBinaryRunner(
  */
 interface WindowsVmCommandRunner {
     fun copyAndInvoke(binary: File, vmId: String): WindowsBinaryRunResult
+
+    /**
+     * Phase 103 — install a Windows Installer
+     * package (`.msi`) inside the VM via
+     * `msiexec /i <msi> /qn`. The bridge
+     * copies the file into the guest's
+     * `C:\elysium\` directory + invokes
+     * `msiexec` via QMP `guest-exec`.
+     */
+    fun installMsi(msi: File, vmId: String): MsiInstallBridgeResult
 }
 
 sealed class WindowsBinaryRunResult {
     data class Success(val exitCode: Int) : WindowsBinaryRunResult()
     data class Failure(val message: String) : WindowsBinaryRunResult()
+}
+
+/**
+ * Phase 103 — the bridge result for MSI
+ * installs. Mirrors [MsiInstallResult] but
+ * lives in the production package (Hilt
+ * needs an Android-side type to bind).
+ */
+sealed class MsiInstallBridgeResult {
+    data class Success(val exitCode: Int) : MsiInstallBridgeResult()
+    data class Failure(val message: String) : MsiInstallBridgeResult()
 }

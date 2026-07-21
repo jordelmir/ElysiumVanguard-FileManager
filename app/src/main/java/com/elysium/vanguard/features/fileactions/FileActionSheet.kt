@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DiscFull
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InstallDesktop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
@@ -201,6 +202,12 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
     is FileAction.InstallPacmanPackage -> Icons.Filled.Archive to Color(0xFFE57373)
     is FileAction.RunAppImage -> Icons.Filled.PlayArrow to Color(0xFF81C784)
     is FileAction.RunWindowsBinary -> Icons.Filled.Code to Color(0xFF64B5F6)
+    // Phase 103 — `.msi` is an installer
+    // (Windows Installer service), not a
+    // Wine-runnable binary. Distinct icon
+    // (Install) + a darker blue tint so the
+    // sheet shows the difference at a glance.
+    is FileAction.InstallWindowsMsi -> Icons.Filled.InstallDesktop to Color(0xFF1976D2)
     is FileAction.MountDiskImage -> Icons.Filled.Storage to Color(0xFFFFB74D)
     is FileAction.BootVmFromImage -> Icons.Filled.DiscFull to Color(0xFFBA68C8)
     is FileAction.GitClone -> Icons.Filled.Download to Color(0xFF4DB6AC)

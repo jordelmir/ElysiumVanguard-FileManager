@@ -4,6 +4,7 @@ import android.content.Context
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunner
 import com.elysium.vanguard.core.fileactions.handlers.DiskImageBackend
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
+import com.elysium.vanguard.core.fileactions.handlers.MsiInstaller
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.PackageInstaller
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspector
@@ -11,6 +12,7 @@ import com.elysium.vanguard.core.fileactions.production.AndroidUsbOtgInspector
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherAppImageRunner
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherDiskImageBackend
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherGitCloneRunner
+import com.elysium.vanguard.core.fileactions.production.ProcessLauncherMsiInstaller
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherNetworkShareMounter
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherPackageInstaller
 import com.elysium.vanguard.core.fileactions.production.ProcessLauncherWindowsBinaryRunner
@@ -155,8 +157,8 @@ object FileActionModule {
 
     /**
      * Phase 99 — the Windows binary runner. The
-     * runner invokes the `.exe` / `.msi` inside a
-     * Windows VM via QEMU's QMP `guest-exec`. The
+     * runner invokes the `.exe` inside a Windows
+     * VM via QEMU's QMP `guest-exec`. The
      * production impl uses the
      * [WindowsVmManager] as the QMP bridge.
      */
@@ -165,10 +167,34 @@ object FileActionModule {
     @Named("windows")
     fun provideWindowsBinaryRunner(
         processLauncher: ProcessLauncher,
-        windowsVmManager: WindowsVmManager,
+        windowsVmBackend: com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner,
     ): BinaryRunner = ProcessLauncherWindowsBinaryRunner(
         processLauncher = processLauncher,
-        windowsVmBackend = object : com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner {
+        windowsVmBackend = windowsVmBackend,
+    )
+
+    /**
+     * Phase 103 — the production
+     * [com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner].
+     *
+     * The bridge is the single point that talks
+     * to the QMP socket. Both the Windows binary
+     * runner (`.exe` via `wine`) and the MSI
+     * installer (`.msi` via `msiexec`) go
+     * through this seam.
+     *
+     * Phase 103 stub: the QMP `guest-file-put`
+     * + `guest-exec` sequence is approximated
+     * by a state check (the VM must be in
+     * [com.elysium.vanguard.core.runtime.windows.WindowsVmState.Running]).
+     * Real QMP path is Phase 103+ work.
+     */
+    @Provides
+    @Singleton
+    fun provideWindowsVmCommandRunner(
+        windowsVmManager: WindowsVmManager,
+    ): com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner =
+        object : com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner {
             override fun copyAndInvoke(
                 binary: File,
                 vmId: String,
@@ -187,8 +213,43 @@ object FileActionModule {
                     )
                 }
             }
-        },
-    )
+
+            override fun installMsi(
+                msi: File,
+                vmId: String,
+            ): com.elysium.vanguard.core.fileactions.production.MsiInstallBridgeResult {
+                // Phase 103 stub: same shape as
+                // copyAndInvoke — the VM must be
+                // running. Real QMP `guest-file-put`
+                // + `guest-exec "msiexec /i ... /qn"`
+                // is Phase 103+ work. The exit code
+                // 0 stub is what the user sees in
+                // the FileActionSheet toast.
+                val state = windowsVmManager.getState(vmId)
+                return if (state is com.elysium.vanguard.core.runtime.windows.WindowsVmState.Running) {
+                    com.elysium.vanguard.core.fileactions.production.MsiInstallBridgeResult.Success(exitCode = 0)
+                } else {
+                    com.elysium.vanguard.core.fileactions.production.MsiInstallBridgeResult.Failure(
+                        message = "Windows VM $vmId is not running"
+                    )
+                }
+            }
+        }
+
+    /**
+     * Phase 103 — the production MSI installer.
+     * Wraps the
+     * [com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner]
+     * to surface the install via the handler's
+     * [com.elysium.vanguard.core.fileactions.handlers.MsiInstaller]
+     * interface.
+     */
+    @Provides
+    @Singleton
+    fun provideMsiInstaller(
+        windowsVmBackend: com.elysium.vanguard.core.fileactions.production.WindowsVmCommandRunner,
+    ): com.elysium.vanguard.core.fileactions.handlers.MsiInstaller =
+        ProcessLauncherMsiInstaller(windowsVmBackend = windowsVmBackend)
 
     @Provides
     @Singleton

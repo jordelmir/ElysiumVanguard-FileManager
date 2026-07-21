@@ -10,6 +10,8 @@ import com.elysium.vanguard.core.fileactions.handlers.GitCloneResult
 import com.elysium.vanguard.core.fileactions.handlers.GitCloneRunner
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageHandler
 import com.elysium.vanguard.core.fileactions.handlers.InstallPackageResult
+import com.elysium.vanguard.core.fileactions.handlers.MsiInstallerHandler
+import com.elysium.vanguard.core.fileactions.handlers.RecordingMsiInstaller
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunner
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
@@ -202,6 +204,7 @@ class FileActionViewModelTest {
             RecordingBinaryRunner(),
             RecordingBinaryRunner(),
         ),
+        msiInstallerHandler: MsiInstallerHandler = MsiInstallerHandler(RecordingMsiInstaller()),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
@@ -210,6 +213,7 @@ class FileActionViewModelTest {
         networkShareHandler = networkShareHandler,
         usbOtgHandler = usbOtgHandler,
         binaryRunnerHandler = binaryRunnerHandler,
+        msiInstallerHandler = msiInstallerHandler,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(

@@ -3,6 +3,7 @@ package com.elysium.vanguard.core.fileactions
 import com.elysium.vanguard.core.fileactions.FileActionContext.LinuxDistroTarget
 import com.elysium.vanguard.core.fileactions.FileActionContext.WindowsVmTarget
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -155,11 +156,32 @@ class FileActionResolverTest {
     }
 
     @Test
-    fun `msi file offers RunWindowsBinary`() {
+    fun `msi file offers InstallWindowsMsi (NOT RunWindowsBinary)`() {
+        // Phase 103 — `.msi` is a Windows Installer
+        // database; the right tool is `msiexec /i`,
+        // not `wine`. The resolver must return
+        // InstallWindowsMsi so the FileActionSheet
+        // labels the action accurately.
         val msi = tmp.newFile("office.msi")
         val actions = FileActionResolver.resolve(msi, typicalContext)
         assertEquals(1, actions.size)
-        assertTrue(actions.first() is FileAction.RunWindowsBinary)
+        val action = actions.first()
+        assertTrue(
+            "expected InstallWindowsMsi, got ${action::class.simpleName}",
+            action is FileAction.InstallWindowsMsi
+        )
+        // It must NOT be a RunWindowsBinary — the
+        // command path is different.
+        assertFalse(action is FileAction.RunWindowsBinary)
+    }
+
+    @Test
+    fun `msi action carries the file path and target VM id`() {
+        val msi = tmp.newFile("office.msi")
+        val actions = FileActionResolver.resolve(msi, typicalContext)
+        val action = actions.first() as FileAction.InstallWindowsMsi
+        assertEquals(msi.absolutePath, action.msiPath)
+        assertEquals(typicalContext.preferredWindowsVmId, action.targetVmId)
     }
 
     @Test

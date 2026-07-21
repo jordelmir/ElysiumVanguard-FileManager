@@ -110,9 +110,8 @@ sealed class FileAction {
     }
 
     /**
-     * Run a Windows executable (`.exe` or
-     * `.msi`) inside a Windows VM via Wine +
-     * QEMU.
+     * Run a Windows executable (`.exe`) inside a
+     * Windows VM via Wine + QEMU.
      */
     data class RunWindowsBinary(
         override val id: String,
@@ -122,6 +121,28 @@ sealed class FileAction {
     ) : FileAction() {
         override val label: String = "Run in $targetVmName"
         override val description: String = "Run via Wine inside $targetVmName"
+        override val targetRuntime: RuntimeKind = RuntimeKind.WINDOWS_VM
+    }
+
+    /**
+     * Phase 103 — install a Windows Installer
+     * package (`.msi`) inside a Windows VM. The
+     * command is `msiexec /i <file.msi> /qn`
+     * (silent install, no UI), dispatched via
+     * QEMU's QMP `guest-exec` to the running
+     * guest. Distinct from `RunWindowsBinary`
+     * because `.msi` is a Windows Installer
+     * database, not a Wine-runnable PE; the
+     * right tool is `msiexec`, not `wine`.
+     */
+    data class InstallWindowsMsi(
+        override val id: String,
+        val msiPath: String,
+        val targetVmId: String,
+        val targetVmName: String,
+    ) : FileAction() {
+        override val label: String = "Install in $targetVmName"
+        override val description: String = "msiexec /i $msiPath /qn in $targetVmName"
         override val targetRuntime: RuntimeKind = RuntimeKind.WINDOWS_VM
     }
 

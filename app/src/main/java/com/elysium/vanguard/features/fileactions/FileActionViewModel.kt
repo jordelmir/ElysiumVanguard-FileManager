@@ -21,6 +21,8 @@ import com.elysium.vanguard.core.fileactions.handlers.UsbOtgHandler
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspectResult
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
+import com.elysium.vanguard.core.fileactions.handlers.MsiInstallerHandler
+import com.elysium.vanguard.core.fileactions.handlers.MsiInstallResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +62,7 @@ class FileActionViewModel @Inject constructor(
     private val networkShareHandler: NetworkShareHandler,
     private val usbOtgHandler: UsbOtgHandler,
     private val binaryRunnerHandler: BinaryRunnerHandler,
+    private val msiInstallerHandler: MsiInstallerHandler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -130,6 +133,29 @@ class FileActionViewModel @Inject constructor(
                         message = "Launched ${action.binaryPath} in ${action.targetVmName}"
                     )
                     is BinaryRunResult.Failure -> FileActionOutcome.Failure(
+                        message = result.message
+                    )
+                }
+            }
+            is FileAction.InstallWindowsMsi -> {
+                // Phase 103 — `.msi` install.
+                // Distinct from RunWindowsBinary
+                // because the command path is
+                // `msiexec /i ... /qn` (Windows
+                // Installer service), not `wine`.
+                val result = msiInstallerHandler.install(action)
+                when (result) {
+                    is MsiInstallResult.Completed -> FileActionOutcome.Success(
+                        // The exit code is 0 on
+                        // success, 3010 on
+                        // success + reboot
+                        // required, 1603 on
+                        // fatal install error.
+                        // We surface the code so
+                        // the toast is accurate.
+                        message = "Installed ${action.msiPath} in ${action.targetVmName} (msiexec exit=${result.exitCode})"
+                    )
+                    is MsiInstallResult.Failure -> FileActionOutcome.Failure(
                         message = result.message
                     )
                 }

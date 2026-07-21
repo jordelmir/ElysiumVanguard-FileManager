@@ -161,13 +161,33 @@ object FileActionResolver {
                     )
                 )
             }
-            "exe", "msi" -> context.windowsVms.firstOrNull {
+            "exe" -> context.windowsVms.firstOrNull {
                 it.id == context.preferredWindowsVmId
             }?.let { vm ->
                 actions.add(
                     FileAction.RunWindowsBinary(
                         id = "run-windows-${vm.id}-${name}",
                         binaryPath = file.absolutePath,
+                        targetVmId = vm.id,
+                        targetVmName = vm.name,
+                    )
+                )
+            }
+            // Phase 103 — `.msi` is a Windows
+            // Installer database, not a
+            // Wine-runnable PE. The right tool is
+            // `msiexec /i <file.msi> /qn` (silent
+            // install), not `wine <file.msi>`. We
+            // offer a separate `InstallWindowsMsi`
+            // action so the FileActionSheet can
+            // label it accurately.
+            "msi" -> context.windowsVms.firstOrNull {
+                it.id == context.preferredWindowsVmId
+            }?.let { vm ->
+                actions.add(
+                    FileAction.InstallWindowsMsi(
+                        id = "install-msi-${vm.id}-${name}",
+                        msiPath = file.absolutePath,
                         targetVmId = vm.id,
                         targetVmName = vm.name,
                     )
