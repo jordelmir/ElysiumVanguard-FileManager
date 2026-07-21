@@ -49,3 +49,7 @@ captures/
 .DS_Store
 Thumbs.db
 .worktrees/
+
+# Allow docs/build (build pipeline documentation)
+!/docs/build/
+!/docs/build/**

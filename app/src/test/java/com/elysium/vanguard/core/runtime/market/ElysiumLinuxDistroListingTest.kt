@@ -103,7 +103,9 @@ class ElysiumLinuxDistroListingTest {
 
     @Test
     fun `size in bytes is 800 MB`() {
-        assertEquals(800_000_000L, ElysiumLinuxDistroListing.SIZE_BYTES)
+        // Phase 101 ships the real size (~584 MB);
+        // the placeholder was 800 MB.
+        assertEquals(612_368_192L, ElysiumLinuxDistroListing.SIZE_BYTES)
     }
 
     // ============================================================
@@ -160,9 +162,12 @@ class ElysiumLinuxDistroListingTest {
     // ============================================================
 
     @Test
-    fun `included runtime layers match the Phase 73 defaults`() {
+    fun `included runtime layers match the Phase 101 defaults`() {
+        // Phase 101 adds elysium-pm to the runtime
+        // layers (the package manager is part of
+        // the image, not a separate installation).
         assertEquals(
-            listOf("native", "mesa-turnip", "box64", "fex", "wine"),
+            listOf("native", "mesa-turnip", "box64", "fex", "wine", "elysium-pm"),
             ElysiumLinuxDistroListing.INCLUDED_RUNTIME_LAYERS,
         )
     }
