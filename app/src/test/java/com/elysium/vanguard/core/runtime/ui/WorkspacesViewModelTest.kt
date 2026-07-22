@@ -496,7 +496,11 @@ class WorkspacesViewModelTest {
         val stopResultFor = mutableMapOf<String, Result<SessionState>>()
         val activeSessions = mutableListOf<ActiveSession>()
 
-        override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+        override fun start(
+            workspace: Workspace,
+            session: WorkspaceSession,
+            networkPolicy: com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy,
+        ): Result<SessionState> {
             startCalls += session
             val result = startResultFor[session.id] ?: Result.success(SessionState.Idle)
             if (result.getOrNull() is SessionState.Running) {

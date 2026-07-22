@@ -465,7 +465,11 @@ class MainScreenViewModelTest {
      */
     private class FakeSessionRunner : com.elysium.vanguard.core.runtime.runner.SessionRunner {
         var activeCount: Int = 0
-        override fun start(workspace: Workspace, session: WorkspaceSession): Result<com.elysium.vanguard.core.runtime.runner.SessionState> {
+        override fun start(
+            workspace: Workspace,
+            session: WorkspaceSession,
+            networkPolicy: com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy,
+        ): Result<com.elysium.vanguard.core.runtime.runner.SessionState> {
             activeCount++
             return Result.success(com.elysium.vanguard.core.runtime.runner.SessionState.Running(pid = 0, startedAtMs = 0L))
         }

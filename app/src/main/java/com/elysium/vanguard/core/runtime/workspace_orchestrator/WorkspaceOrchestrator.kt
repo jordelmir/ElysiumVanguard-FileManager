@@ -1,5 +1,7 @@
 package com.elysium.vanguard.core.runtime.workspace_orchestrator
 
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicySpecBridge
 import com.elysium.vanguard.core.runtime.workspace_def.RuntimeKind
 import com.elysium.vanguard.core.runtime.workspace_def.WorkspaceDefinition
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
@@ -77,7 +79,20 @@ class WorkspaceOrchestrator {
             cpuPriority = definition.resources.cpuPriority,
         )
 
-        // 5. Build the session. The session id is a fresh
+        // 5. PHASE 109 — translate the network
+        //    policy. The workspace spec carries a
+        //    [com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec]
+        //    (DENY_ALL / ALLOW_LIST / ALLOW_ALL).
+        //    The orchestrator bridges it to a
+        //    session-level [NetworkPolicy] via
+        //    [NetworkPolicySpecBridge]. The default
+        //    (LOOPBACK_ONLY) is the safe direction
+        //    — a workspace that doesn't declare a
+        //    network policy gets the deny-by-default
+        //    posture.
+        val networkPolicy = NetworkPolicySpecBridge.toSessionPolicy(definition.network)
+
+        // 6. Build the session. The session id is a fresh
         //    UUID; the session kind is derived from the
         //    definition's runtime. The display name is
         //    the definition's name.
@@ -93,6 +108,7 @@ class WorkspaceOrchestrator {
             environment = environment,
             launchCommand = launchCommand,
             resourceLimits = resourceLimits,
+            networkPolicy = networkPolicy,
         )
     }
 

@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.workspace_orchestrator
 
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 
 /**
@@ -38,6 +39,28 @@ data class OrchestratedWorkspace(
     val environment: Map<String, String>,
     val launchCommand: LaunchCommand,
     val resourceLimits: ResourceLimits,
+    /**
+     * PHASE 109 — the session-level network
+     * policy, bridged from the workspace's
+     * [com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec]
+     * (the typed "red denegada por defecto" field
+     * the spec carries). The session runner
+     * consumes this when starting the session:
+     * it compiles the ruleset via
+     * [com.elysium.vanguard.core.runtime.network.firewall.NetworkPolicyFirewall.compileFromSpec]
+     * and applies the rules.
+     *
+     * The default is
+     * [NetworkPolicySpecBridge.toSessionPolicy]'s
+     * default output (LOOPBACK_ONLY — the safe
+     * direction). The orchestrator always sets
+     * this explicitly; the default exists so
+     * tests that construct an [OrchestratedWorkspace]
+     * without specifying a policy still get a
+     * safe value.
+     */
+    val networkPolicy: NetworkPolicy = com.elysium.vanguard.core.runtime.network.policy.NetworkPolicySpecBridge
+        .toSessionPolicy(com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec.DEFAULT),
 ) {
     init {
         // The bindMounts list MAY be empty: the runtime

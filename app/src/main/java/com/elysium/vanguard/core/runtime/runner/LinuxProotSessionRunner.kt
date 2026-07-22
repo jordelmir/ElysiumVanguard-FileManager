@@ -46,7 +46,31 @@ class LinuxProotSessionRunner(
     private val backend: DistroSessionBackend,
     private val processLauncher: ProcessLauncher,
     private val eventBus: RuntimeEventBus,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * PHASE 109 — the firewall that compiles
+     * the bridged [NetworkPolicy] into
+     * iptables-style rules. The default is a
+     * no-op firewall (compiles an empty
+     * ruleset) so existing tests that don't
+     * care about the network policy still pass.
+     * Production wires the real
+     * [com.elysium.vanguard.core.runtime.network.firewall.NetworkPolicyFirewall].
+     */
+    private val networkPolicyFirewall: com.elysium.vanguard.core.runtime.network.firewall.NetworkPolicyFirewall =
+        com.elysium.vanguard.core.runtime.network.firewall.NetworkPolicyFirewall(),
+    /**
+     * PHASE 109 — the backend that applies the
+     * compiled firewall state. The default is
+     * a no-op recorder (records every state in
+     * memory) so existing tests that don't
+     * care about the firewall still pass.
+     * Production wires the real
+     * [com.elysium.vanguard.core.runtime.network.firewall.IptablesFirewallRuleBackend]
+     * (Phase 109+ production wiring).
+     */
+    private val firewallBackend: com.elysium.vanguard.core.runtime.network.firewall.FirewallRuleBackend =
+        com.elysium.vanguard.core.runtime.network.firewall.InMemoryFirewallBackend(),
 ) : SessionRunner {
 
     private val states = ConcurrentHashMap<SessionKey, SessionState>()
@@ -54,7 +78,11 @@ class LinuxProotSessionRunner(
 
     private data class SessionKey(val workspaceId: String, val sessionId: String)
 
-    override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+    override fun start(
+        workspace: Workspace,
+        session: WorkspaceSession,
+        networkPolicy: com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy,
+    ): Result<SessionState> {
         // Only LinuxProot sessions. Windows VM is a future
         // SessionRunner impl (Phase 31).
         if (session !is WorkspaceSession.LinuxProot) {
@@ -67,6 +95,29 @@ class LinuxProotSessionRunner(
             )
         }
         val key = SessionKey(workspace.id, session.id)
+
+        // PHASE 109 — apply the session's network
+        // policy. The firewall compiles the iptables-
+        // style ruleset from the bridged
+        // [NetworkPolicy]; the in-memory backend records
+        // the state (the actual iptables push is
+        // production-only). A failure to apply the
+        // policy is a typed [SessionRunnerError.StartFailed]
+        // (the user's intent is "I want this network
+        // posture"; refusing to start is the safe
+        // direction).
+        val firewallState = try {
+            networkPolicyFirewall.compile(sessionId = session.id, policy = networkPolicy)
+        } catch (e: IllegalArgumentException) {
+            return Result.failure(
+                SessionRunnerError.StartFailed(
+                    workspaceId = workspace.id,
+                    sessionId = session.id,
+                    causeMessage = "network policy rejected: ${e.message ?: e::class.java.simpleName}"
+                )
+            )
+        }
+        firewallBackend.apply(firewallState)
         val current = states[key] ?: SessionState.Idle
         if (!current.isStartable()) {
             return Result.failure(

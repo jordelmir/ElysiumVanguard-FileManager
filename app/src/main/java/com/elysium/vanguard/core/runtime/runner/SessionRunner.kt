@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.runner
 
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 
@@ -34,8 +35,25 @@ interface SessionRunner {
      * [Result.failure] with a [SessionRunnerError] when the
      * session could not be started (distro missing, launcher
      * unavailable, already running, etc.).
+     *
+     * The [networkPolicy] (PHASE 109) is the bridged
+     * session-level policy from the workspace's
+     * [com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec].
+     * The runner compiles it via
+     * [com.elysium.vanguard.core.runtime.network.firewall.NetworkPolicyFirewall.compileFromSpec]
+     * and applies the rules before transitioning to
+     * `Running`. The default is a safe LOOPBACK_ONLY
+     * policy (the deny-by-default posture) so callers
+     * that don't pass a policy still get a safe
+     * start.
      */
-    fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState>
+    fun start(
+        workspace: Workspace,
+        session: WorkspaceSession,
+        networkPolicy: NetworkPolicy = NetworkPolicy(
+            mode = com.elysium.vanguard.core.runtime.network.policy.NetworkMode.LOOPBACK_ONLY
+        ),
+    ): Result<SessionState>
 
     /**
      * Stop the session. The state machine moves:

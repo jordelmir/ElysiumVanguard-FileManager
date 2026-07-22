@@ -234,7 +234,11 @@ class SessionRunnerRegistryTest {
         val stateMap = ConcurrentHashMap<String, SessionState>()
         val activeSessions = java.util.Collections.synchronizedList(mutableListOf<ActiveSession>())
 
-        override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> {
+        override fun start(
+            workspace: Workspace,
+            session: WorkspaceSession,
+            networkPolicy: com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy,
+        ): Result<SessionState> {
             startCount.incrementAndGet()
             startCalls += workspace to session
             stateMap[session.id] = stateForStart

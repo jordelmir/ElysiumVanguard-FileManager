@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.runner
 
+import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
 import com.elysium.vanguard.core.runtime.workspaces.Workspace
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 
@@ -47,8 +48,12 @@ class SessionRunnerRegistry(
         is WorkspaceSession.WindowsVm -> windowsRunner
     }
 
-    override fun start(workspace: Workspace, session: WorkspaceSession): Result<SessionState> =
-        runnerFor(session).start(workspace, session)
+    override fun start(
+        workspace: Workspace,
+        session: WorkspaceSession,
+        networkPolicy: NetworkPolicy,
+    ): Result<SessionState> =
+        runnerFor(session).start(workspace, session, networkPolicy)
 
     override fun stop(workspace: Workspace, session: WorkspaceSession): Result<SessionState> =
         runnerFor(session).stop(workspace, session)
