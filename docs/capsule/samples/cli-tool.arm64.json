@@ -1,0 +1,25 @@
+{
+  "apiVersion": "elysium.capsule/v1",
+  "id": "org.example.ripgrep.arm64",
+  "name": "ripgrep",
+  "version": "14.1.0",
+  "description": "ripgrep is a line-oriented search tool that recursively searches the current directory for a regex pattern. Example capsule for a CLI tool with no GPU and no network access.",
+  "runtime": "LINUX",
+  "architecture": "ARM64",
+  "distribution": "any",
+  "entrypoint": {
+    "executable": "/usr/bin/rg",
+    "args": ["--color", "always", "--smart-case"],
+    "workingDirectory": "/workspace"
+  },
+  "gpu": {
+    "api": "NONE",
+    "driver": "NONE"
+  },
+  "permissions": {
+    "network": false,
+    "storage": ["USER_SELECTED"]
+  },
+  "signature": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "contentHash": "0000000000000000000000000000000000000000000000000000000000000000"
+}

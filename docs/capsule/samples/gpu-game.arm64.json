@@ -1,0 +1,25 @@
+{
+  "apiVersion": "elysium.capsule/v1",
+  "id": "com.indie.shadowquest.arm64",
+  "name": "ShadowQuest",
+  "version": "1.0.0",
+  "description": "A Vulkan-only indie game. Requires the Turnip driver (Adreno GPUs). Uses network for online leaderboards; uses APP_PRIVATE storage for save files.",
+  "runtime": "LINUX",
+  "architecture": "ARM64",
+  "distribution": "elysium-linux-1",
+  "entrypoint": {
+    "executable": "/opt/shadowquest/bin/shadowquest",
+    "args": ["--renderer=vulkan", "--fullscreen"],
+    "workingDirectory": "/opt/shadowquest"
+  },
+  "gpu": {
+    "api": "VULKAN",
+    "driver": "TURNIP"
+  },
+  "permissions": {
+    "network": true,
+    "storage": ["APP_PRIVATE", "MEDIA_STORE"]
+  },
+  "signature": "ed25519:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+  "contentHash": "1111111111111111111111111111111111111111111111111111111111111111"
+}

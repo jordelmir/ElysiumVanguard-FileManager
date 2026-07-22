@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elysium-vanguard.io/schemas/capsule/v1.json",
+  "title": "Elysium Vanguard Capsule",
+  "description": "The typed manifest for a single distributable unit in the Elysium Vanguard Marketplace. The schema is append-only; a breaking change is a new $id + a migration tool.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "id",
+    "name",
+    "version",
+    "description",
+    "runtime",
+    "architecture",
+    "distribution",
+    "entrypoint",
+    "gpu",
+    "permissions",
+    "signature",
+    "contentHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "description": "The Capsule API version. A breaking change is a new version + a migration tool. Per .ai/AGENTS.md 24.1: append-only.",
+      "pattern": "^elysium\\.capsule/v\\d+(\\.\\d+)?$",
+      "examples": ["elysium.capsule/v1"]
+    },
+    "id": {
+      "type": "string",
+      "description": "The typed capsule id. The id follows the Java package naming convention (e.g. com.elysium.blender.arm64) so a creator's namespace is respected.",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "minLength": 1,
+      "maxLength": 253,
+      "examples": ["com.elysium.blender.arm64", "org.example.myapp"]
+    },
+    "name": {
+      "type": "string",
+      "description": "User-readable display name.",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "version": {
+      "type": "string",
+      "description": "SemVer 2.0 version. The patch is mandatory; the pre-release is optional.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.]+)?$",
+      "examples": ["1.0.0", "4.2.0", "1.0.0-beta.1"]
+    },
+    "description": {
+      "type": "string",
+      "description": "One-paragraph description. Plain text, no markup.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "architecture": {
+      "$ref": "#/$defs/architecture"
+    },
+    "distribution": {
+      "type": "string",
+      "description": "Distro id (e.g. elysium-linux-1) or any.",
+      "minLength": 1,
+      "maxLength": 100,
+      "examples": ["any", "elysium-linux-1", "ubuntu-24.04-lts", "fedora-41", "arch-linux", "debian-12", "alpine-3.20", "opensuse-leap-15"]
+    },
+    "entrypoint": {
+      "type": "object",
+      "description": "The binary to launch.",
+      "additionalProperties": false,
+      "required": ["executable"],
+      "properties": {
+        "executable": {
+          "type": "string",
+          "description": "Absolute path inside the capsule's rootfs. Must start with /.",
+          "pattern": "^/",
+          "minLength": 1,
+          "maxLength": 1024,
+          "examples": ["/usr/bin/blender", "/opt/myapp/bin/myapp"]
+        },
+        "args": {
+          "type": "array",
+          "description": "CLI args passed to the executable. Each arg is a literal token (no shell expansion).",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "default": [],
+          "maxItems": 256
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Absolute path inside the rootfs. Must start with /.",
+          "pattern": "^/",
+          "default": "/",
+          "maxLength": 1024,
+          "examples": ["/", "/workspace", "/workspace/projects"]
+        }
+      }
+    },
+    "gpu": {
+      "type": "object",
+      "description": "The GPU API + driver the capsule needs. The runtime checks the device's actual capabilities before launching.",
+      "additionalProperties": false,
+      "required": ["api", "driver"],
+      "properties": {
+        "api": { "$ref": "#/$defs/gpuApi" },
+        "driver": { "$ref": "#/$defs/gpuDriver" }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "The runtime access the capsule needs. Per Zero Trust (vision section 9), the platform assumes any executable can be hostile; declare the MINIMUM access needed.",
+      "additionalProperties": false,
+      "required": ["network", "storage"],
+      "properties": {
+        "network": {
+          "type": "boolean",
+          "description": "True if the capsule can reach the network. The runtime's deny-by-default policy (Phase 105) starts at false; requires NetworkPolicySpec.ALLOW_LIST to enable."
+        },
+        "storage": {
+          "type": "array",
+          "description": "List of storage scopes the capsule can read. A pure-sandbox (no network AND empty storage) is rejected at parse time.",
+          "items": { "$ref": "#/$defs/storageScope" },
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true
+        }
+      }
+    },
+    "signature": {
+      "type": "string",
+      "description": "Ed25519 signature of the canonical JSON (with signature set to empty string). Format: ed25519:<base64-bytes>.",
+      "pattern": "^ed25519:[A-Za-z0-9+/]+={0,2}$",
+      "minLength": 11,
+      "maxLength": 200
+    },
+    "contentHash": {
+      "type": "string",
+      "description": "SHA-256 of the canonical JSON (with signature + contentHash fields omitted). 64 hex chars.",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "runtime": {
+      "type": "string",
+      "description": "The runtime kind.",
+      "enum": ["LINUX", "WINDOWS", "MACOS", "WEB"]
+    },
+    "architecture": {
+      "type": "string",
+      "description": "The CPU architecture.",
+      "enum": ["ARM64", "ARM32", "X86_64", "X86", "ANY"]
+    },
+    "gpuApi": {
+      "type": "string",
+      "description": "The GPU API the capsule needs.",
+      "enum": ["NONE", "OPENGL_ES", "VULKAN", "OPENCL"]
+    },
+    "gpuDriver": {
+      "type": "string",
+      "description": "The GPU driver the capsule needs.",
+      "enum": [
+        "NONE",
+        "TURNIP",
+        "FREEDRENO",
+        "PANFROST",
+        "LIMA",
+        "SOFTPIPE",
+        "DXVK",
+        "VKD3D_PROTON"
+      ]
+    },
+    "storageScope": {
+      "type": "string",
+      "description": "A storage scope the capsule can read.",
+      "enum": ["USER_SELECTED", "APP_PRIVATE", "MEDIA_STORE", "NETWORK"]
+    }
+  },
+  "allOf": [
+    {
+      "description": "A capsule with no network AND empty storage is a pure sandbox (the runtime would deny every I/O). Rejected at parse time.",
+      "not": {
+        "properties": {
+          "permissions": {
+            "type": "object",
+            "properties": {
+              "network": { "const": false },
+              "storage": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The driver must support the requested GPU API. See the SCHEMA.md 'GPU API x driver matrix' for the supported combinations.",
+      "comments": "Valid combinations: NONE+*, TURNIP+OPENGL_ES/VULKAN, FREEDRENO+OPENGL_ES, PANFROST+OPENGL_ES/VULKAN, LIMA+OPENGL_ES, SOFTPIPE+OPENGL_ES, DXVK+VULKAN, VKD3D_PROTON+VULKAN."
+    }
+  ],
+  "examples": [
+    {
+      "$ref": "https://elysium-vanguard.io/schemas/capsule/examples/blender.json"
+    }
+  ]
+}
