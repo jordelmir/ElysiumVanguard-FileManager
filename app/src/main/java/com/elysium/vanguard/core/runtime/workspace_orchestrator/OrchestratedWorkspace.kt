@@ -40,6 +40,34 @@ data class OrchestratedWorkspace(
     val launchCommand: LaunchCommand,
     val resourceLimits: ResourceLimits,
     /**
+     * PHASE 111 — the env-name → secret-id
+     * references that the workspace
+     * declared with [com.elysium.vanguard.core.runtime.workspace_def.EnvSpec.secret]
+     * = true. The map is empty for workspaces
+     * that don't declare any secret env vars.
+     *
+     * The orchestrator emits this map from
+     * the [com.elysium.vanguard.core.runtime.workspace_def.WorkspaceDefinition]
+     * at plan time. The runtime hook calls
+     * [WorkspaceOrchestrator.resolveSecrets] at
+     * session start + the resolver produces
+     * a new plan with the secret values
+     * populated in [environment].
+     *
+     * **Why a separate field (not embedding
+     * the secret id in [environment])**: the
+     * secret id is a reference, not a value.
+     * Keeping the two concerns separate lets
+     * the runtime hook decide when (if ever)
+     * to resolve the secrets — a workspace
+     * that doesn't need them at start (e.g.
+     * a build workspace that only reads the
+     * secret at runtime via the
+     * [com.elysium.vanguard.core.security.SecretStore])
+     * can skip the resolution.
+     */
+    val secretEnvRefs: Map<String, String> = emptyMap(),
+    /**
      * PHASE 109 — the session-level network
      * policy, bridged from the workspace's
      * [com.elysium.vanguard.core.runtime.workspace_def.NetworkPolicySpec]

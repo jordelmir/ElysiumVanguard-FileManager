@@ -155,6 +155,22 @@ object SecurityModule {
     fun provideSecretStore(audit: SecurityAudit): SecretStore = SecretStore(audit = audit)
 
     /**
+     * PHASE 111 — the secret resolver. The
+     * resolver is the seam between the
+     * [com.elysium.vanguard.core.runtime.workspace_orchestrator.WorkspaceOrchestrator]
+     * (pure-domain) and the [SecretStore] (I/O).
+     * The orchestrator calls
+     * `resolveSecrets(plan, resolver)` at
+     * session start to populate the
+     * secret-bound env vars.
+     */
+    @Provides
+    @Singleton
+    fun provideSecretResolver(
+        secretStore: SecretStore,
+    ): SecretResolver = SecretStoreResolver(secretStore = secretStore)
+
+    /**
      * Phase 100 — the production
      * [RuntimeDataWiper]. The class wraps the
      * Room database; the kill switch consumes

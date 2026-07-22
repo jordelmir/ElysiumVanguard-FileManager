@@ -2,9 +2,11 @@ package com.elysium.vanguard.core.runtime.workspace_orchestrator
 
 import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicy
 import com.elysium.vanguard.core.runtime.network.policy.NetworkPolicySpecBridge
+import com.elysium.vanguard.core.runtime.workspace_def.EnvSpec
 import com.elysium.vanguard.core.runtime.workspace_def.RuntimeKind
 import com.elysium.vanguard.core.runtime.workspace_def.WorkspaceDefinition
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
+import com.elysium.vanguard.core.security.SecretResolver
 import java.util.UUID
 
 /**
@@ -55,13 +57,34 @@ class WorkspaceOrchestrator {
             )
         }
 
-        // 2. Translate the env. The orchestrator emits a
-        //    Map<String, String> from the EnvSpec list.
+        // 2. Translate the env. The orchestrator emits
+        //    two artifacts:
+        //
+        //    - `environment` — a Map<String, String>
+        //      with the **literal values** (the
+        //      `value` field of every EnvSpec). The
+        //      secret-id entries show up here as the
+        //      secret id (the orchestrator does NOT
+        //      resolve secrets — that's a separate
+        //      step in [resolveSecrets]).
+        //    - `secretEnvRefs` — a Map<envName,
+        //      secretId> with the **secret-id refs**.
+        //      The runtime hook reads this map to
+        //      know which env names need resolution
+        //      at session start.
+        //
         //    Duplicate names are not allowed (the
-        //    WorkspaceDefinition's init check rejects them).
+        //    WorkspaceDefinition's init check rejects
+        //    them). A workspace cannot have both a
+        //    literal `FOO` and a secret `FOO` — the
+        //    init check on [EnvSpec] rejects a
+        //    duplicate name.
         val environment = definition.env.associate { spec ->
             spec.name to spec.value
         }
+        val secretEnvRefs = definition.env
+            .filter { it.secret }
+            .associate { spec -> spec.name to spec.value }
 
         // 3. Translate the launcher. The orchestrator emits
         //    a LaunchCommand from the LauncherSpec. The
@@ -108,7 +131,96 @@ class WorkspaceOrchestrator {
             environment = environment,
             launchCommand = launchCommand,
             resourceLimits = resourceLimits,
+            secretEnvRefs = secretEnvRefs,
             networkPolicy = networkPolicy,
+        )
+    }
+
+    /**
+     * PHASE 111 — resolve the secret env vars
+     * in [plan] via [resolver]. The function
+     * returns a new [OrchestratedWorkspace]
+     * with the secret values populated in
+     * [OrchestratedWorkspace.environment] +
+     * the [OrchestratedWorkspace.secretEnvRefs]
+     * cleared (the secrets are now resolved).
+     *
+     * **Algorithm**:
+     *
+     *  1. Iterate [plan].secretEnvRefs.
+     *  2. For each (envName, secretId) pair,
+     *     call `resolver.resolve(secretId)`.
+     *  3. On success, store the resolved
+     *     value in the new `environment`
+     *     map (overwriting the placeholder
+     *     secret id that [orchestrate]
+     *     emitted).
+     *  4. On failure, return the typed
+     *     [SecretResolutionError] — the
+     *     runtime hook refuses to start the
+     *     session.
+     *
+     * **Why fail-closed (a missing secret
+     * aborts the resolution)**: the user's
+     * intent is "this workspace needs
+     * secret FOO at session start". A
+     * missing secret is a misconfiguration
+     * (the user forgot to set up the secret,
+     * or the secret was deleted). Silently
+     * passing an empty string would mask
+     * the misconfiguration + the workspace
+     * would fail later with a confusing
+     * "auth failed" error from the app.
+     *
+     * **Why a pure function (not a member
+     * of the resolver)**: the orchestrator
+     * owns the typed plan; the resolver is
+     * just an I/O seam. The orchestrator
+     * decides what to do with the resolver's
+     * output (emit a new plan, surface an
+     * error, etc.).
+     */
+    fun resolveSecrets(
+        plan: OrchestratedWorkspace,
+        resolver: SecretResolver,
+    ): SecretResolutionResult {
+        if (plan.secretEnvRefs.isEmpty()) {
+            // No secrets to resolve. The plan
+            // is already in its resolved form.
+            return SecretResolutionResult.Success(plan)
+        }
+        val resolved = plan.environment.toMutableMap()
+        for ((envName, secretId) in plan.secretEnvRefs) {
+            val resolvedValue = resolver.resolve(secretId)
+            val applied: SecretResolutionResult? = resolvedValue.fold(
+                onSuccess = { value ->
+                    resolved[envName] = value
+                    null
+                },
+                onFailure = { error ->
+                    SecretResolutionResult.MissingSecret(
+                        envName = envName,
+                        secretId = secretId,
+                        cause = error.message ?: error::class.java.simpleName,
+                    )
+                },
+            )
+            if (applied != null) {
+                // A non-null result is an error
+                // (the success branch returns
+                // null to signal "continue"). The
+                // resolution is fail-closed: the
+                // first missing secret aborts the
+                // resolution; the plan's secret
+                // refs are NOT partially resolved.
+                return applied
+            }
+        }
+        return SecretResolutionResult.Success(
+            plan.copy(
+                environment = resolved.toMap(),
+                secretEnvRefs = emptyMap(),
+            )
         )
     }
 
