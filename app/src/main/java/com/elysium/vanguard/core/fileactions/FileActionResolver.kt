@@ -44,7 +44,10 @@ object FileActionResolver {
     /**
      * The list of [FileAction]s available for
      * [file] in [context]. The list is empty if
-     * the file's extension is not recognized.
+     * the file's extension is not recognized
+     * (apart from the universal
+     * [FileAction.ScanForMalware], which is
+     * appended to every non-empty list).
      *
      * The order of the returned list is the
      * order in which the actions should be
@@ -77,7 +80,8 @@ object FileActionResolver {
                     id = "git-clone-${name}",
                     repoUrl = file.absolutePath, // handler reads the URL from the body
                     destinationDir = parent,
-                )
+                ),
+                scanForMalwareAction(file),
             )
         }
 
@@ -95,7 +99,8 @@ object FileActionResolver {
                     id = "mount-${proto.name.lowercase()}-${name}",
                     url = file.absolutePath, // placeholder; handler reads body
                     protocol = proto,
-                )
+                ),
+                scanForMalwareAction(file),
             )
         }
 
@@ -106,7 +111,8 @@ object FileActionResolver {
                 FileAction.InspectUsbOtgDevice(
                     id = "usbotg-inspect-${name}",
                     blockDevice = file.absolutePath, // placeholder; handler reads body
-                )
+                ),
+                scanForMalwareAction(file),
             )
         }
 
@@ -213,6 +219,39 @@ object FileActionResolver {
             }
         }
 
+        // PHASE 110 — append a malware scan
+        // action to every list of extension-
+        // matched actions. The scan is a
+        // universal action: any file (a `.deb`,
+        // an `.iso`, an `.exe`) can be scanned
+        // for malware patterns. The user can
+        // long-press a file → "Scan for
+        // malware" without committing to the
+        // primary action (install / run /
+        // mount).
+        if (actions.isNotEmpty()) {
+            actions.add(scanForMalwareAction(file))
+        }
+
         return actions
     }
+
+    /**
+     * PHASE 110 — the universal
+     * [FileAction.ScanForMalware] factory. The
+     * action targets the file's absolute path;
+     * the [com.elysium.vanguard.core.fileactions.handlers.MalwareScanHandler]
+     * reads the bytes + dispatches to the
+     * [com.elysium.vanguard.core.security.malware.MalwareAnalyzer].
+     *
+     * The id is stable per file name so the UI
+     * can identify the action across re-
+     * resolutions.
+     */
+    private fun scanForMalwareAction(file: File): FileAction.ScanForMalware =
+        FileAction.ScanForMalware(
+            id = "scan-malware-${file.name}",
+            targetPath = file.absolutePath,
+            displayName = file.name,
+        )
 }

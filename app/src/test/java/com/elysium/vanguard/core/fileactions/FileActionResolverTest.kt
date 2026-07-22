@@ -64,7 +64,11 @@ class FileActionResolverTest {
     fun `deb file with apt distro offers InstallDebPackage`() {
         val deb = tmp.newFile("test.deb")
         val actions = FileActionResolver.resolve(deb, typicalContext)
-        assertEquals(1, actions.size)
+        // PHASE 110 — ScanForMalware is appended
+        // to every list of extension-matched
+        // actions. The count is 1 install + 1
+        // scan = 2.
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(action is FileAction.InstallDebPackage)
         action as FileAction.InstallDebPackage
@@ -84,7 +88,7 @@ class FileActionResolverTest {
     }
 
     @Test
-    fun `deb file offers one action per apt distro`() {
+    fun `deb file offers one install action per apt distro plus a scan`() {
         val twoApt = typicalContext.copy(
             linuxDistros = listOf(aptDistro, dnfDistro, pacmanDistro).let {
                 listOf(aptDistro, aptDistro.copy(id = "ubuntu-24", name = "Ubuntu 24"))
@@ -92,7 +96,8 @@ class FileActionResolverTest {
         )
         val deb = tmp.newFile("test.deb")
         val actions = FileActionResolver.resolve(deb, twoApt)
-        assertEquals(2, actions.size)
+        // 2 install + 1 scan = 3.
+        assertEquals(3, actions.size)
     }
 
     // --- .rpm ---
@@ -101,7 +106,7 @@ class FileActionResolverTest {
     fun `rpm file with dnf distro offers InstallRpmPackage`() {
         val rpm = tmp.newFile("test.rpm")
         val actions = FileActionResolver.resolve(rpm, typicalContext)
-        assertEquals(1, actions.size)
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(action is FileAction.InstallRpmPackage)
         action as FileAction.InstallRpmPackage
@@ -114,7 +119,7 @@ class FileActionResolverTest {
     fun `pkg tar zst file with pacman distro offers InstallPacmanPackage`() {
         val pkg = tmp.newFile("test.pkg.tar.zst")
         val actions = FileActionResolver.resolve(pkg, typicalContext)
-        assertEquals(1, actions.size)
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(action is FileAction.InstallPacmanPackage)
         action as FileAction.InstallPacmanPackage
@@ -127,7 +132,7 @@ class FileActionResolverTest {
     fun `AppImage file offers RunAppImage in the preferred distro`() {
         val app = tmp.newFile("Blender.AppImage")
         val actions = FileActionResolver.resolve(app, typicalContext)
-        assertEquals(1, actions.size)
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(action is FileAction.RunAppImage)
         action as FileAction.RunAppImage
@@ -148,7 +153,7 @@ class FileActionResolverTest {
     fun `exe file offers RunWindowsBinary in the preferred VM`() {
         val exe = tmp.newFile("setup.exe")
         val actions = FileActionResolver.resolve(exe, typicalContext)
-        assertEquals(1, actions.size)
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(action is FileAction.RunWindowsBinary)
         action as FileAction.RunWindowsBinary
@@ -164,7 +169,7 @@ class FileActionResolverTest {
         // labels the action accurately.
         val msi = tmp.newFile("office.msi")
         val actions = FileActionResolver.resolve(msi, typicalContext)
-        assertEquals(1, actions.size)
+        assertEquals(2, actions.size)
         val action = actions.first()
         assertTrue(
             "expected InstallWindowsMsi, got ${action::class.simpleName}",
@@ -195,10 +200,11 @@ class FileActionResolverTest {
     // --- Disk images ---
 
     @Test
-    fun `iso file offers both mount and boot actions`() {
+    fun `iso file offers both mount and boot actions plus scan`() {
         val iso = tmp.newFile("windows10.iso")
         val actions = FileActionResolver.resolve(iso, typicalContext)
-        assertEquals(2, actions.size)
+        // mount + boot + scan = 3.
+        assertEquals(3, actions.size)
         assertTrue(actions.any { it is FileAction.MountDiskImage })
         assertTrue(actions.any { it is FileAction.BootVmFromImage })
     }
@@ -207,7 +213,8 @@ class FileActionResolverTest {
     fun `qcow2 file is recognized as QCOW2 format`() {
         val qcow = tmp.newFile("win11.qcow2")
         val actions = FileActionResolver.resolve(qcow, typicalContext)
-        assertEquals(2, actions.size)
+        // mount + boot + scan = 3.
+        assertEquals(3, actions.size)
         val mount = actions.first { it is FileAction.MountDiskImage }
             as FileAction.MountDiskImage
         assertEquals(DiskImageFormat.QCOW2, mount.imageFormat)
@@ -217,7 +224,8 @@ class FileActionResolverTest {
     fun `img file is recognized as IMG format`() {
         val img = tmp.newFile("raspbian.img")
         val actions = FileActionResolver.resolve(img, typicalContext)
-        assertEquals(2, actions.size)
+        // mount + boot + scan = 3.
+        assertEquals(3, actions.size)
         val mount = actions.first { it is FileAction.MountDiskImage }
             as FileAction.MountDiskImage
         assertEquals(DiskImageFormat.IMG, mount.imageFormat)
@@ -229,7 +237,8 @@ class FileActionResolverTest {
     fun `git file offers GitClone action`() {
         val git = tmp.newFile("repo.git")
         val actions = FileActionResolver.resolve(git, typicalContext)
-        assertEquals(1, actions.size)
+        // clone + scan = 2.
+        assertEquals(2, actions.size)
         assertTrue(actions.first() is FileAction.GitClone)
     }
 
@@ -253,7 +262,8 @@ class FileActionResolverTest {
         val smb = tmp.newFile("server.smb")
         smb.writeText("smb://server/share")
         val actions = FileActionResolver.resolve(smb, typicalContext)
-        assertEquals(1, actions.size)
+        // mount + scan = 2.
+        assertEquals(2, actions.size)
         val mount = actions.first() as FileAction.MountNetworkShare
         assertEquals(NetworkProtocol.SMB, mount.protocol)
     }
@@ -262,7 +272,8 @@ class FileActionResolverTest {
     fun `webdav file offers MountNetworkShare with WEBDAV protocol`() {
         val webdav = tmp.newFile("nextcloud.webdav")
         val actions = FileActionResolver.resolve(webdav, typicalContext)
-        assertEquals(1, actions.size)
+        // mount + scan = 2.
+        assertEquals(2, actions.size)
         val mount = actions.first() as FileAction.MountNetworkShare
         assertEquals(NetworkProtocol.WEBDAV, mount.protocol)
     }
@@ -274,8 +285,65 @@ class FileActionResolverTest {
         val usb = tmp.newFile("device.usbotg")
         usb.writeText("/dev/block/sda1")
         val actions = FileActionResolver.resolve(usb, typicalContext)
-        assertEquals(1, actions.size)
+        // inspect + scan = 2.
+        assertEquals(2, actions.size)
         assertTrue(actions.first() is FileAction.InspectUsbOtgDevice)
+    }
+
+    // --- PHASE 110 — universal ScanForMalware ---
+
+    @Test
+    fun `every deb list includes a ScanForMalware action as the last entry`() {
+        val deb = tmp.newFile("test.deb")
+        val actions = FileActionResolver.resolve(deb, typicalContext)
+        val last = actions.last()
+        assertTrue(
+            "expected last action to be ScanForMalware, got ${last::class.simpleName}",
+            last is FileAction.ScanForMalware
+        )
+        last as FileAction.ScanForMalware
+        assertEquals(deb.absolutePath, last.targetPath)
+        assertEquals(deb.name, last.displayName)
+    }
+
+    @Test
+    fun `every iso list includes a ScanForMalware action`() {
+        val iso = tmp.newFile("win10.iso")
+        val actions = FileActionResolver.resolve(iso, typicalContext)
+        assertTrue(
+            "expected at least one ScanForMalware in the list, got ${actions.map { it::class.simpleName }}",
+            actions.any { it is FileAction.ScanForMalware }
+        )
+    }
+
+    @Test
+    fun `every exe list includes a ScanForMalware action`() {
+        val exe = tmp.newFile("setup.exe")
+        val actions = FileActionResolver.resolve(exe, typicalContext)
+        assertTrue(
+            "expected at least one ScanForMalware in the list, got ${actions.map { it::class.simpleName }}",
+            actions.any { it is FileAction.ScanForMalware }
+        )
+    }
+
+    @Test
+    fun `ScanForMalware action id is stable per file name`() {
+        // Two distinct files with the same
+        // basename. The id is the basename +
+        // the scan-malware prefix, so both
+        // files produce the same id.
+        val subdir1 = tmp.newFolder("scan-1")
+        val subdir2 = tmp.newFolder("scan-2")
+        val deb1 = File(subdir1, "test.deb")
+        val deb2 = File(subdir2, "test.deb")
+        deb1.writeText("placeholder")
+        deb2.writeText("placeholder")
+        val a1 = FileActionResolver.resolve(deb1, typicalContext)
+            .last() as FileAction.ScanForMalware
+        val a2 = FileActionResolver.resolve(deb2, typicalContext)
+            .last() as FileAction.ScanForMalware
+        assertEquals(a1.id, a2.id)
+        assertEquals("scan-malware-test.deb", a1.id)
     }
 
     // --- Unknown extensions ---
@@ -284,6 +352,17 @@ class FileActionResolverTest {
     fun `unknown file extension returns no actions`() {
         val txt = tmp.newFile("readme.txt")
         val actions = FileActionResolver.resolve(txt, typicalContext)
+        // PHASE 110 — `readme.txt` is an
+        // unknown extension. The resolver does
+        // NOT add ScanForMalware (the rule is
+        // "append to lists of extension-matched
+        // actions"; an unknown extension has no
+        // primary action, so the scan is
+        // surfaced through a different surface
+        // — the File Manager's right-click
+        // "Scan for malware" command). A future
+        // phase may make the scan universal
+        // across all extensions.
         assertTrue(actions.isEmpty())
     }
 
@@ -291,7 +370,8 @@ class FileActionResolverTest {
     fun `extension matching is case insensitive`() {
         val deb = tmp.newFile("test.DEB")
         val actions = FileActionResolver.resolve(deb, typicalContext)
-        assertEquals(1, actions.size)
+        // PHASE 110 — InstallDebPackage + ScanForMalware.
+        assertEquals(2, actions.size)
     }
 
     // --- Image format helpers ---

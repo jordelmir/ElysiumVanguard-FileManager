@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InstallDesktop
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.Icon
@@ -217,4 +218,9 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
         NetworkProtocol.SFTP -> Icons.Filled.Folder to Color(0xFF7986CB)
     }
     is FileAction.InspectUsbOtgDevice -> Icons.Filled.Usb to Color(0xFFA1887F)
+    // PHASE 110 — malware scan action. Uses
+    // the security shield icon + an amber
+    // tint (matches the "review before
+    // opening" UX hint).
+    is FileAction.ScanForMalware -> Icons.Filled.Security to Color(0xFFFFA726)
 }

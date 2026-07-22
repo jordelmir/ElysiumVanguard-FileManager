@@ -15,6 +15,7 @@ import com.elysium.vanguard.core.fileactions.handlers.RecordingMsiInstaller
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunner
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
+import com.elysium.vanguard.core.fileactions.handlers.MalwareScanHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareHandler
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMounter
 import com.elysium.vanguard.core.fileactions.handlers.NetworkShareMountResult
@@ -24,6 +25,10 @@ import com.elysium.vanguard.core.fileactions.handlers.UsbOtgHandler
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspectResult
 import com.elysium.vanguard.core.fileactions.handlers.UsbOtgInspector
 import com.elysium.vanguard.core.fileactions.handlers.UsbPartition
+import com.elysium.vanguard.core.security.malware.MalwareAnalyzer
+import com.elysium.vanguard.core.security.malware.MalwareScanResult
+import com.elysium.vanguard.core.security.malware.MatchedRule
+import com.elysium.vanguard.core.security.malware.Severity
 import com.elysium.vanguard.core.runtime.distros.Distro
 import com.elysium.vanguard.core.runtime.distros.DistroFamily
 import com.elysium.vanguard.core.runtime.distros.DistroInstallation
@@ -77,7 +82,8 @@ class FileActionViewModelTest {
         val state = vm.state.value
         assertTrue("sheet should be visible", state.sheetVisible)
         assertEquals(deb, state.targetFile)
-        assertEquals(1, state.actions.size)
+        // PHASE 110 — InstallDebPackage + ScanForMalware.
+        assertEquals(2, state.actions.size)
         assertTrue(state.actions.first() is FileAction.InstallDebPackage)
     }
 
@@ -190,6 +196,124 @@ class FileActionViewModelTest {
         assertTrue((outcome as FileActionOutcome.Success).message.contains("/mnt/win10"))
     }
 
+    // --- PHASE 110 — ScanForMalware ---
+
+    @Test
+    fun `execute ScanForMalware with Clean returns Success`() = runTest {
+        val analyzer = RecordingMalwareAnalyzer(
+            expectedResult = MalwareScanResult.Clean,
+        )
+        val handler = MalwareScanHandler(analyzer)
+        val env = FakeEnvironment()
+        val vm = buildViewModel(env, malwareScanHandler = handler)
+        val file = java.io.File.createTempFile("clean", ".txt")
+        file.writeText("hello world")
+        file.deleteOnExit()
+        val action = FileAction.ScanForMalware(
+            id = "scan",
+            targetPath = file.absolutePath,
+            displayName = file.name,
+        )
+        vm.execute(action)
+        advanceUntilIdle()
+        val outcome = vm.state.value.lastOutcome
+        assertNotNull(outcome)
+        assertTrue(
+            "expected Success, got $outcome",
+            outcome is FileActionOutcome.Success
+        )
+        assertTrue(
+            "message should mention 'Clean': ${(outcome as FileActionOutcome.Success).message}",
+            outcome.message.contains("Clean")
+        )
+        assertEquals(1, analyzer.calls.size)
+        assertEquals(file, analyzer.calls[0])
+    }
+
+    @Test
+    fun `execute ScanForMalware with Malicious returns Failure with rule list`() = runTest {
+        val analyzer = RecordingMalwareAnalyzer(
+            expectedResult = MalwareScanResult.Malicious(
+                file = java.io.File("evil.exe"),
+                matchedRules = listOf(
+                    MatchedRule(
+                        ruleId = "eicar-test-string",
+                        severity = Severity.MALICIOUS,
+                        evidence = "EICAR test string at offset 0",
+                    )
+                ),
+                riskScore = 10,
+            )
+        )
+        val handler = MalwareScanHandler(analyzer)
+        val env = FakeEnvironment()
+        val vm = buildViewModel(env, malwareScanHandler = handler)
+        val file = java.io.File.createTempFile("evil", ".exe")
+        file.writeText("X5O!P%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*")
+        file.deleteOnExit()
+        val action = FileAction.ScanForMalware(
+            id = "scan",
+            targetPath = file.absolutePath,
+            displayName = file.name,
+        )
+        vm.execute(action)
+        advanceUntilIdle()
+        val outcome = vm.state.value.lastOutcome
+        assertNotNull(outcome)
+        assertTrue(
+            "expected Failure, got $outcome",
+            outcome is FileActionOutcome.Failure
+        )
+        val msg = (outcome as FileActionOutcome.Failure).message
+        assertTrue("message should mention 'Blocked': $msg", msg.contains("Blocked"))
+        assertTrue(
+            "message should mention the rule id: $msg",
+            msg.contains("eicar-test-string")
+        )
+    }
+
+    @Test
+    fun `execute ScanForMalware with Suspicious returns Failure with rule list`() = runTest {
+        val analyzer = RecordingMalwareAnalyzer(
+            expectedResult = MalwareScanResult.Suspicious(
+                file = java.io.File("dropper.sh"),
+                matchedRules = listOf(
+                    MatchedRule(
+                        ruleId = "script-eval-base64",
+                        severity = Severity.SUSPICIOUS,
+                        evidence = "dropper pattern",
+                    )
+                ),
+                riskScore = 1,
+            )
+        )
+        val handler = MalwareScanHandler(analyzer)
+        val env = FakeEnvironment()
+        val vm = buildViewModel(env, malwareScanHandler = handler)
+        val file = java.io.File.createTempFile("dropper", ".sh")
+        file.writeText("eval $(echo abc | base64 -d)")
+        file.deleteOnExit()
+        val action = FileAction.ScanForMalware(
+            id = "scan",
+            targetPath = file.absolutePath,
+            displayName = file.name,
+        )
+        vm.execute(action)
+        advanceUntilIdle()
+        val outcome = vm.state.value.lastOutcome
+        assertNotNull(outcome)
+        assertTrue(
+            "expected Failure, got $outcome",
+            outcome is FileActionOutcome.Failure
+        )
+        val msg = (outcome as FileActionOutcome.Failure).message
+        assertTrue("message should mention 'Suspicious': $msg", msg.contains("Suspicious"))
+        assertTrue(
+            "message should mention the rule id: $msg",
+            msg.contains("script-eval-base64")
+        )
+    }
+
     // --- helpers ---
 
     private fun buildViewModel(
@@ -205,6 +329,7 @@ class FileActionViewModelTest {
             RecordingBinaryRunner(),
         ),
         msiInstallerHandler: MsiInstallerHandler = MsiInstallerHandler(RecordingMsiInstaller()),
+        malwareScanHandler: MalwareScanHandler = MalwareScanHandler(RecordingMalwareAnalyzer()),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
@@ -214,6 +339,7 @@ class FileActionViewModelTest {
         usbOtgHandler = usbOtgHandler,
         binaryRunnerHandler = binaryRunnerHandler,
         msiInstallerHandler = msiInstallerHandler,
+        malwareScanHandler = malwareScanHandler,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(
@@ -324,4 +450,14 @@ private class RecordingBinaryRunner(
         targetId: String,
         runtimeLabel: String,
     ): BinaryRunResult = expectedResult
+}
+
+private class RecordingMalwareAnalyzer(
+    private val expectedResult: MalwareScanResult = MalwareScanResult.Clean,
+) : MalwareAnalyzer {
+    val calls: MutableList<File> = mutableListOf()
+    override suspend fun scan(file: File): MalwareScanResult {
+        calls.add(file)
+        return expectedResult
+    }
 }

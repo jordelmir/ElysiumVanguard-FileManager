@@ -230,6 +230,32 @@ sealed class FileAction {
         override val description: String = "List partitions + mount first readable"
         override val targetRuntime: RuntimeKind? = null
     }
+
+    /**
+     * PHASE 110 — scan a file for malware. The
+     * scan is offered for **every file** the
+     * File Manager shows (a `.txt` file can
+     * contain a malicious payload; an `.iso`
+     * can include a known-backdoored binary).
+     * The action is runtime-agnostic: the
+     * underlying analyzer is the JVM-based
+     * [com.elysium.vanguard.core.security.malware.MalwareAnalyzer]
+     * (the [com.elysium.vanguard.core.security.malware.PatternBasedMalwareAnalyzer]
+     * production impl). A future phase adds a
+     * "sandbox runner" path that uploads the
+     * file to a Linux distro's proot sandbox +
+     * runs `clamscan` / `yara` against it; the
+     * action is forward-compatible.
+     */
+    data class ScanForMalware(
+        override val id: String,
+        val targetPath: String,
+        val displayName: String,
+    ) : FileAction() {
+        override val label: String = "Scan for malware"
+        override val description: String = "Run pattern-based malware scan on $displayName"
+        override val targetRuntime: RuntimeKind? = null
+    }
 }
 
 /**

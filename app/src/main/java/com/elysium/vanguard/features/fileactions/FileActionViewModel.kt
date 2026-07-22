@@ -23,6 +23,8 @@ import com.elysium.vanguard.core.fileactions.handlers.BinaryRunnerHandler
 import com.elysium.vanguard.core.fileactions.handlers.BinaryRunResult
 import com.elysium.vanguard.core.fileactions.handlers.MsiInstallerHandler
 import com.elysium.vanguard.core.fileactions.handlers.MsiInstallResult
+import com.elysium.vanguard.core.fileactions.handlers.MalwareScanHandler
+import com.elysium.vanguard.core.security.malware.MalwareScanResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,6 +65,7 @@ class FileActionViewModel @Inject constructor(
     private val usbOtgHandler: UsbOtgHandler,
     private val binaryRunnerHandler: BinaryRunnerHandler,
     private val msiInstallerHandler: MsiInstallerHandler,
+    private val malwareScanHandler: MalwareScanHandler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -231,6 +234,41 @@ class FileActionViewModel @Inject constructor(
                     )
                     is UsbOtgInspectResult.Failure -> FileActionOutcome.Failure(
                         message = result.message
+                    )
+                }
+            }
+            is FileAction.ScanForMalware -> {
+                // PHASE 110 — pattern-based
+                // malware scan. The four
+                // result variants map cleanly
+                // to the UI banners (clean /
+                // review / blocked / error).
+                // The message carries the
+                // count of matched rules +
+                // the file size so the user
+                // has an immediate "did the
+                // scan actually run" signal.
+                val result = malwareScanHandler.scan(action)
+                when (result) {
+                    is MalwareScanResult.Clean -> FileActionOutcome.Success(
+                        message = "Clean: no malware patterns matched in ${action.displayName}"
+                    )
+                    is MalwareScanResult.Suspicious -> {
+                        val ruleList = result.matchedRules
+                            .joinToString(", ") { it.ruleId }
+                        FileActionOutcome.Failure(
+                            message = "Suspicious (${result.matchedRules.size} rule(s): $ruleList) — review before opening",
+                        )
+                    }
+                    is MalwareScanResult.Malicious -> {
+                        val ruleList = result.matchedRules
+                            .joinToString(", ") { it.ruleId }
+                        FileActionOutcome.Failure(
+                            message = "Blocked (${result.matchedRules.size} rule(s): $ruleList) — known malware signature",
+                        )
+                    }
+                    is MalwareScanResult.ScanError -> FileActionOutcome.Failure(
+                        message = "Scan error: ${result.reason}",
                     )
                 }
             }
