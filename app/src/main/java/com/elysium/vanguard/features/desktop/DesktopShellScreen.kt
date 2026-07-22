@@ -38,11 +38,14 @@ import androidx.compose.ui.unit.dp
 import com.elysium.vanguard.features.desktop.content.WindowContentRegistry
 import com.elysium.vanguard.features.desktop.dock.Dock
 import com.elysium.vanguard.features.desktop.dock.DockStatusBadge
+import com.elysium.vanguard.features.desktop.dock.LayoutModeToggle
 import com.elysium.vanguard.features.desktop.drag.WindowDragMath
+import com.elysium.vanguard.features.desktop.layout.WindowLayoutMath
 import com.elysium.vanguard.features.desktop.model.DesktopSessionState
 import com.elysium.vanguard.features.desktop.model.DesktopWindow
 import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
+import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
 import com.elysium.vanguard.features.desktop.window.WindowFrame
 
@@ -129,6 +132,7 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
                 }
             }
         },
+        onLayoutModeSelected = { mode -> viewModel.setLayoutMode(mode) },
     )
 }
 
@@ -142,6 +146,7 @@ fun DesktopShellContent(
     onWindowClose: (String) -> Unit = {},
     onWindowDragged: (String, com.elysium.vanguard.features.desktop.model.WindowBounds) -> Unit = { _, _ -> },
     onDockItemClick: (DockItem) -> Unit = {},
+    onLayoutModeSelected: (com.elysium.vanguard.features.desktop.layout.LayoutMode) -> Unit = {},
 ) {
     var measuredSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
@@ -203,6 +208,25 @@ fun DesktopShellContent(
                 )
         )
 
+        // PHASE 112 — compute the layout
+        // override bounds. The math takes the
+        // visible windows + the desktop bounds
+        // + the current layout mode + returns
+        // a map of windowId -> bounds. Windows
+        // that are not in the map render at
+        // their stored bounds (FREEFORM-style).
+        val desktopBoundsForLayout = WindowBounds(
+            x = 0,
+            y = 0,
+            width = measuredSize.width.coerceAtLeast(0),
+            height = measuredSize.height.coerceAtLeast(0),
+        )
+        val layoutOverrides = WindowLayoutMath.computeRenderedBounds(
+            windows = state.windows,
+            desktopBounds = desktopBoundsForLayout,
+            layoutMode = state.layoutMode,
+        )
+
         // Render visible windows in z-order
         // (lowest first; higher z-order is
         // drawn on top). Each window has its
@@ -219,8 +243,17 @@ fun DesktopShellContent(
                 exit = scaleOut(targetScale = 0.92f, animationSpec = tween(160)) +
                     fadeOut(animationSpec = tween(160)),
             ) {
+                // PHASE 112 — apply the layout
+                // override if present (split
+                // modes); otherwise use the
+                // stored bounds. The effective
+                // window is what the renderer
+                // sees.
+                val effectiveWindow = layoutOverrides[window.id]?.let { override ->
+                    window.copy(bounds = override)
+                } ?: window
                 PositionedWindow(
-                    window = window,
+                    window = effectiveWindow,
                     isFocused = window.id == state.focusedWindowId,
                     desktopSize = measuredSize,
                     titleBarHeightPx = titleBarHeightPx,
@@ -233,6 +266,22 @@ fun DesktopShellContent(
                     onDragged = { newBounds -> onWindowDragged(window.id, newBounds) },
                 )
             }
+        }
+
+        // PHASE 112 — the layout mode toggle
+        // sits in the top-right of the
+        // desktop. The user clicks a chip to
+        // switch modes. The current mode is
+        // highlighted in the primary color.
+        Box(
+            modifier = Modifier
+                .align(androidx.compose.ui.Alignment.TopEnd)
+                .padding(top = 16.dp, end = 16.dp),
+        ) {
+            LayoutModeToggle(
+                currentMode = state.layoutMode,
+                onModeSelected = onLayoutModeSelected,
+            )
         }
 
         // Dock at the bottom — the live status

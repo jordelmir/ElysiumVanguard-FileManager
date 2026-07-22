@@ -6,6 +6,7 @@ import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
 import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
+import com.elysium.vanguard.features.desktop.layout.LayoutMode
 import com.elysium.vanguard.foundry.core.ontology.primitives.FoundryError
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
 import androidx.lifecycle.ViewModel
@@ -231,6 +232,27 @@ open class DesktopShellViewModel(
                     windowId = null,
                 ),
             )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * PHASE 112 — set the layout mode. The
+     * mode is **persistent** (a user
+     * preference); switching back to
+     * [LayoutMode.FREEFORM] preserves the
+     * windows' stored bounds so the user
+     * does not lose their previous layout.
+     *
+     * The math that arranges the windows
+     * in split modes is the
+     * [com.elysium.vanguard.features.desktop.layout.WindowLayoutMath].
+     * The ViewModel only stores the mode;
+     * the math is applied at render time.
+     */
+    fun setLayoutMode(mode: LayoutMode): Result<Unit> {
+        _state.update { current ->
+            current.copy(layoutMode = mode)
         }
         return Result.success(Unit)
     }

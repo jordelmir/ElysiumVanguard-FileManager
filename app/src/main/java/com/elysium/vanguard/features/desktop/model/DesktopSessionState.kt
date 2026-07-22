@@ -1,5 +1,7 @@
 package com.elysium.vanguard.features.desktop.model
 
+import com.elysium.vanguard.features.desktop.layout.LayoutMode
+
 /**
  * The session state of the Universal Desktop Shell.
  * The session is the **source of truth** for the
@@ -18,6 +20,17 @@ data class DesktopSessionState(
     val dockItems: List<DockItem>,
     val desktopBounds: WindowBounds,
     val nextZOrder: Int = INITIAL_Z_ORDER,
+    /**
+     * PHASE 112 — the current layout mode
+     * ([LayoutMode.FREEFORM] by default).
+     * The math that arranges the windows
+     * is the
+     * [com.elysium.vanguard.features.desktop.layout.WindowLayoutMath].
+     * Switching modes is a ViewModel
+     * action (the user toggles a button in
+     * the dock or a settings panel).
+     */
+    val layoutMode: LayoutMode = LayoutMode.FREEFORM,
 ) {
     init {
         require(desktopBounds.width >= 0) { "desktopBounds width must be non-negative" }

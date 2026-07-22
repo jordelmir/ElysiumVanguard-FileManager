@@ -190,4 +190,48 @@ class DesktopShellViewModelTest {
         val zOrders = viewModel.state.value.windows.map { it.zOrder }
         assertEquals(zOrders.size, zOrders.toSet().size)
     }
+
+    // --- PHASE 112 — layout mode ---
+
+    @Test
+    fun `setLayoutMode changes the state's layout mode`() {
+        assertEquals(
+            com.elysium.vanguard.features.desktop.layout.LayoutMode.FREEFORM,
+            viewModel.state.value.layoutMode,
+        )
+        viewModel.setLayoutMode(
+            com.elysium.vanguard.features.desktop.layout.LayoutMode.SPLIT_HORIZONTAL
+        )
+        assertEquals(
+            com.elysium.vanguard.features.desktop.layout.LayoutMode.SPLIT_HORIZONTAL,
+            viewModel.state.value.layoutMode,
+        )
+    }
+
+    @Test
+    fun `layout mode defaults to FREEFORM on a fresh viewmodel`() {
+        // The class-level `viewModel` field
+        // is a fresh ViewModel (the state
+        // flow is a fresh MutableStateFlow
+        // with a fresh initial state). The
+        // default is FREEFORM.
+        assertEquals(
+            com.elysium.vanguard.features.desktop.layout.LayoutMode.FREEFORM,
+            viewModel.state.value.layoutMode,
+        )
+    }
+
+    @Test
+    fun `switching layout modes preserves the windows' stored bounds`() {
+        viewModel.openWindow(id = "app-1", title = "T1", iconKey = "i1")
+        val originalBounds = viewModel.state.value.windows.first().bounds
+        viewModel.setLayoutMode(
+            com.elysium.vanguard.features.desktop.layout.LayoutMode.SPLIT_HORIZONTAL
+        )
+        val boundsAfterSwitch = viewModel.state.value.windows.first().bounds
+        // The stored bounds are unchanged;
+        // the layout math is applied at
+        // render time, not in the state.
+        assertEquals(originalBounds, boundsAfterSwitch)
+    }
 }
