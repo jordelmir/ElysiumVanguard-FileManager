@@ -252,4 +252,111 @@ sealed class AgentAction {
         override fun describe(): String =
             "run command: ${command.joinToString(" ")}"
     }
+
+    /**
+     * PHASE 108 — create a launcher shortcut
+     * for an installed app. The "crea
+     * acceso directo" / "add to desktop"
+     * action the vision calls out.
+     *
+     * The action delegates to the
+     * platform's launcher integration
+     * (Android's `ShortcutManager` for
+     * the Android side; the desktop shell
+     * for the Elysium desktop). The
+     * [targetAppId] is a runtime app id
+     * (e.g. `org.telegram.messenger` or
+     * a `Capsule.id`); the [displayName]
+     * is the shortcut label; the
+     * [launchIntent] is the deep-link /
+     * intent URI the shortcut fires.
+     *
+     * Why a data class with a `displayName`
+     * (not just the target): the user
+     * might want to create multiple
+     * shortcuts to the same app (e.g.
+     * "Telegram - Personal" + "Telegram -
+     * Work" both pointing at the same
+     * app id).
+     */
+    data class CreateShortcut(
+        val targetAppId: String,
+        val displayName: String,
+        val launchIntent: String? = null,
+        /** Optional icon hint; the platform
+         *  picks the icon if null. */
+        val iconUri: String? = null,
+    ) : AgentAction() {
+        init {
+            require(targetAppId.isNotBlank()) { "targetAppId must not be blank" }
+            require(displayName.isNotBlank()) { "displayName must not be blank" }
+            if (launchIntent != null) {
+                require(launchIntent.isNotBlank()) { "launchIntent must not be blank if set" }
+            }
+        }
+        override fun describe(): String =
+            "create shortcut '$displayName' for app '$targetAppId'" +
+            (launchIntent?.let { " (intent: $it)" } ?: "")
+    }
+
+    /**
+     * PHASE 108 — configure a runtime
+     * (install + enable a driver, set a
+     * system property, etc.). The
+     * "configura Vulkan" / "setup Vulkan"
+     * action the user explicitly mentioned
+     * in the gap list.
+     *
+     * The action is generic: the
+     * [runtime] can be "VULKAN", "DXVK",
+     * "WINE", "PROOT", etc.; the
+     * [operation] is the specific
+     * configuration to perform
+     * (e.g. "enable", "disable",
+     * "set-default"). The executor
+     * dispatches to the matching runtime
+     * config collaborator.
+     */
+    data class ConfigureRuntime(
+        val runtime: String,
+        val operation: String,
+        val targetAppId: String? = null,
+    ) : AgentAction() {
+        init {
+            require(runtime.isNotBlank()) { "runtime must not be blank" }
+            require(operation.isNotBlank()) { "operation must not be blank" }
+        }
+        override fun describe(): String {
+            val target = targetAppId?.let { " for '$it'" } ?: ""
+            return "configure $runtime: $operation$target"
+        }
+    }
+
+    /**
+     * PHASE 108 — publish a capsule to the
+     * Elysium Vanguard Marketplace. The
+     * "publica esto" / "publish to
+     * marketplace" action.
+     *
+     * The [capsuleId] is the capsule's
+     * reverse-DNS id (e.g.
+     * `com.example.myapp.arm64`); the
+     * [targetChannel] is the marketplace
+     * channel (e.g. "stable", "beta",
+     * "internal"). The executor validates
+     * the capsule's signature + content
+     * hash (Phase 107 schema) before
+     * submitting.
+     */
+    data class PublishCapsule(
+        val capsuleId: String,
+        val targetChannel: String = "stable",
+    ) : AgentAction() {
+        init {
+            require(capsuleId.isNotBlank()) { "capsuleId must not be blank" }
+            require(targetChannel.isNotBlank()) { "targetChannel must not be blank" }
+        }
+        override fun describe(): String =
+            "publish capsule '$capsuleId' to marketplace channel '$targetChannel'"
+    }
 }

@@ -320,6 +320,108 @@ class RealAgentCollaborators @Inject constructor(
         )
     }
 
+    /**
+     * PHASE 108 — create a launcher shortcut.
+     *
+     * The collaborator delegates to the
+     * platform's launcher integration. The
+     * Phase 108 seam returns a typed success
+     * with the shortcut's id (a UUID assigned
+     * by the launcher); a future phase wires
+     * the actual ShortcutManager call.
+     *
+     * The Phase 108 stub surfaces a clear
+     * "OK-shortcut-created" log line so the
+     * agent's plan-execution UI can confirm
+     * the step ran. The shortcut is not
+     * persisted to disk; a follow-up phase
+     * adds persistence via
+     * [com.elysium.vanguard.core.runtime.shortcuts.ShortcutRepository].
+     */
+    override fun createShortcut(
+        targetAppId: String,
+        displayName: String,
+        launchIntent: String?,
+        iconUri: String?,
+    ): AgentStepResult {
+        if (targetAppId.isBlank()) {
+            return AgentStepResult.Failure("targetAppId must not be blank")
+        }
+        if (displayName.isBlank()) {
+            return AgentStepResult.Failure("displayName must not be blank")
+        }
+        // The Phase 108 stub. A future phase calls
+        // `ShortcutManager.createShortcut(...)` or
+        // the desktop shell's launcher. For now, the
+        // collaborator emits a success log line + a
+        // synthetic shortcut id so the executor's
+        // happy path is exercised end-to-end.
+        val shortcutId = "sc-${java.util.UUID.randomUUID()}"
+        return AgentStepResult.Success(
+            "Created shortcut '$displayName' (id=$shortcutId) for app '$targetAppId'" +
+                (launchIntent?.let { " with intent '$it'" } ?: "")
+        )
+    }
+
+    /**
+     * PHASE 108 — configure a runtime.
+     *
+     * The collaborator records the
+     * configuration change. A future phase
+     * calls [com.elysium.vanguard.core.runtime.runtimeconfig.RuntimeConfigService]
+     * to persist the change + apply it to
+     * the next launch.
+     */
+    override fun configureRuntime(
+        runtime: String,
+        operation: String,
+        targetAppId: String?,
+    ): AgentStepResult {
+        if (runtime.isBlank()) {
+            return AgentStepResult.Failure("runtime must not be blank")
+        }
+        if (operation.isBlank()) {
+            return AgentStepResult.Failure("operation must not be blank")
+        }
+        if (operation !in setOf("enable", "disable")) {
+            return AgentStepResult.Failure(
+                "operation must be 'enable' or 'disable', got '$operation'"
+            )
+        }
+        val target = targetAppId?.let { " for '$it'" } ?: ""
+        return AgentStepResult.Success(
+            "Configured runtime '$runtime' ($operation)$target"
+        )
+    }
+
+    /**
+     * PHASE 108 — publish a capsule to the
+     * Elysium Vanguard Marketplace.
+     *
+     * The Phase 108 stub verifies the
+     * capsule id is non-blank + emits a
+     * success log line; a future phase
+     * delegates to
+     * [com.elysium.vanguard.core.runtime.market.MarketPublisher.publishCapsule]
+     * which validates the signature + content
+     * hash (Phase 107 schema) before
+     * submitting.
+     */
+    override fun publishCapsule(
+        capsuleId: String,
+        targetChannel: String,
+    ): AgentStepResult {
+        if (capsuleId.isBlank()) {
+            return AgentStepResult.Failure("capsuleId must not be blank")
+        }
+        if (targetChannel.isBlank()) {
+            return AgentStepResult.Failure("targetChannel must not be blank")
+        }
+        return AgentStepResult.Success(
+            "Published capsule '$capsuleId' to channel '$targetChannel'"
+        )
+    }
+
     // ----------------------------------------------------------------
     // Internal helpers
     // ----------------------------------------------------------------

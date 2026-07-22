@@ -57,6 +57,40 @@ interface AgentCollaborators {
     ): AgentStepResult
 
     /**
+     * PHASE 108 — create a launcher shortcut
+     * for an installed app. The "crea acceso
+     * directo" / "add to desktop" action.
+     */
+    fun createShortcut(
+        targetAppId: String,
+        displayName: String,
+        launchIntent: String? = null,
+        iconUri: String? = null,
+    ): AgentStepResult
+
+    /**
+     * PHASE 108 — configure a runtime
+     * (install + enable a driver, set a
+     * system property, etc.). The
+     * "configura Vulkan" action.
+     */
+    fun configureRuntime(
+        runtime: String,
+        operation: String,
+        targetAppId: String? = null,
+    ): AgentStepResult
+
+    /**
+     * PHASE 108 — publish a capsule to the
+     * Elysium Vanguard Marketplace. The
+     * "publica esto" action.
+     */
+    fun publishCapsule(
+        capsuleId: String,
+        targetChannel: String,
+    ): AgentStepResult
+
+    /**
      * Run a generic command.
      */
     fun runCommand(
@@ -312,6 +346,24 @@ class PlanExecutor(
                 command = action.command,
                 workingDirectory = action.workingDirectory
             )
+        is AgentAction.CreateShortcut ->
+            collaborators.createShortcut(
+                targetAppId = action.targetAppId,
+                displayName = action.displayName,
+                launchIntent = action.launchIntent,
+                iconUri = action.iconUri,
+            )
+        is AgentAction.ConfigureRuntime ->
+            collaborators.configureRuntime(
+                runtime = action.runtime,
+                operation = action.operation,
+                targetAppId = action.targetAppId,
+            )
+        is AgentAction.PublishCapsule ->
+            collaborators.publishCapsule(
+                capsuleId = action.capsuleId,
+                targetChannel = action.targetChannel,
+            )
     }
 
     /**
@@ -328,5 +380,8 @@ class PlanExecutor(
         is AgentAction.RollbackToSnapshot -> false
         is AgentAction.RunBuild -> false
         is AgentAction.RunCommand -> false
+        is AgentAction.CreateShortcut -> false
+        is AgentAction.ConfigureRuntime -> false
+        is AgentAction.PublishCapsule -> false
     }
 }

@@ -286,6 +286,21 @@ internal class FakeAgentCollaborators : AgentCollaborators {
         data class Rollback(val workspaceId: String, val snapshotId: String) : Call()
         data class Build(val toolchainKind: String, val command: List<String>) : Call()
         data class Run(val command: List<String>, val workingDirectory: String?) : Call()
+        data class CreateShortcut(
+            val targetAppId: String,
+            val displayName: String,
+            val launchIntent: String?,
+            val iconUri: String?,
+        ) : Call()
+        data class ConfigureRuntime(
+            val runtime: String,
+            val operation: String,
+            val targetAppId: String?,
+        ) : Call()
+        data class PublishCapsule(
+            val capsuleId: String,
+            val targetChannel: String,
+        ) : Call()
     }
 
     val calls = Collections.synchronizedList(mutableListOf<Call>())
@@ -295,6 +310,9 @@ internal class FakeAgentCollaborators : AgentCollaborators {
     var rollbackToSnapshotResult: AgentStepResult = AgentStepResult.Success()
     var runBuildResult: AgentStepResult = AgentStepResult.Success()
     var runCommandResult: AgentStepResult = AgentStepResult.Success()
+    var createShortcutResult: AgentStepResult = AgentStepResult.Success()
+    var configureRuntimeResult: AgentStepResult = AgentStepResult.Success()
+    var publishCapsuleResult: AgentStepResult = AgentStepResult.Success()
 
     override fun installDistro(distroId: String): AgentStepResult {
         calls += Call.Install(distroId)
@@ -339,5 +357,32 @@ internal class FakeAgentCollaborators : AgentCollaborators {
     ): AgentStepResult {
         calls += Call.Run(command, workingDirectory)
         return runCommandResult
+    }
+
+    override fun createShortcut(
+        targetAppId: String,
+        displayName: String,
+        launchIntent: String?,
+        iconUri: String?,
+    ): AgentStepResult {
+        calls += Call.CreateShortcut(targetAppId, displayName, launchIntent, iconUri)
+        return createShortcutResult
+    }
+
+    override fun configureRuntime(
+        runtime: String,
+        operation: String,
+        targetAppId: String?,
+    ): AgentStepResult {
+        calls += Call.ConfigureRuntime(runtime, operation, targetAppId)
+        return configureRuntimeResult
+    }
+
+    override fun publishCapsule(
+        capsuleId: String,
+        targetChannel: String,
+    ): AgentStepResult {
+        calls += Call.PublishCapsule(capsuleId, targetChannel)
+        return publishCapsuleResult
     }
 }
