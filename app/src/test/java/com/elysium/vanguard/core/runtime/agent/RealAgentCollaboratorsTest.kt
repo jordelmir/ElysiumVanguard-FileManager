@@ -531,7 +531,7 @@ class RealAgentCollaboratorsTest {
                 env = any<List<Pair<String, String>>>(),
                 cwd = any<File>(),
             )
-        ).thenReturn(LaunchedProcess(pid = 4242) { /* no-op stop */ })
+        ).thenReturn(LaunchedProcess(pid = 4242, stop = { /* no-op stop */ }))
         val collaborators = newCollaborators(processLauncher = launcher)
 
         val result = collaborators.runCommand(

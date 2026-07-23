@@ -406,7 +406,7 @@ private class RecordingProcessLauncher : ProcessLauncher {
         lastCommand = command
         lastEnv = env
         lastCwd = cwd
-        return LaunchedProcess(pid = 99999) { stopCount += 1 }
+        return LaunchedProcess(pid = 99999, stop = { stopCount += 1 })
     }
 }
 

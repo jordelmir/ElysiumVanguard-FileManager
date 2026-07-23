@@ -53,16 +53,47 @@ interface ProcessLauncher {
 }
 
 /**
- * The handle to a launched process. Captures the pid and a stop
- * callback. The [SessionRunner] holds one of these per running
- * session so a `stop()` call can find the right child.
+ * The handle to a launched process. Captures the pid, a stop
+ * callback, and (Phase 117+) a `waitFor` callback that blocks
+ * until the child exits and returns the OS exit code.
  *
- * The `stop()` callback is intentionally a `() -> Unit`, not a
- * `Process` reference — the production launcher closes over the
- * `Process` inside the callback, the test launcher closes over a
- * counter. The runner treats the callback as opaque.
+ * The [SessionRunner] holds one of these per running session
+ * so a `stop()` call can find the right child, and the
+ * fileaction backends (disk-image, package installer) call
+ * `waitFor()` to reap short-lived helper processes
+ * (`qemu-img convert`, `mount -o loop`, etc.).
+ *
+ * The `stop()` and `waitFor()` callbacks are intentionally
+ * `() -> Unit` / `() -> Int`, not `Process` references — the
+ * production launcher closes over the `Process` inside the
+ * callbacks, the test launcher closes over counters / canned
+ * values. The runner + backends treat the callbacks as opaque.
+ *
+ * Phase 117 added [waitFor] to replace the 60-second polling
+ * loop the fileaction backends used before (the polling
+ * could not actually detect process exit because PIDs are
+ * assigned at fork time, so the loop always timed out).
+ * The default is a no-op returning `-1` so old test fakes
+ * that only supply `pid` + `stop` keep compiling.
  */
 data class LaunchedProcess(
     val pid: Int,
-    val stop: () -> Unit
+    val stop: () -> Unit,
+    /**
+     * Block until the launched process exits, then return its
+     * OS exit code. Implementations MUST be safe to call from
+     * a background coroutine (the fileaction backends call this
+     * from `Dispatchers.IO`); blocking on the caller's thread
+     * is acceptable because the call sites are already on an
+     * I/O dispatcher. Implementations MUST return a value even
+     * if the process was already reaped (the typical contract
+     * is `Process.waitFor()` returns the cached exit code, not
+     * `IllegalThreadStateException`).
+     *
+     * The default returns `-1` so legacy test fakes (Phase 94
+     * and earlier) that only supplied `pid` + `stop` keep
+     * compiling. Production launchers (Phase 117+) populate
+     * this with the underlying `Process.waitFor()`.
+     */
+    val waitFor: () -> Int = { -1 }
 )

@@ -192,25 +192,18 @@ class ProcessLauncherPackageInstaller(
 
     /**
      * Wait for the launched process to exit.
-     * Phase 94's heuristic: the production
-     * `ProcessLauncher` does not expose
-     * `waitFor()`; we approximate with a
-     * 60-second polling loop. The Phase 95+
-     * refactor will use a real `waitFor`.
+     *
+     * PHASE 117 — this used to be a 60-second polling loop
+     * that checked `launched.pid <= 0` (always false because
+     * PIDs are assigned at fork time). The loop never
+     * detected exit, so `proot dpkg -i` and `proot rpm -i`
+     * were always timed out and the install path was
+     * effectively broken. Replaced with a direct delegate
+     * to `LaunchedProcess.waitFor` (the production launcher
+     * wires `Process.waitFor()` into that callback).
      */
-    private fun waitForExit(launched: com.elysium.vanguard.core.runtime.runner.LaunchedProcess): Int {
-        var attempts = 0
-        while (attempts < 600) {
-            // Heuristic: any non-zero pid is
-            // presumed to be alive. The real
-            // waitFor is Phase 95+.
-            if (launched.pid <= 0) return 0
-            Thread.sleep(100)
-            attempts++
-        }
-        launched.stop()
-        return -1
-    }
+    private fun waitForExit(launched: com.elysium.vanguard.core.runtime.runner.LaunchedProcess): Int =
+        launched.waitFor()
 
     companion object {
         const val DEFAULT_PROOT_BINARY = "proot"

@@ -482,7 +482,7 @@ private class SingleCallProcessLauncher : ProcessLauncher {
 
     override fun start(command: List<String>, env: List<Pair<String, String>>, cwd: File): LaunchedProcess {
         startCount += 1
-        return LaunchedProcess(pid = 99999) { /* stop is a no-op */ }
+        return LaunchedProcess(pid = 99999, stop = { /* stop is a no-op */ })
     }
 }
 

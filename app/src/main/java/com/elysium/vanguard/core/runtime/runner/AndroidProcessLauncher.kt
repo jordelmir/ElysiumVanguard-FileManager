@@ -66,7 +66,13 @@ class AndroidProcessLauncher : ProcessLauncher {
         val pid: Int = readPid(process)
         return LaunchedProcess(
             pid = pid,
-            stop = { process.destroy() }
+            stop = { process.destroy() },
+            // PHASE 117 — the production `waitFor` delegates to
+            // `Process.waitFor()` (Android-compatible; Java 1.0+).
+            // The fileaction backends (`ProcessLauncherDiskImageBackend`,
+            // `ProcessLauncherPackageInstaller`) call this in place of
+            // the 60-second polling loop they used before.
+            waitFor = { process.waitFor() }
         )
     }
 

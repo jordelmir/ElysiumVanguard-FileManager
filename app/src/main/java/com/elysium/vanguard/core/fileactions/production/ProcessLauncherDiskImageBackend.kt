@@ -202,24 +202,29 @@ class ProcessLauncherDiskImageBackend(
 
     /**
      * Wait for the launched process to exit.
-     * Phase 94's heuristic: the production
-     * `ProcessLauncher` does not expose
-     * `waitFor()`; we approximate with a
-     * 60-second polling loop. The Phase 95+
-     * refactor will use a real `waitFor`.
+     *
+     * PHASE 117 — this used to be a 60-second polling loop
+     * that checked `launched.pid <= 0` (which is always false
+     * because PIDs are assigned at fork time). The loop could
+     * never actually detect process exit, so the helper processes
+     * (`qemu-img convert`, `mount -o loop`) were always timed
+     * out and the success path was effectively unreachable.
+     *
+     * The fix: `LaunchedProcess` now exposes a `waitFor`
+     * callback (default `-1` for legacy fakes; production wires
+     * `Process.waitFor()`). We delegate directly — no polling,
+     * no `Thread.sleep`, no 60-second budget. The process blocks
+     * until the child exits; for `qemu-img convert` this is
+     * typically a few seconds.
      */
     private fun waitForExit(
         launched: com.elysium.vanguard.core.runtime.runner.LaunchedProcess,
-        timeoutMs: Long = 60_000,
-    ): Int {
-        val attempts = (timeoutMs / 100).toInt()
-        var i = 0
-        while (i < attempts) {
-            if (launched.pid <= 0) return 0
-            Thread.sleep(100)
-            i++
-        }
-        launched.stop()
-        return -1
-    }
+        // Kept as a parameter for API compatibility (the
+        // QEMU boot path passes `timeoutMs = 5_000` to
+        // distinguish a daemonized process from a real
+        // failure). The value is no longer used as a budget;
+        // it remains as a documented intent ("expect this
+        // kind of process to return within N seconds").
+        @Suppress("UNUSED_PARAMETER") timeoutMs: Long = 60_000,
+    ): Int = launched.waitFor()
 }

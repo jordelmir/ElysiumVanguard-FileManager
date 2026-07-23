@@ -104,4 +104,84 @@ class ProcessLauncherDiskImageBackendTest {
         val secondCmd = launcher.calls[1].first
         assertEquals("qemu-system-x86_64", secondCmd[0])
     }
+
+    // ──────────────────────────────────────────────
+    // PHASE 117 — real `waitFor` (replaces 60s poll)
+    // ──────────────────────────────────────────────
+
+    /**
+     * The disk-image backend used to poll the pid for 60
+     * seconds in `waitForExit` and always return `-1` (the
+     * `pid <= 0` check was a no-op because pids are
+     * assigned at fork time). Phase 117 replaces the poll
+     * with a direct call to `LaunchedProcess.waitFor`. This
+     * test asserts the new behavior: the waitFor callback
+     * is invoked exactly once per started process and its
+     * return value is treated as the exit code.
+     */
+    @Test
+    fun `mount invokes waitFor exactly once and returns the exit code`() = runTest {
+        val image = tmp.newFile("win10.iso")
+        val launcher = RecordingProcessLauncher(launchedPid = 4242)
+        val backend = ProcessLauncherDiskImageBackend(launcher, tmp.root)
+        val result = backend.mountReadOnly(image, DiskImageFormat.ISO)
+        assertTrue("expected Mounted, got $result", result is DiskImageResult.Mounted)
+        // One process started (the mount), one waitFor call.
+        assertEquals(1, launcher.calls.size)
+        assertEquals(1, launcher.waitForCalls.size)
+    }
+
+    /**
+     * The 60-second poll never detected failure, so a
+     * failed `mount` always reported timeout (-1). With
+     * the real `waitFor`, the failure exit code
+     * propagates and the backend surfaces a Failure
+     * with the original code.
+     */
+    @Test
+    fun `mount failure exit code propagates as Failure with the code`() = runTest {
+        val image = tmp.newFile("win10.iso")
+        val launcher = RecordingProcessLauncher(launchedPid = 4242, waitForExitCode = 32)
+        val backend = ProcessLauncherDiskImageBackend(launcher, tmp.root)
+        val result = backend.mountReadOnly(image, DiskImageFormat.ISO)
+        assertTrue("expected Failure, got $result", result is DiskImageResult.Failure)
+        val msg = (result as DiskImageResult.Failure).message
+        assertTrue("message should include exit=32: $msg", msg.contains("exit=32"))
+    }
+
+    /**
+     * QCOW2 mount runs two processes (qemu-img convert +
+     * mount), so the new waitFor must be called twice —
+     * once per helper process.
+     */
+    @Test
+    fun `qcow2 mount invokes waitFor once per helper process`() = runTest {
+        val image = tmp.newFile("win11.qcow2")
+        val launcher = RecordingProcessLauncher(launchedPid = 4242)
+        val backend = ProcessLauncherDiskImageBackend(launcher, tmp.root)
+        val result = backend.mountReadOnly(image, DiskImageFormat.QCOW2)
+        assertTrue(result is DiskImageResult.Mounted)
+        // qemu-img convert + mount = 2 helper processes
+        // = 2 waitFor calls.
+        assertEquals(2, launcher.calls.size)
+        assertEquals(2, launcher.waitForCalls.size)
+    }
+
+    /**
+     * If qemu-img convert fails (non-zero exit), the mount
+     * must short-circuit with a typed Failure — no second
+     * process is started and only one waitFor was called.
+     */
+    @Test
+    fun `qcow2 mount short-circuits when qemu-img convert fails`() = runTest {
+        val image = tmp.newFile("win11.qcow2")
+        val launcher = RecordingProcessLauncher(launchedPid = 4242, waitForExitCode = 1)
+        val backend = ProcessLauncherDiskImageBackend(launcher, tmp.root)
+        val result = backend.mountReadOnly(image, DiskImageFormat.QCOW2)
+        assertTrue("expected Failure, got $result", result is DiskImageResult.Failure)
+        // Only qemu-img convert was started; the mount was
+        // never attempted.
+        assertEquals(1, launcher.calls.size)
+        assertEquals(1, launcher.waitForCalls.size)
+    }
 }
