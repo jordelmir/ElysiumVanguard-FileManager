@@ -45,8 +45,22 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class WordEditorViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle
+    private val savedStateHandle: SavedStateHandle,
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val context: android.content.Context,
 ) : ViewModel() {
+
+    /**
+     * The directory where new `.elysium.word` / `.docx` files are
+     * saved when the user picks a relative file name in the
+     * "Save as..." dialog. PHASE 116 — previous behavior passed a
+     * relative path to [java.io.File], which resolved to the app's
+     * current working directory (read-only on Android → `EROFS`).
+     * Now the relative name is anchored under `context.filesDir` so
+     * the write succeeds.
+     */
+    private val saveRoot: java.io.File
+        get() = java.io.File(context.filesDir, "documents")
 
     private val initialPath: String? =
         savedStateHandle.get<String>("path")?.takeIf { it.isNotEmpty() }
@@ -120,14 +134,26 @@ class WordEditorViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    val file = File(path)
+                    // PHASE 116 — resolve the path against `saveRoot`
+                    // when the user picks a relative file name. An
+                    // absolute path is used as-is. Without this, the
+                    // previous code passed the relative name to
+                    // [java.io.File], which landed in the app's
+                    // read-only working directory and threw
+                    // `EROFS (Read-only file system)`.
+                    val file = if (java.io.File(path).isAbsolute) {
+                        java.io.File(path)
+                    } else {
+                        java.io.File(saveRoot, path)
+                    }
+                    val absolute = file.absolutePath
                     when {
-                        path.endsWith(".docx", true) -> WordDocx.exportFile(_doc.value, file)
+                        absolute.endsWith(".docx", true) -> WordDocx.exportFile(_doc.value, file)
                         else -> WordFile.writeFile(file, _doc.value)
                     }
                 }
             }.onSuccess {
-                currentPath = path
+                currentPath = (java.io.File(saveRoot, path)).absolutePath
             }.onFailure { _lastError.value = "Save failed: ${it.message}" }
         }
     }
@@ -382,6 +408,51 @@ class WordEditorViewModel @Inject constructor(
     }
 
     // ── Text editing ──────────────────────────────────────────────
+
+    /**
+     * PHASE 116 — set the full text of a block (replaces the runs with
+     * a single run carrying the first run's format). The block index
+     * identifies the target; the call is a no-op for out-of-range or
+     * non-text blocks (page break / horizontal rule / code block).
+     *
+     * **Why this exists**: the editor's body blocks are now
+     * `BasicTextField`s (not read-only `Text`s). When the user types,
+     * the field's `onValueChange` calls this method. The first run's
+     * format is preserved so the user keeps the bold/italic/etc. they
+     * applied via the toolbar.
+     */
+    fun setBlockText(index: Int, text: String) {
+        if (index !in _doc.value.blocks.indices) return
+        val block = _doc.value.blocks[index]
+        when (block) {
+            is WordParagraph -> {
+                val preservedFormat = block.runs.firstOrNull()?.format
+                    ?: CharacterFormat()
+                replaceBlock(index, block.copy(runs = listOf(WordRun(text, preservedFormat))))
+            }
+            is WordHeading -> {
+                val preservedFormat = block.runs.firstOrNull()?.format
+                    ?: CharacterFormat()
+                replaceBlock(index, block.copy(runs = listOf(WordRun(text, preservedFormat))))
+            }
+            is WordListItem -> {
+                val preservedFormat = block.runs.firstOrNull()?.format
+                    ?: CharacterFormat()
+                replaceBlock(index, block.copy(runs = listOf(WordRun(text, preservedFormat))))
+            }
+            is WordBlockQuote -> {
+                val preservedFormat = block.runs.firstOrNull()?.format
+                    ?: CharacterFormat()
+                replaceBlock(index, block.copy(runs = listOf(WordRun(text, preservedFormat))))
+            }
+            is WordCodeBlock -> {
+                replaceBlock(index, block.copy(code = text))
+            }
+            is WordPageBreak, is WordHorizontalRule -> {
+                // No text on these block types — ignore.
+            }
+        }
+    }
 
     /**
      * Append [text] to the run at [runIndex] of the currently selected

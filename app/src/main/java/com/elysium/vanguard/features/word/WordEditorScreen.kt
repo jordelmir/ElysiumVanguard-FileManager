@@ -85,7 +85,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -238,6 +243,7 @@ fun WordEditorScreen(
                 doc = doc,
                 selectedBlock = selectedBlock,
                 onSelectBlock = viewModel::selectBlock,
+                onSetBlockText = viewModel::setBlockText,
                 onAppendText = viewModel::appendText,
                 onAddParagraph = viewModel::newParagraphAfterSelected,
                 modifier = Modifier
@@ -639,6 +645,7 @@ private fun WordDocumentBody(
     doc: WordDocument,
     selectedBlock: Int,
     onSelectBlock: (Int) -> Unit,
+    onSetBlockText: (Int, String) -> Unit,
     onAppendText: (String, CharacterFormat?) -> Unit,
     onAddParagraph: (CharacterFormat) -> Unit,
     modifier: Modifier = Modifier
@@ -650,11 +657,21 @@ private fun WordDocumentBody(
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        itemsIndexed(doc.blocks, key = { _, b -> b.id() }) { index, block ->
+        // PHASE 116 — key is the **block index**, not the block's
+        // derived id. The previous key (a hash of `runs` + `format`)
+        // changed **on every keystroke** because `runs.hashCode()`
+        // changes as the user types — Compose then destroyed the
+        // `TextField` and recreated it, killing the focus + the
+        // soft keyboard. The user had to re-tap the field after
+        // every single character. The index is stable for the
+        // lifetime of a block; the content is re-driven by the new
+        // state.
+        itemsIndexed(doc.blocks, key = { index, _ -> index }) { index, block ->
             BlockRow(
                 block = block,
                 selected = index == selectedBlock,
                 onClick = { onSelectBlock(index) },
+                onSetText = { text -> onSetBlockText(index, text) },
                 onAppend = { text, fmt -> onAppendText(text, fmt) }
             )
         }
@@ -664,6 +681,16 @@ private fun WordDocumentBody(
     }
 }
 
+// PHASE 116 — the previous `WordBlock.id()` produced a key derived
+// from `runs.hashCode()`. That hash changes on **every keystroke**,
+// which caused Compose to destroy + recreate the `TextField` for
+// the block on every character, killing the focus + the soft
+// keyboard. The LazyColumn now uses the **block index** as the
+// key (see the `itemsIndexed(doc.blocks, key = { index, _ -> index })`
+// call above) — stable for the lifetime of a block. The legacy
+// `id()` helper is kept here for reference only and is no longer
+// referenced. Delete on the next pass.
+@Suppress("unused")
 private fun WordBlock.id(): String = when (this) {
     is WordParagraph -> "p-${runs.hashCode()}-${format.hashCode()}"
     is WordHeading -> "h$level-${runs.hashCode()}"
@@ -679,43 +706,138 @@ private fun BlockRow(
     block: WordBlock,
     selected: Boolean,
     onClick: () -> Unit,
+    onSetText: (String) -> Unit,
     onAppend: (String, CharacterFormat?) -> Unit
 ) {
     val borderColor = if (selected) Color(0xFF61AFEF) else Color.Transparent
+    // PHASE 116 — selection is now driven by the [BasicTextField]'s
+    // focus callback (`onFocusChanged` → `onClick()`), not by an
+    // outer `clickable` on the Box. The previous design had
+    // `clickable { onClick() }` on the Box, which **consumed** every
+    // tap and prevented the inner `BasicTextField` from ever gaining
+    // focus — the user could not type. (Same pattern as the
+    // Phase 10.10.1 SovereignCard clickable fix.)
+    //
+    // The border is now a visual-only indicator; the focus state
+    // (driven by the text field) is what makes the block "selected".
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .border(1.dp, borderColor, RoundedCornerShape(6.dp))
-            .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
         when (block) {
-            is WordParagraph -> ParagraphText(block, selected)
-            is WordHeading -> HeadingText(block, selected)
-            is WordListItem -> ListItemText(block, selected)
+            is WordParagraph -> ParagraphText(block, selected, onSetText = onSetText, onFocus = onClick)
+            is WordHeading -> HeadingText(block, selected, onSetText = onSetText, onFocus = onClick)
+            is WordListItem -> ListItemText(block, selected, onSetText = onSetText, onFocus = onClick)
             is WordPageBreak -> PageBreakIndicator()
             is WordHorizontalRule -> HorizontalRuleIndicator()
-            is WordBlockQuote -> BlockQuoteText(block, selected)
-            is WordCodeBlock -> CodeBlockText(block, selected)
+            is WordBlockQuote -> BlockQuoteText(block, selected, onSetText = onSetText, onFocus = onClick)
+            is WordCodeBlock -> CodeBlockText(block, selected, onSetText = onSetText, onFocus = onClick)
         }
     }
 }
 
+/**
+ * PHASE 116 — an editable text cell that renders the same visual style
+ * as the read-only [androidx.compose.material3.Text] but accepts
+ * keyboard input. The cell:
+ *  - **Looks like text**: no border / label / counter decorations.
+ *    The user shouldn't see a "form field" — just a typing surface.
+ *  - **Inherits the first run's format**: color, size, family, weight,
+ *    style, decoration, letter-spacing. When the user types, the VM
+ *    rewrites the block's runs to a single run carrying this format
+ *    (the simplest behavior; multi-run editing is a future feature).
+ *  - **Caret color matches the run color** so the cursor is visible on
+ *    dark backgrounds.
+ *
+ * The cell is read from the [text] parameter on every recomposition;
+ * the [onValueChange] is the only path that mutates state.
+ */
 @Composable
-private fun ParagraphText(p: WordParagraph, selected: Boolean) {
-    val annotated = buildRunsAnnotated(p.runs)
-    androidx.compose.material3.Text(
-        text = annotated,
-        modifier = Modifier
+private fun EditableTextCell(
+    text: String,
+    format: CharacterFormat,
+    textAlign: TextAlign,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    lineHeightMultiplier: Float = 1f,
+    monospace: Boolean = false,
+    onFocus: (() -> Unit)? = null,
+) {
+    val color = format.composeColor()
+    // PHASE 116 — switch from [BasicTextField] to the Material3
+    // [TextField]. The [BasicTextField] variant lost IME focus
+    // after every character (the recomposition dropped the
+    // connection to the input connection). The Material3 [TextField]
+    // holds the focus + IME state correctly across recompositions.
+    //
+    // The decoration / label / counter UI is hidden via the
+    // `colors = TextFieldDefaults.colors(...)` block — every
+    // container / indicator / focused / unfocused color is set to
+    // `Color.Transparent`. The result is a clean typing surface that
+    // **looks** like a paragraph / heading / etc. (no border, no
+    // underline) but behaves like a real Android edit field.
+    val focusModifier = if (onFocus != null) {
+        Modifier.onFocusChanged { state -> if (state.isFocused) onFocus() }
+    } else {
+        Modifier
+    }
+    androidx.compose.material3.TextField(
+        value = text,
+        onValueChange = onValueChange,
+        textStyle = TextStyle(
+            color = color,
+            fontSize = format.composeFontSize(),
+            fontFamily = if (monospace) FontFamily.Monospace else format.composeFontFamily(),
+            fontWeight = format.composeWeight(),
+            fontStyle = format.composeStyle(),
+            textDecoration = format.composeDecoration(),
+            letterSpacing = format.letterSpacing.sp,
+            textAlign = textAlign,
+            lineHeight = (lineHeightMultiplier * 16).sp,
+        ),
+        colors = androidx.compose.material3.TextFieldDefaults.colors(
+            focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+            unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+            disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+        ),
+        modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = p.format.spaceAfterPt.dp / 2),
-        textAlign = p.format.alignment.toTextAlign(),
-        lineHeight = (p.format.lineSpacingMultiplier * 16).sp
+            .then(focusModifier),
     )
 }
 
 @Composable
-private fun HeadingText(h: WordHeading, selected: Boolean) {
+private fun ParagraphText(
+    p: WordParagraph,
+    selected: Boolean,
+    onSetText: (String) -> Unit,
+    onFocus: () -> Unit,
+) {
+    val text = p.runs.joinToString("") { it.text }
+    val format = p.runs.firstOrNull()?.format ?: CharacterFormat()
+    EditableTextCell(
+        text = text,
+        format = format,
+        textAlign = p.format.alignment.toTextAlign(),
+        onValueChange = onSetText,
+        modifier = Modifier.padding(vertical = p.format.spaceAfterPt.dp / 2),
+        lineHeightMultiplier = p.format.lineSpacingMultiplier,
+        onFocus = onFocus,
+    )
+}
+
+@Composable
+private fun HeadingText(
+    h: WordHeading,
+    selected: Boolean,
+    onSetText: (String) -> Unit,
+    onFocus: () -> Unit,
+) {
     val defaultFormat = when (h.level) {
         1 -> CharacterFormat.HEADING_1
         2 -> CharacterFormat.HEADING_2
@@ -724,32 +846,58 @@ private fun HeadingText(h: WordHeading, selected: Boolean) {
         5 -> CharacterFormat.HEADING_5
         else -> CharacterFormat.HEADING_6
     }
-    val runs = h.runs.map { it.copy(format = defaultFormat.merge(it.format)) }
-    val annotated = buildRunsAnnotated(runs)
-    androidx.compose.material3.Text(
-        text = annotated,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        textAlign = h.format.alignment.toTextAlign()
+    val merged = defaultFormat.merge(h.runs.firstOrNull()?.format ?: CharacterFormat())
+    val text = h.runs.joinToString("") { it.text }
+    EditableTextCell(
+        text = text,
+        format = merged,
+        textAlign = h.format.alignment.toTextAlign(),
+        onValueChange = onSetText,
+        modifier = Modifier.padding(vertical = 4.dp),
+        onFocus = onFocus,
     )
 }
 
 @Composable
-private fun ListItemText(item: WordListItem, selected: Boolean) {
+private fun ListItemText(
+    item: WordListItem,
+    selected: Boolean,
+    onSetText: (String) -> Unit,
+    onFocus: () -> Unit,
+) {
     val prefix = when (item.kind) {
         ListKind.BULLET -> "• "
         ListKind.NUMBERED -> "${item.depth + 1}. "
         ListKind.CHECKBOX -> "☐ "
     }
-    val combined = listOf(WordRun(prefix)) + item.runs
-    val annotated = buildRunsAnnotated(combined)
-    androidx.compose.material3.Text(
-        text = annotated,
+    val text = item.runs.joinToString("") { it.text }
+    val format = item.runs.firstOrNull()?.format ?: CharacterFormat()
+    // The prefix is rendered as a static leading span — the editable
+    // cell is the rest of the row. This is implemented as a `Row` so
+    // the prefix doesn't move when the user types.
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = (12f * (item.depth + 1)).dp, top = 2.dp, bottom = 2.dp)
-    )
+    ) {
+        Text(
+            text = prefix,
+            color = format.composeColor(),
+            fontSize = format.composeFontSize(),
+            fontFamily = format.composeFontFamily(),
+            fontWeight = format.composeWeight(),
+            fontStyle = format.composeStyle(),
+            textDecoration = format.composeDecoration(),
+            letterSpacing = format.letterSpacing.sp,
+        )
+        EditableTextCell(
+            text = text,
+            format = format,
+            textAlign = TextAlign.Start,
+            onValueChange = onSetText,
+            onFocus = onFocus,
+        )
+    }
 }
 
 @Composable
@@ -789,7 +937,12 @@ private fun HorizontalRuleIndicator() {
 }
 
 @Composable
-private fun BlockQuoteText(b: WordBlockQuote, selected: Boolean) {
+private fun BlockQuoteText(
+    b: WordBlockQuote,
+    selected: Boolean,
+    onSetText: (String) -> Unit,
+    onFocus: () -> Unit,
+) {
     Row(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -799,8 +952,15 @@ private fun BlockQuoteText(b: WordBlockQuote, selected: Boolean) {
         )
         Spacer(Modifier.width(8.dp))
         Column {
-            val annotated = buildRunsAnnotated(b.runs)
-            androidx.compose.material3.Text(text = annotated, modifier = Modifier.fillMaxWidth())
+            val text = b.runs.joinToString("") { it.text }
+            val format = b.runs.firstOrNull()?.format ?: CharacterFormat()
+            EditableTextCell(
+                text = text,
+                format = format,
+                textAlign = TextAlign.Start,
+                onValueChange = onSetText,
+                onFocus = onFocus,
+            )
             b.citation?.let {
                 Spacer(Modifier.height(2.dp))
                 Text("— $it", color = Color(0xFF8B949E), fontSize = 12.sp)
@@ -810,7 +970,12 @@ private fun BlockQuoteText(b: WordBlockQuote, selected: Boolean) {
 }
 
 @Composable
-private fun CodeBlockText(c: WordCodeBlock, selected: Boolean) {
+private fun CodeBlockText(
+    c: WordCodeBlock,
+    selected: Boolean,
+    onSetText: (String) -> Unit,
+    onFocus: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -818,12 +983,14 @@ private fun CodeBlockText(c: WordCodeBlock, selected: Boolean) {
             .border(1.dp, Color(0xFF2A2F35), RoundedCornerShape(4.dp))
             .padding(8.dp)
     ) {
-        androidx.compose.material3.Text(
+        val format = CharacterFormat().copy(color = 0xFFE4E7EB, fontSizeSp = 12f)
+        EditableTextCell(
             text = c.code,
-            modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFE4E7EB),
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp
+            format = format,
+            textAlign = TextAlign.Start,
+            onValueChange = onSetText,
+            monospace = true,
+            onFocus = onFocus,
         )
     }
 }

@@ -49,8 +49,21 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SheetEditorViewModel @Inject constructor(
-    private val savedStateHandle: SavedStateHandle
+    private val savedStateHandle: SavedStateHandle,
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val context: android.content.Context,
 ) : ViewModel() {
+
+    /**
+     * The directory where new `.elysium.sheet` / `.xlsx` files are
+     * saved when the user picks a relative file name in the
+     * "Save as..." dialog. PHASE 116 — the previous code passed a
+     * relative path to [java.io.File], which landed in the app's
+     * read-only working directory and threw `EROFS`. The relative
+     * name is now anchored under `context.filesDir/documents/`.
+     */
+    private val saveRoot: java.io.File
+        get() = java.io.File(context.filesDir, "documents")
 
     private val initialPath: String? =
         savedStateHandle.get<String>("path")?.takeIf { it.isNotEmpty() }
@@ -123,14 +136,27 @@ class SheetEditorViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 runCatching {
-                    val file = File(path)
+                    // PHASE 116 — resolve the path against `saveRoot`
+                    // when the user picks a relative file name. An
+                    // absolute path is used as-is. Without this, the
+                    // previous code passed the relative name to
+                    // [java.io.File], which landed in the app's
+                    // read-only working directory and threw
+                    // `EROFS (Read-only file system)`.
+                    val file = if (java.io.File(path).isAbsolute) {
+                        java.io.File(path)
+                    } else {
+                        java.io.File(saveRoot, path)
+                    }
+                    val absolute = file.absolutePath
                     when {
-                        path.endsWith(".xlsx", true) -> SheetXlsx.exportFile(_workbook.value, file)
+                        absolute.endsWith(".xlsx", true) -> SheetXlsx.exportFile(_workbook.value, file)
                         else -> SheetFile.writeFile(file, _workbook.value)
                     }
                 }
-            }.onSuccess { currentPath = path }
-                .onFailure { _lastError.value = "Save failed: ${it.message}" }
+            }.onSuccess {
+                currentPath = java.io.File(saveRoot, path).absolutePath
+            }.onFailure { _lastError.value = "Save failed: ${it.message}" }
         }
     }
 
