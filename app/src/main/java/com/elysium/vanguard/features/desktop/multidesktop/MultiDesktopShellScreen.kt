@@ -3,6 +3,8 @@ package com.elysium.vanguard.features.desktop.multidesktop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,12 +45,12 @@ fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
     Box(modifier = Modifier.fillMaxSize()) {
         DesktopShellContent(
             state = active,
-            onWindowClick = { /* delegate to multi-VM */ },
-            onWindowMinimize = { /* delegate to multi-VM */ },
-            onWindowMaximize = { /* delegate to multi-VM */ },
-            onWindowRestore = { /* delegate to multi-VM */ },
+            onWindowClick = { id -> viewModel.focusWindow(id) },
+            onWindowMinimize = { id -> viewModel.minimizeWindow(id) },
+            onWindowMaximize = { id -> viewModel.maximizeWindow(id) },
+            onWindowRestore = { id -> viewModel.restoreWindow(id) },
             onWindowClose = { id -> viewModel.closeWindow(id) },
-            onWindowDragged = { _, _ -> /* freeform drag is disabled in multi-VM */ },
+            onWindowDragged = { id, bounds -> viewModel.updateWindowBounds(id, bounds) },
             onDockItemClick = { item -> handleDockItemClick(viewModel, item) },
             onLayoutModeSelected = { mode -> viewModel.setLayoutMode(mode) },
         )
@@ -59,8 +61,24 @@ fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
         // visually distinct (the tabs are
         // larger; the toggle is a single
         // pill).
+        //
+        // PHASE 115 — the `align(TopStart)`
+        // is required; without it, the
+        // inner Box is positioned at the
+        // center of the outer `fillMaxSize`
+        // Box, where it can be overlapped
+        // by other content. The strip is
+        // now explicitly pinned to the
+        // top-left corner.
+        //
+        // The `zIndex(1f)` ensures the
+        // strip draws ABOVE the
+        // [DesktopShellContent] (defensive
+        // against future re-orderings).
         Box(
             modifier = Modifier
+                .align(Alignment.TopStart)
+                .zIndex(1f)
                 .padding(top = 12.dp, start = 16.dp),
         ) {
             SessionTabStrip(
@@ -92,9 +110,9 @@ private fun handleDockItemClick(
             if (windowId != null) {
                 val w = viewModel.activeSession.windows.firstOrNull { it.id == windowId }
                 if (w?.state == WindowState.MINIMIZED) {
-                    // restore
+                    viewModel.restoreWindow(windowId)
                 } else {
-                    // focus
+                    viewModel.focusWindow(windowId)
                 }
             }
         }

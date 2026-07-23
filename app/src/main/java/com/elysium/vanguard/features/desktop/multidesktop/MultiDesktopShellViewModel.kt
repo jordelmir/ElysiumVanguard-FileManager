@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.elysium.vanguard.features.desktop.DesktopShellViewModel
 import com.elysium.vanguard.features.desktop.model.DesktopSessionState
 import com.elysium.vanguard.features.desktop.model.DesktopWindow
+import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
 import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
@@ -310,6 +311,209 @@ open class MultiDesktopShellViewModel(
         _state.update { current ->
             val active = current.activeSession
             val updatedActive = active.copy(layoutMode = mode)
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    // ─── PHASE 115 — window-state-machine methods on the active session ───
+    //
+    // The single-session [DesktopShellViewModel] has these methods; the
+    // multi-session VM delegates them all to the active session. Without
+    // these, the multi-screen's window click / minimize / maximize / restore
+    // / drag callbacks have no effect — windows can be opened but cannot be
+    // interacted with.
+
+    /**
+     * Focus a window in the active session.
+     * Raises the window to the top of the
+     * z-order, restores from minimized, and
+     * sets it as the session's focused id.
+     */
+    fun focusWindow(id: String): Result<Unit> {
+        _state.update { current ->
+            val active = current.activeSession
+            val target = active.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            val newZOrder = active.nextZOrder
+            val updated = target.copy(
+                state = WindowState.NORMAL,
+                zOrder = newZOrder,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            val updatedActive = active.copy(
+                windows = active.windows.map { if (it.id == id) updated else it },
+                focusedWindowId = id,
+                nextZOrder = newZOrder + 1,
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Minimize a window in the active
+     * session. The window is hidden; the
+     * focused id falls through to the next
+     * visible window.
+     */
+    fun minimizeWindow(id: String): Result<Unit> {
+        _state.update { current ->
+            val active = current.activeSession
+            val target = active.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            val updated = target.copy(
+                state = WindowState.MINIMIZED,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            val updatedActive = active.copy(
+                windows = active.windows.map { if (it.id == id) updated else it },
+                focusedWindowId = if (active.focusedWindowId == id) {
+                    active.windows
+                        .filterNot { it.id == id }
+                        .filter { it.state != WindowState.MINIMIZED }
+                        .maxByOrNull { it.zOrder }
+                        ?.id
+                } else {
+                    active.focusedWindowId
+                },
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Maximize a window in the active
+     * session. The window's bounds are set
+     * to the desktop bounds; the window
+     * is raised to the top of the z-order.
+     */
+    fun maximizeWindow(id: String): Result<Unit> {
+        _state.update { current ->
+            val active = current.activeSession
+            val target = active.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            val newZOrder = active.nextZOrder
+            val updated = target.copy(
+                state = WindowState.MAXIMIZED,
+                bounds = active.desktopBounds,
+                zOrder = newZOrder,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            val updatedActive = active.copy(
+                windows = active.windows.map { if (it.id == id) updated else it },
+                focusedWindowId = id,
+                nextZOrder = newZOrder + 1,
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Restore a window in the active
+     * session from maximized OR
+     * minimized. The window is set to
+     * NORMAL; the focused id is updated.
+     */
+    fun restoreWindow(id: String): Result<Unit> {
+        _state.update { current ->
+            val active = current.activeSession
+            val target = active.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            val updated = target.copy(
+                state = WindowState.NORMAL,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            val updatedActive = active.copy(
+                windows = active.windows.map { if (it.id == id) updated else it },
+                focusedWindowId = id,
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Update a window's bounds in the
+     * active session. The update is
+     * applied only when the window is in
+     * NORMAL state (maximized windows
+     * ignore drag updates).
+     */
+    fun updateWindowBounds(id: String, newBounds: WindowBounds): Result<Unit> {
+        _state.update { current ->
+            val active = current.activeSession
+            val target = active.windows.firstOrNull { it.id == id }
+                ?: return@update current
+            if (target.state != WindowState.NORMAL) {
+                return@update current
+            }
+            val updated = target.copy(
+                bounds = newBounds,
+                lastInteractionAt = clock.now().epochMs,
+            )
+            val updatedActive = active.copy(
+                windows = active.windows.map { if (it.id == id) updated else it },
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Pin an app to the dock of the active
+     * session. The pin is a no-op when an
+     * app with the same iconKey is already
+     * pinned.
+     */
+    fun pinApp(iconKey: String, label: String): Result<Unit> {
+        if (iconKey.isBlank() || label.isBlank()) {
+            return Result.failure(
+                FoundryError.VehicleDefinitionInvalid(
+                    field = "DockItem",
+                    reason = "iconKey and label must not be blank",
+                )
+            )
+        }
+        _state.update { current ->
+            val active = current.activeSession
+            if (active.dockItems.any { it.iconKey == iconKey && it.kind == DockItemKind.PINNED_APP }) {
+                return@update current
+            }
+            val updatedActive = active.copy(
+                dockItems = active.dockItems + DockItem(
+                    iconKey = iconKey,
+                    label = label,
+                    kind = DockItemKind.PINNED_APP,
+                    windowId = null,
+                ),
+            )
             current.copy(
                 sessions = current.sessions.toMutableList().apply {
                     this[current.activeIndex] = updatedActive

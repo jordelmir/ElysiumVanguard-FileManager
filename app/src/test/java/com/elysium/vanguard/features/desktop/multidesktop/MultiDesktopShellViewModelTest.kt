@@ -1,6 +1,8 @@
 package com.elysium.vanguard.features.desktop.multidesktop
 
 import com.elysium.vanguard.features.desktop.layout.LayoutMode
+import com.elysium.vanguard.features.desktop.model.WindowBounds
+import com.elysium.vanguard.features.desktop.model.WindowState
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -266,5 +268,161 @@ class MultiDesktopShellViewModelTest {
         val active = viewModel.activeSession
         assertEquals(1, active.windows.size)
         assertEquals("active-w", active.windows.first().id)
+    }
+
+    // --- PHASE 115 — window state-machine methods on the active session ---
+
+    @Test
+    fun `focusWindow raises the window to the top of the z-order`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.openWindow(id = "w2", title = "T2", iconKey = "i2")
+        viewModel.focusWindow("w1")
+        val w1 = viewModel.activeSession.windows.first { it.id == "w1" }
+        val w2 = viewModel.activeSession.windows.first { it.id == "w2" }
+        assertTrue("w1 should have higher z-order after focus, got w1=${w1.zOrder} w2=${w2.zOrder}", w1.zOrder > w2.zOrder)
+        assertEquals("w1", viewModel.activeSession.focusedWindowId)
+    }
+
+    @Test
+    fun `focusWindow on a non-existent window is a no-op`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        val beforeZ = viewModel.activeSession.windows.first().zOrder
+        viewModel.focusWindow("nonexistent")
+        val afterZ = viewModel.activeSession.windows.first().zOrder
+        assertEquals(beforeZ, afterZ)
+    }
+
+    @Test
+    fun `focusWindow targets the active session only`() {
+        viewModel.createSession() // active = 1
+        viewModel.openWindow(id = "s1-w1", title = "S1W1", iconKey = "i")
+        viewModel.switchTo(0)
+        viewModel.openWindow(id = "s0-w1", title = "S0W1", iconKey = "i")
+        viewModel.focusWindow("s0-w1")
+        // Session 1's window is unchanged.
+        viewModel.switchTo(1)
+        val s1w1 = viewModel.activeSession.windows.first { it.id == "s1-w1" }
+        // The z-order of the session 1 window should not have changed.
+        val initialZ = s1w1.zOrder
+        // Re-focus session 1's w1; it should now have a fresh z-order.
+        viewModel.focusWindow("s1-w1")
+        val s1w1After = viewModel.activeSession.windows.first { it.id == "s1-w1" }
+        assertTrue("s1-w1 z-order should advance, was $initialZ, now ${s1w1After.zOrder}", s1w1After.zOrder > initialZ)
+    }
+
+    @Test
+    fun `minimizeWindow sets the window to MINIMIZED state`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.minimizeWindow("w1")
+        val w1 = viewModel.activeSession.windows.first { it.id == "w1" }
+        assertEquals(WindowState.MINIMIZED, w1.state)
+    }
+
+    @Test
+    fun `minimizeWindow falls through the focused id when minimizing the focused window`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.openWindow(id = "w2", title = "T2", iconKey = "i2")
+        // w2 is the focused window (last opened).
+        viewModel.minimizeWindow("w2")
+        // w1 should now be the focused id.
+        assertEquals("w1", viewModel.activeSession.focusedWindowId)
+    }
+
+    @Test
+    fun `minimizeWindow does not change the focused id when minimizing a non-focused window`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.openWindow(id = "w2", title = "T2", iconKey = "i2")
+        // w2 is focused. Minimize w1.
+        viewModel.minimizeWindow("w1")
+        assertEquals("w2", viewModel.activeSession.focusedWindowId)
+    }
+
+    @Test
+    fun `maximizeWindow sets bounds to desktop bounds and raises z-order`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.openWindow(id = "w2", title = "T2", iconKey = "i2")
+        viewModel.maximizeWindow("w1")
+        val w1 = viewModel.activeSession.windows.first { it.id == "w1" }
+        assertEquals(WindowState.MAXIMIZED, w1.state)
+        assertEquals(viewModel.activeSession.desktopBounds, w1.bounds)
+        assertEquals("w1", viewModel.activeSession.focusedWindowId)
+    }
+
+    @Test
+    fun `restoreWindow sets a minimized window back to NORMAL`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.minimizeWindow("w1")
+        viewModel.restoreWindow("w1")
+        val w1 = viewModel.activeSession.windows.first { it.id == "w1" }
+        assertEquals(WindowState.NORMAL, w1.state)
+        assertEquals("w1", viewModel.activeSession.focusedWindowId)
+    }
+
+    @Test
+    fun `updateWindowBounds applies the new bounds in NORMAL state`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        val newBounds = WindowBounds(x = 50, y = 75, width = 600, height = 400)
+        viewModel.updateWindowBounds("w1", newBounds)
+        val w1 = viewModel.activeSession.windows.first { it.id == "w1" }
+        assertEquals(newBounds, w1.bounds)
+    }
+
+    @Test
+    fun `updateWindowBounds is a no-op when the window is MAXIMIZED`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        viewModel.maximizeWindow("w1")
+        val boundsBefore = viewModel.activeSession.windows.first { it.id == "w1" }.bounds
+        val newBounds = WindowBounds(x = 0, y = 0, width = 100, height = 100)
+        viewModel.updateWindowBounds("w1", newBounds)
+        val boundsAfter = viewModel.activeSession.windows.first { it.id == "w1" }.bounds
+        assertEquals(boundsBefore, boundsAfter)
+    }
+
+    @Test
+    fun `updateWindowBounds is a no-op on a non-existent window`() {
+        viewModel.openWindow(id = "w1", title = "T1", iconKey = "i1")
+        val beforeCount = viewModel.activeSession.windows.size
+        viewModel.updateWindowBounds("nonexistent", WindowBounds(0, 0, 100, 100))
+        assertEquals(beforeCount, viewModel.activeSession.windows.size)
+    }
+
+    @Test
+    fun `pinApp adds a new dock item to the active session`() {
+        viewModel.pinApp("calculator", "Calculator")
+        val keys = viewModel.activeSession.dockItems.map { it.iconKey }
+        assertTrue("dock should contain 'calculator', got $keys", keys.contains("calculator"))
+    }
+
+    @Test
+    fun `pinApp is a no-op when the iconKey is already pinned`() {
+        // The default dock has "terminal" pinned.
+        val beforeCount = viewModel.activeSession.dockItems.size
+        viewModel.pinApp("terminal", "Terminal Alt")
+        val afterCount = viewModel.activeSession.dockItems.size
+        assertEquals(beforeCount, afterCount)
+    }
+
+    @Test
+    fun `pinApp with a blank iconKey returns failure`() {
+        val result = viewModel.pinApp("", "Calculator")
+        assertTrue("pinApp should fail, got $result", result.isFailure)
+    }
+
+    @Test
+    fun `window state-machine methods target the active session only`() {
+        viewModel.createSession() // active = 1
+        viewModel.openWindow(id = "s1-w1", title = "S1W1", iconKey = "i")
+        viewModel.switchTo(0)
+        viewModel.openWindow(id = "s0-w1", title = "S0W1", iconKey = "i")
+        // Maximize the active session's w1.
+        viewModel.maximizeWindow("s0-w1")
+        // Session 1's window is unchanged.
+        viewModel.switchTo(1)
+        val s1w1 = viewModel.activeSession.windows.first { it.id == "s1-w1" }
+        assertEquals(WindowState.NORMAL, s1w1.state)
+        // Session 0's w1 is MAXIMIZED.
+        viewModel.switchTo(0)
+        val s0w1 = viewModel.activeSession.windows.first { it.id == "s0-w1" }
+        assertEquals(WindowState.MAXIMIZED, s0w1.state)
     }
 }

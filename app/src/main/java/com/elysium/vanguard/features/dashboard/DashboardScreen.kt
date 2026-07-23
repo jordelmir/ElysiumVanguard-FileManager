@@ -485,10 +485,20 @@ private fun PortalCard(
     onClick: () -> Unit
 ) {
     val adaptive = LocalAdaptiveMetrics.current
+    // PHASE 10.10 — The clickable is on the INNER Box (not the
+    // outer SovereignCard modifier) because the SovereignCard
+    // wraps its content in SovereignLifeWrapper which applies a
+    // 3D rotation effect. The rotation moves the visible card
+    // slightly, but the clickable area stays at the original
+    // position. Tapping the card visibly fires the click
+    // (the focus state changes) but the rotation makes the
+    // hit area not match the visible area, so the click
+    // appears to be ignored. Putting the clickable on the
+    // inner Box (which IS inside the rotation) makes the
+    // hit area track the visible card.
     SovereignCard(
         modifier = modifier
-            .aspectRatio(adaptive.portalAspectRatio)
-            .clickable { onClick() },
+            .aspectRatio(adaptive.portalAspectRatio),
         cornerRadius = 24.dp,
         glassAlpha = 0.0f,
         glowRadius = 26.dp
@@ -497,6 +507,7 @@ private fun PortalCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(gradientBg)
+                .clickable { onClick() }
         ) {
             Column(
                 modifier = Modifier

@@ -243,9 +243,22 @@ class MainActivity : ComponentActivity() {
                     // sessions — tapping it navigates to the
                     // terminal screen with the distro pre-loaded.
                     composable("desktop_shell") {
-                        com.elysium.vanguard.features.desktop.DesktopShellScreen(
+                        // PHASE 115 — the DESKTOP card
+                        // routes to the **multi-desktop
+                        // shell** (Phase 113), not the
+                        // single-session shell. The
+                        // multi-shell is a strict
+                        // superset: it has the same
+                        // freeform / split / stack window
+                        // behavior **plus** the session
+                        // tab strip at the top. The
+                        // single-session shell remains
+                        // available for tests that need
+                        // it; the dashboard exposes only
+                        // the multi-shell.
+                        com.elysium.vanguard.features.desktop.multidesktop.MultiDesktopShellScreen(
                             viewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-                                factory = com.elysium.vanguard.features.desktop.DesktopShellViewModelFactory,
+                                factory = com.elysium.vanguard.features.desktop.multidesktop.MultiDesktopShellViewModel.Companion.Factory,
                             )
                         )
                     }
