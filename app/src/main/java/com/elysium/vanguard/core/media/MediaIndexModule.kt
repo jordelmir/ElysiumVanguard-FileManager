@@ -16,20 +16,20 @@ import javax.inject.Singleton
  *   - The default [MediaIndexer] (the
  *     `DefaultMediaIndexer`, the
  *     production impl that uses the DAO).
- *   - The default [MediaSource] (the
- *     `ContentResolverMediaSource`, the
- *     production impl that reads from
- *     `MediaStore`).
  *
  * The module is **@InstallIn(SingletonComponent)**:
- * the indexer + the source are
- * **process-scoped** (one instance for the
- * app's lifetime).
+ * the indexer is **process-scoped** (one
+ * instance for the app's lifetime).
  *
  * The module deliberately does **NOT**
  * provide the [MediaStoreObserver] (the
  * observer is a `@Singleton` already via
- * its `@Inject constructor`).
+ * its `@Inject constructor`) or the
+ * [MediaSourceProvider] (the provider is a
+ * `@Singleton` already via its `@Inject
+ * constructor`; Hilt constructs it from the
+ * application [android.content.Context]
+ * automatically).
  */
 @Module
 @InstallIn(SingletonComponent::class)

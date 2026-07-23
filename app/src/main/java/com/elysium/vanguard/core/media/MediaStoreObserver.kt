@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,29 @@ import javax.inject.Singleton
 class MediaStoreObserver @Inject constructor(
     @ApplicationContext private val context: Context,
     private val indexer: MediaIndexer,
+    /**
+     * PHASE 118 — the [MediaSource] provider the
+     * observer uses when a `ContentObserver` fires.
+     * The provider is a typed wrapper around the
+     * `() -> MediaSource` factory (a class, not a
+     * Kotlin lambda) so Hilt can inject it without
+     * the `Function0<? extends MediaSource>`
+     * wildcard issue that bites every Hilt + Kotlin
+     * lambda-as-binding project.
+     *
+     * The provider is **process-scoped**
+     * (`@Singleton`); the observer calls
+     * `provider()` on every scan to get a fresh
+     * [MediaSource]. The production
+     * [MediaSourceProvider] returns a
+     * [ContentResolverMediaSource] backed by the
+     * application [Context]; the unit tests pass a
+     * stub provider directly via the constructor
+     * (the Android `ContentResolver` is not
+     * available on the JVM).
+     */
+    @VisibleForTesting
+    internal val mediaSourceProvider: MediaSourceProvider,
 ) {
 
     /**
@@ -134,6 +158,30 @@ class MediaStoreObserver @Inject constructor(
      */
     val state: StateFlow<ScanState>
         get() = scanState.asStateFlow()
+
+    /**
+     * The latest [IndexResult] from the
+     * last completed scan. The flow is
+     * the canonical "what did the last
+     * scan discover" probe for the UI;
+     * the [GalleryViewModel] and the
+     * [MusicHubViewModel] use it to show
+     * the "X new items" badge on the
+     * MEDIA VAULT + AUDIO HUB tiles.
+     *
+     * PHASE 118 — the flow is
+     * `null` before the first scan
+     * completes; non-null after the
+     * first scan. The UI uses
+     * `lastResult?.added?.size` (the
+     * canonical `hasNewItems` predicate)
+     * to decide whether to show the
+     * badge.
+     */
+    private val _lastResult: MutableStateFlow<IndexResult?> =
+        MutableStateFlow(null)
+    val lastResult: StateFlow<IndexResult?>
+        get() = _lastResult.asStateFlow()
 
     /**
      * Start the observer. The observer
@@ -237,26 +285,38 @@ class MediaStoreObserver @Inject constructor(
 
     /**
      * Trigger a scan for the given
-     * change. The scan uses a
-     * `ContentResolverMediaSource` (the
-     * production source) + the
-     * [MediaIndexer].
+     * change. The scan uses the injected
+     * [mediaSourceFactory] (the production
+     * factory constructs a
+     * `ContentResolverMediaSource`; tests
+     * inject a stub `MediaSource`).
      *
      * The scan is a `suspend` operation;
      * the caller (the background coroutine
      * started in [start]) awaits the
      * result.
      */
-    private suspend fun triggerScan(change: MediaStoreChange) {
+    @VisibleForTesting
+    internal suspend fun triggerScan(
+        change: MediaStoreChange,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
         scanState.value = ScanState.Scanning
         try {
-            val source = ContentResolverMediaSource(
-                context = context,
-            )
+            // PHASE 118 — use the injected provider
+            // (the production provider returns a fresh
+            // `ContentResolverMediaSource`; tests inject
+            // a stub provider that returns an in-memory
+            // `MediaSource`).
+            val source = mediaSourceProvider()
             val result = indexer.scan(
                 source = source,
-                nowMs = System.currentTimeMillis(),
+                nowMs = nowMs,
             )
+            // PHASE 118 — publish the result so
+            // the UI can show a "X new items"
+            // badge on MEDIA VAULT + AUDIO HUB.
+            _lastResult.value = result
             scanState.value = ScanState.Idle
         } catch (e: Exception) {
             scanState.value = ScanState.Error(

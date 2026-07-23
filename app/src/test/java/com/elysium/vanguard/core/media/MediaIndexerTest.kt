@@ -407,68 +407,14 @@ class MediaIndexerTest {
  * machinery; the fake is the canonical
  * test seam for the indexer's diff
  * algorithm).
+ *
+ * PHASE 118 — the `FakeMediaIndexDao` was
+ * extracted to the shared
+ * `MediaTestFixtures.kt` so the
+ * `MediaStoreObserverTest` could share it
+ * (the test class is in the same package
+ * as this one; a duplicate
+ * `private class FakeMediaIndexDao` in
+ * two files of the same package is a
+ * compile error in Kotlin).
  */
-private class FakeMediaIndexDao : MediaIndexDao {
-
-    private val rows: MutableList<MediaIndexEntity> =
-        CopyOnWriteArrayList()
-    private val countFlow: MutableStateFlow<Int> =
-        MutableStateFlow(0)
-
-    override suspend fun upsert(entity: MediaIndexEntity) {
-        val index = rows.indexOfFirst { it.mediaId == entity.mediaId }
-        if (index >= 0) {
-            rows[index] = entity
-        } else {
-            rows.add(entity)
-        }
-        countFlow.value = rows.size
-    }
-
-    override suspend fun update(entity: MediaIndexEntity) {
-        val index = rows.indexOfFirst { it.mediaId == entity.mediaId }
-        if (index >= 0) {
-            rows[index] = entity
-            countFlow.value = rows.size
-        }
-    }
-
-    override fun observeAll(): Flow<List<MediaIndexEntity>> =
-        countFlow.map { rows.toList() }
-
-    override suspend fun listAll(): List<MediaIndexEntity> =
-        rows.toList()
-
-    override suspend fun getById(mediaId: Long): MediaIndexEntity? =
-        rows.firstOrNull { it.mediaId == mediaId }
-
-    override suspend fun getByUri(uri: String): MediaIndexEntity? =
-        rows.firstOrNull { it.uri == uri }
-
-    override suspend fun listByType(mediaType: String): List<MediaIndexEntity> =
-        rows.filter { it.mediaType == mediaType }
-
-    override suspend fun listByRelativePath(relativePath: String): List<MediaIndexEntity> =
-        rows.filter { it.relativePath == relativePath }
-
-    override fun observeCount(): Flow<Int> = countFlow
-
-    override suspend fun count(): Int = rows.size
-
-    override suspend fun deleteById(mediaId: Long) {
-        rows.removeAll { it.mediaId == mediaId }
-        countFlow.value = rows.size
-    }
-
-    override suspend fun deleteStale(thresholdMs: Long): Int {
-        val toRemove = rows.filter { it.lastSeenAtMs < thresholdMs }
-        rows.removeAll(toRemove.toSet())
-        countFlow.value = rows.size
-        return toRemove.size
-    }
-
-    override suspend fun clear() {
-        rows.clear()
-        countFlow.value = 0
-    }
-}

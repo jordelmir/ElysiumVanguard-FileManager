@@ -60,6 +60,8 @@ import com.elysium.vanguard.ui.theme.premiumGlass
 import com.elysium.vanguard.ui.theme.SectionColorManager
 import com.elysium.vanguard.ui.components.ColorCustomizerIcon
 import com.elysium.vanguard.ui.components.ColorSelectionDialog
+import com.elysium.vanguard.features.media.MediaScanBadgeViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import kotlin.math.roundToInt
 
 @Composable
@@ -81,6 +83,17 @@ fun DashboardScreen(
     var showColorDialog by remember { mutableStateOf(false) }
     val accentColor = SectionColorManager.dashboardAccent
     val adaptive = LocalAdaptiveMetrics.current
+
+    // PHASE 118 — the "X new items" badge ViewModel. The VM
+    // projects the [MediaStoreObserver.lastResult] flow into
+    // two counts: new IMAGE/VIDEO items (drives the MEDIA
+    // VAULT badge) and new AUDIO items (drives the AUDIO HUB
+    // badge). The observer is auto-started at app boot in
+    // [TitanApp.onCreate], so the badge is live as soon as
+    // the dashboard composes.
+    val badgeViewModel: MediaScanBadgeViewModel = hiltViewModel()
+    val newMediaItemCount by badgeViewModel.newMediaItemCount.collectAsState()
+    val newAudioItemCount by badgeViewModel.newAudioItemCount.collectAsState()
 
     // PHASE 10.9 — Global theme. Read the 4 brand colors once at
     // composition time. Used to drive every card/tile/border in
@@ -104,9 +117,20 @@ fun DashboardScreen(
         PortalItem("FILE SYSTEM", "MANAGE · COMPRESS · EXPLORE", Icons.Default.Storage, gPrimary, onNavigateToStorage,
             moduleSurface(gPrimary)),
         PortalItem("MEDIA VAULT", "PHOTOS · VIDEOS · ALBUMS", Icons.Default.Image, gSecondary, onNavigateToGallery,
-            moduleSurface(gSecondary)),
+            moduleSurface(gSecondary),
+            // PHASE 118 — the "X new items" badge. The
+            // count comes from the [MediaStoreObserver]
+            // via [MediaScanBadgeViewModel]. When the
+            // observer's latest scan found new IMAGE or
+            // VIDEO items, the badge appears in the
+            // top-right corner of the card; otherwise
+            // the corner is blank.
+            badgeCount = newMediaItemCount.takeIf { it > 0 }),
         PortalItem("AUDIO HUB", "MUSIC · PLAYLISTS · BASS", Icons.Default.MusicNote, gTertiary, onNavigateToMusic,
-            moduleSurface(gTertiary)),
+            moduleSurface(gTertiary),
+            // PHASE 118 — same pattern as MEDIA VAULT,
+            // but for AUDIO.
+            badgeCount = newAudioItemCount.takeIf { it > 0 }),
         // PHASE 9.6.2 — Sovereign Runtime catalog now opens a
         // dedicated screen that lets the user pick which distro to
         // install. The Terminal tile stays for one-tap access to the
@@ -374,7 +398,8 @@ fun DashboardScreen(
                     icon = item.icon,
                     neonColor = item.neonColor,
                     gradientBg = item.gradientBg,
-                    onClick = item.onClick
+                    onClick = item.onClick,
+                    badgeCount = item.badgeCount,
                 )
             }
 
@@ -408,7 +433,16 @@ private data class PortalItem(
     val icon: ImageVector,
     val neonColor: Color,
     val onClick: () -> Unit,
-    val gradientBg: Brush
+    val gradientBg: Brush,
+    /**
+     * PHASE 118 — the "X new items" badge count.
+     * `null` means "no badge" (no new items).
+     * Non-null means "show a badge with this
+     * count" in the top-right corner of the
+     * card. The count comes from
+     * [com.elysium.vanguard.features.media.MediaScanBadgeViewModel].
+     */
+    val badgeCount: Int? = null,
 )
 
 /**
@@ -482,7 +516,15 @@ private fun PortalCard(
     neonColor: Color,
     gradientBg: Brush,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    /**
+     * PHASE 118 — the "X new items" badge count.
+     * When non-null and > 0, a small neon-bordered
+     * pill with the count sits in the top-right
+     * corner of the card (above the orbital icon).
+     * The pill pulses softly to draw the eye.
+     */
+    badgeCount: Int? = null,
 ) {
     val adaptive = LocalAdaptiveMetrics.current
     // PHASE 10.10 — The clickable is on the INNER Box (not the
@@ -509,6 +551,21 @@ private fun PortalCard(
                 .background(gradientBg)
                 .clickable { onClick() }
         ) {
+            // PHASE 118 — the "X new items" badge. Anchored
+            // top-end; the pill is a small neon-bordered circle
+            // with the count inside. The pulse alpha comes
+            // from an `infiniteRepeatable` so the badge
+            // "breathes" when there are pending items.
+            badgeCount?.takeIf { it > 0 }?.let { count ->
+                NewItemsBadge(
+                    count = count,
+                    color = neonColor,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                )
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -568,6 +625,55 @@ private fun PortalCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * PHASE 118 — the "X new items" badge. A small
+ * neon-bordered circle (with the count inside) that
+ * sits in the top-right corner of a portal card.
+ * The badge uses an `infiniteRepeatable` to pulse
+ * softly (the alpha goes from 0.6 to 1.0) so the
+ * user perceives the new items as "fresh".
+ *
+ * The badge caps the display at "99+" for counts
+ * above 99 (the canonical "many new items" sentinel;
+ * avoids breaking the card layout when the user
+ * copies a 5,000-photo album at once).
+ */
+@Composable
+private fun NewItemsBadge(
+    count: Int,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val infinite = rememberInfiniteTransition(label = "new_items_badge")
+    val pulse by infinite.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            tween(1400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "pulse",
+    )
+    val displayText = if (count > 99) "99+" else count.toString()
+    Box(
+        modifier = modifier
+            .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.18f * pulse))
+            .border(1.2.dp, color.copy(alpha = 0.95f * pulse), CircleShape)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = displayText,
+            color = Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace,
+        )
     }
 }
 
