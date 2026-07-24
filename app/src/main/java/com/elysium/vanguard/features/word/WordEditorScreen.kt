@@ -263,7 +263,15 @@ fun WordEditorScreen(
         SaveAsDialog(
             initialTitle = doc.title,
             onDismiss = { saveAsOpen = false },
-            onConfirm = { newPath ->
+            onConfirm = { newPath, newTitle ->
+                // PHASE 123 — push the title into the
+                // document BEFORE saving. The dialog
+                // used to only set a local `title` state
+                // (it never reached the ViewModel), so
+                // the saved JSON always had `title:
+                // "Untitled"`. Now we set the title first,
+                // then save.
+                viewModel.setTitle(newTitle)
                 viewModel.saveAs(newPath)
                 saveAsOpen = false
             }
@@ -1084,8 +1092,15 @@ private fun AuthorAndStatusBar(
 private fun SaveAsDialog(
     initialTitle: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (path: String, title: String) -> Unit
 ) {
+    // PHASE 123 — separate the file name (no
+    // extension) from the document title. The user
+    // can have a different display title from the
+    // filename (e.g. title "Annual Report",
+    // filename "annual_report_2026"). Both are
+    // tracked + persisted.
+    var filename by remember { mutableStateOf(initialTitle) }
     var title by remember { mutableStateOf(initialTitle) }
     var format by remember { mutableStateOf("elysium.word") }
     AlertDialog(
@@ -1094,9 +1109,17 @@ private fun SaveAsDialog(
         text = {
             Column {
                 OutlinedTextField(
+                    value = filename,
+                    onValueChange = { filename = it },
+                    label = { Text("File name (no extension)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("File name") },
+                    label = { Text("Document title") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1110,9 +1133,17 @@ private fun SaveAsDialog(
             }
         },
         confirmButton = {
+            // PHASE 123 — trim the filename to avoid
+            // the "test .elysium.word" leading-space
+            // bug (user types "test " with a trailing
+            // space, we get "test .elysium.word").
+            // We also fall back to "Untitled" if the
+            // user submits an empty name.
             TextButton(onClick = {
                 val ext = if (format == "docx") "docx" else "elysium.word"
-                onConfirm("${title}.${ext}")
+                val safeName = filename.trim().ifBlank { "Untitled" }
+                val safeTitle = title.trim().ifBlank { safeName }
+                onConfirm("${safeName}.${ext}", safeTitle)
             }) { Text("Save") }
         },
         dismissButton = {

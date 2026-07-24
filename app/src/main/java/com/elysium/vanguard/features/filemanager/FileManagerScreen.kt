@@ -187,6 +187,18 @@ fun FileManagerScreen(
 
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    // PHASE 123 — custom storage chips state. The
+    // user can add their own chip (label + path)
+    // and it shows up next to the built-in ones.
+    // Persisted to SharedPreferences so the chips
+    // survive app restarts.
+    var customChips by remember {
+        mutableStateOf(loadCustomStorageChips(context))
+    }
+    var showAddStorageDialog by remember { mutableStateOf(false) }
+    var addStorageLabel by remember { mutableStateOf("") }
+    var addStoragePath by remember { mutableStateOf("") }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -511,8 +523,19 @@ fun FileManagerScreen(
                     }
 
                     StorageCategoryRow(
-                        onAddClick = { /* TODO */ },
-                        onPathClick = { viewModel.loadDirectory(it) }
+                        onAddClick = {
+                            showAddStorageDialog = true
+                            addStorageLabel = ""
+                            addStoragePath = ""
+                        },
+                        onPathClick = { viewModel.loadDirectory(it) },
+                        customChips = customChips,
+                        onRemoveCustomChip = { idx ->
+                            customChips = customChips.toMutableList().also {
+                                it.removeAt(idx)
+                            }
+                            saveCustomStorageChips(context, customChips)
+                        },
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -720,6 +743,35 @@ fun FileManagerScreen(
                     sectionName = "FILEMANAGER",
                     onColorSelected = { SectionColorManager.fileAccent = it },
                     onDismiss = { showColorDialog = false }
+                )
+            }
+
+            // PHASE 123 — Add storage chip dialog.
+            // The user types a label + path; we add a
+            // new CustomStorageChip to the list and
+            // persist. The dialog uses platform
+            // AlertDialog (not AppCompat) because the
+            // host activity is themed Theme.Material.*
+            // (see agent memory gotcha).
+            if (showAddStorageDialog) {
+                AddStorageChipDialog(
+                    label = addStorageLabel,
+                    path = addStoragePath,
+                    onLabelChange = { addStorageLabel = it },
+                    onPathChange = { addStoragePath = it },
+                    onConfirm = {
+                        if (addStorageLabel.isNotBlank() && addStoragePath.isNotBlank()) {
+                            customChips = customChips + CustomStorageChip(
+                                label = addStorageLabel.trim(),
+                                path = addStoragePath.trim(),
+                            )
+                            saveCustomStorageChips(context, customChips)
+                            showAddStorageDialog = false
+                            addStorageLabel = ""
+                            addStoragePath = ""
+                        }
+                    },
+                    onDismiss = { showAddStorageDialog = false },
                 )
             }
 
@@ -1208,7 +1260,9 @@ private fun NeuralSearchBar(
 @Composable
 private fun StorageCategoryRow(
     onAddClick: () -> Unit,
-    onPathClick: (String) -> Unit
+    onPathClick: (String) -> Unit,
+    customChips: List<CustomStorageChip> = emptyList(),
+    onRemoveCustomChip: (Int) -> Unit = {},
 ) {
     Row(
         modifier = Modifier
@@ -1236,31 +1290,129 @@ private fun StorageCategoryRow(
         ) {
             Icon(Icons.Default.Add, contentDescription = null, tint = GlobalColors.primary)
         }
-        
+
         StorageChip(
             title = "Internal Storage",
             icon = Icons.Default.SdStorage,
             onClick = { onPathClick("/storage/emulated/0") }
         )
-        
+
         StorageChip(
             title = "Downloads",
             icon = Icons.Default.Download,
             onClick = { onPathClick("/storage/emulated/0/Download") }
         )
-        
+
         StorageChip(
             title = "Termux",
             icon = Icons.Default.Terminal,
             onClick = { onPathClick("/data/data/com.termux/files/home") }
         )
-        
+
         StorageChip(
             title = "WhatsApp",
             icon = Icons.Default.Share, // Using Share icon as generic chat/social icon
             onClick = { onPathClick("/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media") }
         )
+
+        // PHASE 123 — render the user's custom
+        // chips. Each chip has a small "x" that
+        // removes it (long-press).
+        customChips.forEachIndexed { index, chip ->
+            CustomStorageChipView(
+                chip = chip,
+                onClick = { onPathClick(chip.path) },
+                onLongClick = { onRemoveCustomChip(index) },
+            )
+        }
     }
+}
+
+/**
+ * PHASE 123 — a user-added storage chip.
+ * Persisted to SharedPreferences; the format is
+ * a single string `"<label>|<path>"` per chip,
+ * joined by `\n`. Load/save via the file-level
+ * helpers below.
+ */
+data class CustomStorageChip(
+    val label: String,
+    val path: String,
+)
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun CustomStorageChipView(
+    chip: CustomStorageChip,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    SovereignCard(
+        modifier = Modifier
+            .height(48.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        cornerRadius = 12.dp,
+        glassAlpha = 0.0f,
+        glowRadius = 18.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(GlobalColors.primary.copy(alpha = 0.16f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NeonGlowIcon(
+                    icon = Icons.Default.Folder,
+                    color = GlobalColors.primary,
+                    size = 18.dp,
+                    glowRadius = 8.dp,
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = chip.label,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+// ─── Custom chip persistence ────────────────────────────
+
+private const val PREFS_CUSTOM_CHIPS = "custom_storage_chips"
+private const val KEY_CUSTOM_CHIPS = "chips_v1"
+
+private fun loadCustomStorageChips(context: android.content.Context): List<CustomStorageChip> {
+    val prefs = context.getSharedPreferences(PREFS_CUSTOM_CHIPS, android.content.Context.MODE_PRIVATE)
+    val raw = prefs.getString(KEY_CUSTOM_CHIPS, "") ?: ""
+    if (raw.isBlank()) return emptyList()
+    return raw.split("\n").mapNotNull { line ->
+        val idx = line.indexOf("|")
+        if (idx <= 0 || idx >= line.length - 1) null
+        else CustomStorageChip(
+            label = line.substring(0, idx),
+            path = line.substring(idx + 1),
+        )
+    }
+}
+
+private fun saveCustomStorageChips(
+    context: android.content.Context,
+    chips: List<CustomStorageChip>,
+) {
+    val raw = chips.joinToString("\n") { "${it.label}|${it.path}" }
+    context.getSharedPreferences(PREFS_CUSTOM_CHIPS, android.content.Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_CUSTOM_CHIPS, raw)
+        .apply()
 }
 
 @Composable
@@ -2176,4 +2328,87 @@ fun GrantFullAccessBanner(
             )
         }
     }
+}
+
+/**
+ * PHASE 123 — dialog for adding a custom storage
+ * chip. Uses platform [android.app.AlertDialog]
+ * (not AppCompat) because the host activity is
+ * themed `Theme.Material.*` — see agent memory
+ * gotcha about AppCompat theme requirements.
+ */
+@Composable
+private fun AddStorageChipDialog(
+    label: String,
+    path: String,
+    onLabelChange: (String) -> Unit,
+    onPathChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Storage Chip", color = Color.White) },
+        text = {
+            Column {
+                Text(
+                    "Label",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                androidx.compose.material3.TextField(
+                    value = label,
+                    onValueChange = onLabelChange,
+                    placeholder = { Text("e.g. Termux Home", color = Color.White.copy(alpha = 0.4f)) },
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = GlobalColors.primary,
+                        unfocusedIndicatorColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = GlobalColors.primary,
+                    ),
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Path",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                androidx.compose.material3.TextField(
+                    value = path,
+                    onValueChange = onPathChange,
+                    placeholder = { Text("e.g. /sdcard/Download", color = Color.White.copy(alpha = 0.4f)) },
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = GlobalColors.primary,
+                        unfocusedIndicatorColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = GlobalColors.primary,
+                    ),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onConfirm,
+                enabled = label.isNotBlank() && path.isNotBlank(),
+            ) {
+                Text("ADD", color = GlobalColors.primary, fontFamily = FontFamily.Monospace)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+            }
+        },
+        containerColor = TitanColors.CarbonGray,
+    )
 }

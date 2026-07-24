@@ -93,7 +93,20 @@ fun AlbumDetailScreen(
                         MediaThumbnail(
                             media = media,
                             onClick = { onMediaClick(media) },
-                            onOptionClick = { /* TODO: Context Menu */ }
+                            onOptionClick = { action ->
+                                // Album detail shares the same
+                                // action vocabulary as the
+                                // main GalleryScreen grid. The
+                                // GalleryViewModel already
+                                // implements every action.
+                                when (action) {
+                                    "FAVORITE" -> viewModel.toggleFavorite(media.id)
+                                    "DELETE" -> viewModel.deleteMedia(media)
+                                    "SHARE" -> viewModel.shareMedia(media)
+                                    "EDIT" -> viewModel.editMedia(media)
+                                    "WALLPAPER" -> viewModel.setWallpaper(media)
+                                }
+                            },
                         )
                     }
                 }

@@ -160,6 +160,10 @@ class SheetEditorViewModel @Inject constructor(
         }
     }
 
+    fun setTitle(title: String) {
+        _workbook.value = _workbook.value.copy(title = title)
+    }
+
     fun dismissError() {
         _lastError.value = null
     }

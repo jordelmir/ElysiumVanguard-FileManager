@@ -1003,6 +1003,8 @@ private fun LiveDesktopWorkspace(
     onBack: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val rootView = androidx.compose.ui.platform.LocalView.current
     val pulse by rememberInfiniteTransition(label = "live").animateFloat(
         initialValue = 0.5f,
         targetValue = 1.0f,
@@ -1133,7 +1135,26 @@ private fun LiveDesktopWorkspace(
                     icon = Icons.Default.ScreenshotMonitor,
                     tint = Color.White,
                     contentDescription = "Capture screenshot",
-                    onClick = { /* TODO: Phase 75 — capture host-side screenshot */ },
+                    onClick = {
+                        // Phase 123 — capture the visible
+                        // desktop surface as a bitmap and
+                        // save it to MediaStore. The proper
+                        // VNC framebuffer capture is a
+                        // future phase; for now this
+                        // captures what's actually on
+                        // screen, which is what the user
+                        // sees anyway.
+                        val width = rootView.width.coerceAtLeast(1)
+                        val height = rootView.height.coerceAtLeast(1)
+                        val bmp = android.graphics.Bitmap.createBitmap(
+                            width,
+                            height,
+                            android.graphics.Bitmap.Config.ARGB_8888,
+                        )
+                        val canvas = android.graphics.Canvas(bmp)
+                        rootView.draw(canvas)
+                        captureScreenToMediaStore(context, bmp)
+                    },
                 )
                 ToolbarIconButton(
                     icon = Icons.Default.PowerSettingsNew,
@@ -1331,3 +1352,67 @@ private fun iconFor(app: LinuxAppEntry): Pair<ImageVector, Color> = when {
 private fun Modifier.clickableSafe(enabled: Boolean, onClick: () -> Unit): Modifier =
     if (enabled) this.clickable(onClick = onClick)
     else this
+
+// ─── Screenshot capture helper ────────────────────────────
+//
+// PHASE 123 — wires the ToolbarIconButton "Capture
+// screenshot" action that was a Phase 75 TODO. The
+// proper VNC framebuffer capture is a future phase;
+// for now this captures the Android surface the user
+// is actually looking at (the LiveDesktopWorkspace)
+// and saves it to MediaStore (Pictures/Elysium).
+//
+// Returns the MediaStore URI (or null on failure).
+// The caller can show a Snackbar with the path on
+// success; we silently swallow on failure since
+// screenshot capture is best-effort.
+
+private fun captureScreenToMediaStore(
+    context: android.content.Context,
+    bitmap: android.graphics.Bitmap,
+): android.net.Uri? {
+    val timestamp = java.text.SimpleDateFormat(
+        "yyyyMMdd_HHmmss",
+        java.util.Locale.US,
+    ).format(java.util.Date())
+    val filename = "ElysiumLinuxDesktop_$timestamp.png"
+    val resolver = context.contentResolver
+    val collection = android.provider.MediaStore.Images.Media.getContentUri(
+        android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY,
+    )
+    val values = android.content.ContentValues().apply {
+        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, filename)
+        put(
+            android.provider.MediaStore.Images.Media.MIME_TYPE,
+            "image/png",
+        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            put(
+                android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                "Pictures/Elysium",
+            )
+            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+        }
+    }
+    val uri = resolver.insert(collection, values) ?: return null
+    return try {
+        resolver.openOutputStream(uri)?.use { os ->
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, os)
+        } ?: run {
+            resolver.delete(uri, null, null)
+            null
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        }
+        uri
+    } catch (_: Exception) {
+        try {
+            resolver.delete(uri, null, null)
+        } catch (_: Exception) {
+        }
+        null
+    }
+}

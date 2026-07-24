@@ -220,7 +220,13 @@ fun SheetEditorScreen(
         SaveAsDialog(
             initialTitle = workbook.title,
             onDismiss = { saveAsOpen = false },
-            onConfirm = { newPath ->
+            onConfirm = { newPath, newTitle ->
+                // PHASE 123 — push the title into the
+                // workbook BEFORE saving (same fix as
+                // Word: the dialog used to only set a
+                // local `title` state, the saved JSON
+                // always had `title: "Untitled"`).
+                viewModel.setTitle(newTitle)
                 viewModel.saveAs(newPath)
                 saveAsOpen = false
             }
@@ -788,8 +794,12 @@ private fun CellView(
 private fun SaveAsDialog(
     initialTitle: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (path: String, title: String) -> Unit
 ) {
+    // PHASE 123 — separate the file name (no
+    // extension) from the document title. Mirrors
+    // the Word editor's SaveAsDialog fix.
+    var filename by remember { mutableStateOf(initialTitle) }
     var title by remember { mutableStateOf(initialTitle) }
     var format by remember { mutableStateOf("elysium.sheet") }
     AlertDialog(
@@ -798,9 +808,17 @@ private fun SaveAsDialog(
         text = {
             Column {
                 OutlinedTextField(
+                    value = filename,
+                    onValueChange = { filename = it },
+                    label = { Text("File name (no extension)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("File name") },
+                    label = { Text("Workbook title") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -812,9 +830,15 @@ private fun SaveAsDialog(
             }
         },
         confirmButton = {
+            // PHASE 123 — trim the filename to avoid
+            // the "test .elysium.sheet" leading-space
+            // bug, and fall back to "Untitled" if the
+            // user submits an empty name.
             TextButton(onClick = {
                 val ext = if (format == "xlsx") "xlsx" else "elysium.sheet"
-                onConfirm("${title}.${ext}")
+                val safeName = filename.trim().ifBlank { "Untitled" }
+                val safeTitle = title.trim().ifBlank { safeName }
+                onConfirm("${safeName}.${ext}", safeTitle)
             }) { Text("Save") }
         },
         dismissButton = {
