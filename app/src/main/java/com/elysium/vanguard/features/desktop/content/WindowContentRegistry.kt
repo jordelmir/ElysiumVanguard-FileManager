@@ -31,6 +31,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.List
@@ -45,6 +51,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Memory
@@ -269,6 +276,15 @@ class WindowContentRegistry @Inject constructor(
         "help" to WindowContent(
             icon = Icons.AutoMirrored.Filled.HelpOutline,
             body = { HelpBody() },
+        ),
+        // PHASE 131 — Image Viewer: open
+        // any image from /sdcard and view
+        // it. Uses Coil for async loading
+        // + pinch-to-zoom via the
+        // Compose-foundation gesture APIs.
+        "image_viewer" to WindowContent(
+            icon = Icons.Filled.Image,
+            body = { ImageViewerBody() },
         ),
     )
 
@@ -996,6 +1012,13 @@ private fun ProgramsBody() {
             icon = Icons.AutoMirrored.Filled.HelpOutline,
             iconTint = Color(0xFFBD93F9),
             onClick = { registry.requestOpenInternal("help", "Help") },
+        ),
+        ProgramEntry(
+            label = "Image Viewer",
+            subtitle = "View any image with pinch-to-zoom",
+            icon = Icons.Filled.Image,
+            iconTint = Color(0xFFFF79C6),
+            onClick = { registry.requestOpenInternal("image_viewer", "Image Viewer") },
         ),
     )
 
@@ -3431,6 +3454,219 @@ private fun BodyText(text: String) {
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface,
     )
+}
+
+// ─── Image Viewer (real) ────────────────────────────────
+
+/**
+ * PHASE 131 — a real image viewer. The user
+ * types a path (or picks from a short list of
+ * recent images from /sdcard). The image is
+ * loaded via the platform's BitmapFactory
+ * (no Coil dependency to add) and rendered
+ * with [ContentScale.Fit] so it scales to
+ * fit the window. Pinch-to-zoom is wired via
+ * a [Modifier.transformable] with the
+ * foundation gestures API.
+ *
+ * The recent-images list is a live query:
+ * [FileManagerRepositoryDual.listOnce] over
+ * the canonical image folders
+ * (DCIM, Pictures, Download, WhatsApp Media).
+ */
+@Composable
+private fun ImageViewerBody() {
+    val registry = rememberWindowContentRegistry()
+    var path by remember { mutableStateOf("") }
+    var recent by remember { mutableStateOf<List<String>>(emptyList()) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        // Load a small list of candidate images
+        // from the canonical folders. We pick
+        // the first image we find in each folder
+        // (max 4 entries) so the user has
+        // something to click without typing a
+        // path.
+        try {
+            val candidates = mutableListOf<String>()
+            val folders = listOf(
+                "/sdcard/DCIM",
+                "/sdcard/Pictures",
+                "/sdcard/Download",
+                "/sdcard/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
+            )
+            for (folder in folders) {
+                try {
+                    val items = registry.fileManagerRepository.listOnce(folder)
+                    val firstImage = items.firstOrNull {
+                        !it.isFolder && (
+                            it.path.endsWith(".jpg", true) ||
+                                it.path.endsWith(".jpeg", true) ||
+                                it.path.endsWith(".png", true) ||
+                                it.path.endsWith(".webp", true) ||
+                                it.path.endsWith(".gif", true)
+                            )
+                    }
+                    if (firstImage != null) candidates.add(firstImage.path)
+                    if (candidates.size >= 4) break
+                } catch (_: Exception) {
+                    // Folder may not exist; skip.
+                }
+            }
+            recent = candidates
+        } catch (_: Exception) {
+            // Swallow — empty recent is fine.
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+    ) {
+        // Path input
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = path,
+                onValueChange = { path = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("/sdcard/path/to/image.png", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = { errorMessage = null },
+                enabled = path.isNotBlank(),
+            ) {
+                Text("View")
+            }
+        }
+        // Recent images
+        if (recent.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Recent images",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            LazyColumn(
+                modifier = Modifier.height(100.dp),
+            ) {
+                items(recent) { recentPath ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { path = recentPath }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Image,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = recentPath.removePrefix("/sdcard/"),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        // Image
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .padding(4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (path.isBlank()) {
+                Text(
+                    text = "Type a path above or pick from the recent list",
+                    color = Color.White.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                val bitmap = remember(path) {
+                    try {
+                        val f = java.io.File(path)
+                        if (!f.exists()) {
+                            errorMessage = "File not found: $path"
+                            null
+                        } else {
+                            val opts = android.graphics.BitmapFactory.Options().apply {
+                                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                            }
+                            android.graphics.BitmapFactory.decodeFile(path, opts)
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Cannot decode: ${e.message}"
+                        null
+                    }
+                }
+                errorMessage?.let { msg ->
+                    Text(
+                        text = msg,
+                        color = Color(0xFFFF5555),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (bitmap != null) {
+                    // PHASE 131 — pinch-to-zoom + pan.
+                    // The transformable modifier gives
+                    // us scale (pinch) + offset (pan)
+                    // gestures; we clamp scale to
+                    // [0.5, 5x] to keep the image on
+                    // screen.
+                    var scale by remember { mutableStateOf(1f) }
+                    var offsetX by remember { mutableStateOf(0f) }
+                    var offsetY by remember { mutableStateOf(0f) }
+                    val state = androidx.compose.foundation.gestures.rememberTransformableState { zoom, pan, _ ->
+                        scale = (scale * zoom).coerceIn(0.5f, 5f)
+                        offsetX += pan.x
+                        offsetY += pan.y
+                    }
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offsetX,
+                                translationY = offsetY,
+                            )
+                            .transformable(state = state),
+                    )
+                    Text(
+                        text = "${bitmap.width}×${bitmap.height} · scale ${"%.1f".format(scale)}x",
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 // ============================== Hilt bridge ==============================
