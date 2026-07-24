@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.SpeakerNotes
 import androidx.compose.material.icons.filled.Add
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.RocketLaunch
@@ -258,6 +260,15 @@ class WindowContentRegistry @Inject constructor(
         "tasks" to WindowContent(
             icon = Icons.AutoMirrored.Filled.List,
             body = { TaskManagerBody() },
+        ),
+        // PHASE 130 — Help: a simple in-app
+        // help body that shows the dock
+        // reference + keyboard shortcuts +
+        // the about info inline. No browser
+        // needed.
+        "help" to WindowContent(
+            icon = Icons.AutoMirrored.Filled.HelpOutline,
+            body = { HelpBody() },
         ),
     )
 
@@ -978,6 +989,13 @@ private fun ProgramsBody() {
             icon = Icons.AutoMirrored.Filled.List,
             iconTint = Color(0xFFFF5555),
             onClick = { registry.requestOpenInternal("tasks", "Task Manager") },
+        ),
+        ProgramEntry(
+            label = "Help",
+            subtitle = "Quick reference + keyboard shortcuts",
+            icon = Icons.AutoMirrored.Filled.HelpOutline,
+            iconTint = Color(0xFFBD93F9),
+            onClick = { registry.requestOpenInternal("help", "Help") },
         ),
     )
 
@@ -3299,6 +3317,120 @@ private fun formatKb(kb: Long): String = when {
     kb < 1024 -> "${kb}K"
     kb < 1024 * 1024 -> "%.1fM".format(kb / 1024.0)
     else -> "%.1fG".format(kb / (1024.0 * 1024.0))
+}
+
+// ─── Help body ─────────────────────────────────────────
+
+/**
+ * PHASE 130 — a real in-app help body. Shows
+ * the dock + Programs catalog, the Terminal
+ * command list (cross-referenced with the
+ * Terminal body's help output), and a
+ * "Getting started" section. The body is
+ * entirely self-contained — no web fetches,
+ * no Settings lookups — so it works even if
+ * the user is offline.
+ */
+@Composable
+private fun HelpBody() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "Elysium Vanguard — Quick Help",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = "v1.0.0-TITAN · com.elysium.vanguard",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        SectionHeader("Getting Started")
+        BodyText(
+            "• Tap a card on the dashboard to open its feature.\n" +
+                "• Tap the DESKTOP card for the proprietary Windows desktop.\n" +
+                "• In the desktop, tap a dock icon at the bottom to open a window.\n" +
+                "• Drag any window's title bar to move it.\n" +
+                "• Tap the minimize/maximize/close buttons on the title bar.\n" +
+                "• Open multiple windows — each one is a separate task.\n" +
+                "• Use Programs (Start menu) to find every app.",
+        )
+
+        SectionHeader("Dock Apps")
+        BodyText(
+            "• This PC — proprietary drives C: / D: / E: / Z:\n" +
+                "• Files — real Windows Explorer (tap a folder to enter; breadcrumb at the top)\n" +
+                "• Terminal — client-side shell with 22 built-in commands. Type 'help' to list them. ↑/↓ buttons recall history.\n" +
+                "• Programs — Start menu: Elysium System (15 apps) + User Apps (every installed app on the device)\n" +
+                "• Chrome — opens the system browser (or any installed browser via the URL fallback)\n" +
+                "• Settings — live storage/memory/battery + theme picker (Dark / Light / System)\n" +
+                "• Notes — multi-note editor with 2-pane layout. Auto-save every 600ms. Search bar filters by title + body.",
+        )
+
+        SectionHeader("Start Menu (Programs)")
+        BodyText(
+            "The Programs window lists every Elysium app:\n" +
+                "• Files · Terminal · This PC · Settings · Notes\n" +
+                "• Chrome · Codex · Antigravity · OpenCode · Mavis (external launchers)\n" +
+                "• Calculator · System Info · Browser · Clock · Task Manager",
+        )
+
+        SectionHeader("Terminal Commands")
+        BodyText(
+            "Navigation: pwd, ls, cd, tree\n" +
+                "File ops: cat, mkdir, touch, rm, stat, open\n" +
+                "Echo/info: echo, whoami, uname, date, uptime, version, drives\n" +
+                "System: df, free, battery\n" +
+                "UI: clear (wipes screen), help (this list)",
+        )
+
+        SectionHeader("Theme Switching")
+        BodyText(
+            "Open Settings → Theme. The 3 chips (Sovereign Dark / Sovereign Light / System) " +
+                "switch the whole UI. Light inverts the surface; System follows the OS setting. " +
+                "The choice persists across app restarts.",
+        )
+
+        SectionHeader("Files & .exe")
+        BodyText(
+            "Tap any file in the Files window to open it with the system's default app. " +
+                "PDFs, images, videos, APKs, zips all work. .exe files are routed to the " +
+                "application/x-msdownload MIME type — install a Wine-compatible app like " +
+                "Winlator to actually run them.",
+        )
+
+        SectionHeader("Task Manager")
+        BodyText(
+            "Lists every running process with PID + name + RSS. Refreshes every 3s. " +
+                "Tap a row to kill (system processes are protected; the kill is silently " +
+                "rejected and the process remains in the list).",
+        )
+
+        SectionHeader("About")
+        BodyText(
+            "Elysium Vanguard v1.0.0-TITAN\n" +
+                "Application ID: com.elysium.vanguard\n" +
+                "Android: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})\n" +
+                "Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}\n" +
+                "Stack: Hilt + Compose + Material 3 + Room + Tink + Apache MINA SSHD + ML Kit + Media 3",
+        )
+    }
+}
+
+@Composable
+private fun BodyText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
 }
 
 // ============================== Hilt bridge ==============================
