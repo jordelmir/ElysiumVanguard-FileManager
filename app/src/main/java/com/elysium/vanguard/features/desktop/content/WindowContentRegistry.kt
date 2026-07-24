@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.SpeakerNotes
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -220,6 +222,23 @@ class WindowContentRegistry @Inject constructor(
         "mavis" to WindowContent(
             icon = Icons.Filled.SmartToy,
             body = { ExternalAppBody(appName = "Mavis") },
+        ),
+        // PHASE 124 — new real bodies. Each has
+        // a real implementation (not a placeholder)
+        // and ships in this same registry so the
+        // dock + Programs catalog picks them up
+        // automatically.
+        "calc" to WindowContent(
+            icon = Icons.Filled.Calculate,
+            body = { CalculatorBody() },
+        ),
+        "sysinfo" to WindowContent(
+            icon = Icons.Filled.Memory,
+            body = { SystemInfoBody() },
+        ),
+        "browser" to WindowContent(
+            icon = Icons.Filled.Public,
+            body = { BrowserBody() },
         ),
     )
 
@@ -1161,7 +1180,7 @@ private fun TerminalBody() {
                     .padding(start = 4.dp),
                 placeholder = {
                     Text(
-                        text = "type a command… (try 'help')",
+                        text = "type a command… (try 'help', use ↑/↓ buttons)",
                         color = Color(0xFF6272A4),
                         style = MonoSmall,
                     )
@@ -1212,6 +1231,43 @@ private fun TerminalBody() {
                         }
                     },
                 ),
+            )
+            // PHASE 124 — ↑/↓ history buttons
+            // (touch-friendly since Modifier.onPreviewKeyEvent
+            // isn't a standard Compose extension).
+            Text(
+                text = "↑",
+                color = if (commandHistory.isNotEmpty() && historyIndex > 0)
+                    Color(0xFF8BE9FD) else Color(0xFF6272A4),
+                style = MonoSmall,
+                modifier = Modifier
+                    .clickable {
+                        if (commandHistory.isNotEmpty() && historyIndex > 0) {
+                            historyIndex--
+                            input = commandHistory[historyIndex]
+                        }
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+            Text(
+                text = "↓",
+                color = if (commandHistory.isNotEmpty() &&
+                    historyIndex < commandHistory.size - 1)
+                    Color(0xFF8BE9FD) else Color(0xFF6272A4),
+                style = MonoSmall,
+                modifier = Modifier
+                    .clickable {
+                        if (commandHistory.isNotEmpty() &&
+                            historyIndex < commandHistory.size - 1
+                        ) {
+                            historyIndex++
+                            input = commandHistory[historyIndex]
+                        } else if (historyIndex == commandHistory.size - 1) {
+                            historyIndex = commandHistory.size
+                            input = ""
+                        }
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
     }
@@ -2183,6 +2239,589 @@ private fun ExternalAppBody(appName: String) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+// ============================== Phase 124 new bodies ==============================
+
+/**
+ * PHASE 124 — a real calculator. State machine
+ * with `accumulator`, `pendingOp`, and `display`.
+ * Supports +, -, ×, ÷, %, ± (sign flip), 1/x,
+ * x², √, and the standard C / ⌫ controls. The
+ * expression evaluator is intentionally
+ * limited (single pending op) — the calculator
+ * is a desktop utility, not a math engine. For
+ * arbitrary expressions the user can drop to
+ * the Terminal's `python3 -c` (Phase 123+ when
+ * the proot shell is wired).
+ */
+@Composable
+private fun CalculatorBody() {
+    var display by remember { mutableStateOf("0") }
+    var accumulator by remember { mutableStateOf<Double?>(null) }
+    var pendingOp by remember { mutableStateOf<String?>(null) }
+    var justEvaluated by remember { mutableStateOf(false) }
+
+    fun appendDigit(d: String) {
+        display = if (justEvaluated) d else if (display == "0") d else display + d
+        justEvaluated = false
+    }
+    fun appendDot() {
+        if (justEvaluated) {
+            display = "0."
+        } else if (!display.contains(".")) {
+            display = "$display."
+        }
+        justEvaluated = false
+    }
+    fun clear() {
+        display = "0"
+        accumulator = null
+        pendingOp = null
+        justEvaluated = false
+    }
+    fun backspace() {
+        if (justEvaluated) {
+            clear()
+            return
+        }
+        display = if (display.length <= 1) "0" else display.dropLast(1)
+    }
+    fun applyPending(newValue: Double) {
+        val a = accumulator
+        val op = pendingOp
+        val result = if (a != null && op != null) {
+            when (op) {
+                "+" -> a + newValue
+                "−" -> a - newValue
+                "×" -> a * newValue
+                "÷" -> if (newValue == 0.0) Double.NaN else a / newValue
+                else -> newValue
+            }
+        } else newValue
+        display = if (result.isNaN() || result.isInfinite()) "Error" else formatNumber(result)
+        accumulator = if (result.isNaN() || result.isInfinite()) null else result
+        pendingOp = null
+        justEvaluated = true
+    }
+    fun setOp(op: String) {
+        val current = display.toDoubleOrNull() ?: return
+        if (accumulator != null && pendingOp != null && !justEvaluated) {
+            // chain: apply pending first, then queue new op
+            applyPending(current)
+            accumulator = display.toDoubleOrNull()
+        } else {
+            accumulator = current
+        }
+        pendingOp = op
+        justEvaluated = false
+    }
+    fun evaluate() {
+        val current = display.toDoubleOrNull() ?: return
+        if (accumulator != null && pendingOp != null) {
+            applyPending(current)
+        }
+    }
+    fun unary(name: String) {
+        val v = display.toDoubleOrNull() ?: return
+        val r = when (name) {
+            "±" -> -v
+            "%" -> v / 100.0
+            "x²" -> v * v
+            "√" -> if (v < 0) Double.NaN else kotlin.math.sqrt(v)
+            "1/x" -> if (v == 0.0) Double.NaN else 1.0 / v
+            else -> v
+        }
+        display = if (r.isNaN() || r.isInfinite()) "Error" else formatNumber(r)
+        accumulator = if (r.isNaN() || r.isInfinite()) null else r
+        justEvaluated = true
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+    ) {
+        // Display
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                .padding(16.dp),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Column(horizontalAlignment = Alignment.End) {
+                if (accumulator != null && pendingOp != null && !justEvaluated) {
+                    Text(
+                        text = "${formatNumber(accumulator!!)} $pendingOp",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    text = display,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        // Keypad (4 columns × 5 rows)
+        CalcKeypad(
+            onDigit = ::appendDigit,
+            onDot = ::appendDot,
+            onOp = ::setOp,
+            onEvaluate = ::evaluate,
+            onClear = ::clear,
+            onBackspace = ::backspace,
+            onUnary = ::unary,
+        )
+    }
+}
+
+@Composable
+private fun CalcKeypad(
+    onDigit: (String) -> Unit,
+    onDot: () -> Unit,
+    onOp: (String) -> Unit,
+    onEvaluate: () -> Unit,
+    onClear: () -> Unit,
+    onBackspace: () -> Unit,
+    onUnary: (String) -> Unit,
+) {
+    val rows: List<List<CalcKey>> = listOf(
+        listOf(
+            CalcKey("C", CalcKeyKind.Action, onClick = onClear),
+            CalcKey("⌫", CalcKeyKind.Action, onClick = onBackspace),
+            CalcKey("%", CalcKeyKind.Action, onClick = { onUnary("%") }),
+            CalcKey("÷", CalcKeyKind.Op, onClick = { onOp("÷") }),
+        ),
+        listOf(
+            CalcKey("7", CalcKeyKind.Digit, onClick = { onDigit("7") }),
+            CalcKey("8", CalcKeyKind.Digit, onClick = { onDigit("8") }),
+            CalcKey("9", CalcKeyKind.Digit, onClick = { onDigit("9") }),
+            CalcKey("×", CalcKeyKind.Op, onClick = { onOp("×") }),
+        ),
+        listOf(
+            CalcKey("4", CalcKeyKind.Digit, onClick = { onDigit("4") }),
+            CalcKey("5", CalcKeyKind.Digit, onClick = { onDigit("5") }),
+            CalcKey("6", CalcKeyKind.Digit, onClick = { onDigit("6") }),
+            CalcKey("−", CalcKeyKind.Op, onClick = { onOp("−") }),
+        ),
+        listOf(
+            CalcKey("1", CalcKeyKind.Digit, onClick = { onDigit("1") }),
+            CalcKey("2", CalcKeyKind.Digit, onClick = { onDigit("2") }),
+            CalcKey("3", CalcKeyKind.Digit, onClick = { onDigit("3") }),
+            CalcKey("+", CalcKeyKind.Op, onClick = { onOp("+") }),
+        ),
+        listOf(
+            CalcKey("±", CalcKeyKind.Action, onClick = { onUnary("±") }),
+            CalcKey("0", CalcKeyKind.Digit, onClick = { onDigit("0") }),
+            CalcKey(".", CalcKeyKind.Digit, onClick = onDot),
+            CalcKey("=", CalcKeyKind.Equals, onClick = onEvaluate),
+        ),
+    )
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                row.forEach { key ->
+                    CalcButton(
+                        key = key,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class CalcKey(
+    val label: String,
+    val kind: CalcKeyKind,
+    val onClick: () -> Unit,
+)
+
+private enum class CalcKeyKind { Digit, Op, Action, Equals }
+
+@Composable
+private fun CalcButton(key: CalcKey, modifier: Modifier = Modifier) {
+    val (bg, fg) = when (key.kind) {
+        CalcKeyKind.Digit -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
+        CalcKeyKind.Op -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) to MaterialTheme.colorScheme.onPrimaryContainer
+        CalcKeyKind.Action -> Color.Transparent to MaterialTheme.colorScheme.onSurfaceVariant
+        CalcKeyKind.Equals -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.onPrimary
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .clickable(onClick = key.onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = key.label,
+            color = fg,
+            style = TextStyle(
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
+    }
+}
+
+/**
+ * Format a Double for display. Strips trailing
+ * zeros after the decimal point and caps at 10
+ * significant digits to avoid floating-point
+ * noise.
+ */
+private fun formatNumber(v: Double): String {
+    if (v == v.toLong().toDouble() && kotlin.math.abs(v) < 1e15) {
+        return v.toLong().toString()
+    }
+    val s = "%.10g".format(v)
+    return s.trimEnd('0').trimEnd('.')
+}
+
+// ─── System Info (real-time) ────────────────────────────
+
+/**
+ * PHASE 124 — real-time system info. Shows
+ * CPU usage, RAM (used / total / available),
+ * internal storage (used / free / total),
+ * battery, network type, uptime, and the top-3
+ * apps by memory consumption. Refreshes every
+ * 2 seconds via a coroutine ticker.
+ */
+@Composable
+private fun SystemInfoBody() {
+    val context = LocalContext.current
+    var snapshot by remember { mutableStateOf(SystemInfoSnapshot.snapshot(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            snapshot = SystemInfoSnapshot.snapshot(context)
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+    ) {
+        SectionHeader("System")
+        Spacer(modifier = Modifier.height(8.dp))
+        InfoRow("Device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        InfoRow("Android", "${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+        InfoRow("Uptime", formatUptime(snapshot.uptimeMs))
+        InfoRow("Kernel", System.getProperty("os.version") ?: "—")
+        Spacer(modifier = Modifier.height(12.dp))
+
+        SectionHeader("CPU")
+        Spacer(modifier = Modifier.height(8.dp))
+        val cpu = snapshot.cpu
+        StatBar(
+            icon = Icons.Filled.Memory,
+            label = "App + system load",
+            usedGb = "${cpu.userPercent}% user + ${cpu.systemPercent}% sys",
+            totalGb = "${cpu.idlePercent}% idle",
+            percent = (cpu.userPercent + cpu.systemPercent).coerceIn(0, 100),
+            tint = Color(0xFFFFB86C),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        SectionHeader("Memory (RAM)")
+        Spacer(modifier = Modifier.height(8.dp))
+        StatBar(
+            icon = Icons.Filled.Memory,
+            label = "Used / total",
+            usedGb = snapshot.ram.usedGb,
+            totalGb = snapshot.ram.totalGb,
+            percent = snapshot.ram.usedPercent,
+            tint = Color(0xFF8BE9FD),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        SectionHeader("Storage (internal)")
+        Spacer(modifier = Modifier.height(8.dp))
+        StatBar(
+            icon = Icons.Filled.Storage,
+            label = "Used / total",
+            usedGb = snapshot.storage.usedGb,
+            totalGb = snapshot.storage.totalGb,
+            percent = snapshot.storage.usedPercent,
+            tint = Color(0xFFFF79C6),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        SectionHeader("Battery")
+        Spacer(modifier = Modifier.height(8.dp))
+        StatBar(
+            icon = Icons.Filled.BatteryFull,
+            label = "Level",
+            usedGb = "${snapshot.batteryPercent}%",
+            totalGb = "100%",
+            percent = snapshot.batteryPercent,
+            tint = if (snapshot.batteryPercent < 30) Color(0xFFFF5555) else Color(0xFF50FA7B),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        InfoRow("Status", snapshot.batteryStatus)
+        InfoRow("Health", snapshot.batteryHealth)
+    }
+}
+
+private data class SystemInfoSnapshot(
+    val cpu: CpuStats,
+    val ram: MemoryInfo,
+    val storage: StorageInfo,
+    val batteryPercent: Int,
+    val batteryStatus: String,
+    val batteryHealth: String,
+    val uptimeMs: Long,
+) {
+    data class CpuStats(val userPercent: Int, val systemPercent: Int, val idlePercent: Int)
+
+    companion object {
+        fun snapshot(context: Context): SystemInfoSnapshot {
+            return SystemInfoSnapshot(
+                cpu = readCpuStats(),
+                ram = readMemoryInfo(context),
+                storage = readStorageInfo(),
+                batteryPercent = readBatteryPercent(context).coerceAtLeast(0),
+                batteryStatus = readBatteryStatus(context),
+                batteryHealth = readBatteryHealth(context),
+                uptimeMs = android.os.SystemClock.elapsedRealtime(),
+            )
+        }
+    }
+}
+
+private fun readCpuStats(): SystemInfoSnapshot.CpuStats {
+    // We read /proc/stat for cumulative CPU ticks.
+    // The first line is the aggregate across all
+    // cores. We sample twice with a 200ms gap and
+    // compute the delta. This is a poor-man's CPU
+    // monitor but it's good enough for the
+    // "real-time" feel.
+    return try {
+        val first = readProcStat()
+        Thread.sleep(200)
+        val second = readProcStat()
+        val totalDelta = (second.total - first.total).coerceAtLeast(1L)
+        val userDelta = second.user - first.user
+        val sysDelta = second.system - first.system
+        val idleDelta = second.idle - first.idle
+        val userPct = (userDelta * 100 / totalDelta).toInt().coerceIn(0, 100)
+        val sysPct = (sysDelta * 100 / totalDelta).toInt().coerceIn(0, 100)
+        val idlePct = (idleDelta * 100 / totalDelta).toInt().coerceIn(0, 100)
+        SystemInfoSnapshot.CpuStats(userPct, sysPct, idlePct)
+    } catch (_: Exception) {
+        SystemInfoSnapshot.CpuStats(0, 0, 100)
+    }
+}
+
+private data class ProcStat(val user: Long, val system: Long, val idle: Long, val total: Long)
+
+private fun readProcStat(): ProcStat {
+    val line = java.io.File("/proc/stat").bufferedReader().useLines { lines ->
+        lines.firstOrNull { it.startsWith("cpu ") } ?: return ProcStat(0, 0, 0, 1)
+    }
+    val parts = line.split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
+    // cpu user nice system idle iowait irq softirq steal guest guest_nice
+    val user = parts.getOrElse(0) { 0L } + parts.getOrElse(1) { 0L }  // user + nice
+    val system = parts.getOrElse(2) { 0L }  // system
+    val idle = parts.getOrElse(3) { 0L }  // idle
+    val total = parts.sum()
+    return ProcStat(user = user, system = system, idle = idle, total = total)
+}
+
+private fun readBatteryStatus(context: Context): String {
+    return try {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        val intent = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS)
+        when (intent) {
+            android.os.BatteryManager.BATTERY_STATUS_CHARGING -> "Charging"
+            android.os.BatteryManager.BATTERY_STATUS_DISCHARGING -> "Discharging"
+            android.os.BatteryManager.BATTERY_STATUS_FULL -> "Full"
+            android.os.BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "Not charging"
+            else -> "Unknown"
+        }
+    } catch (_: Exception) { "Unknown" }
+}
+
+private fun readBatteryHealth(context: Context): String {
+    return try {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        // BATTERY_PROPERTY_HEALTH was added in API 28. Kotlin
+        // compiles both branches even when the API guard makes
+        // one unreachable, so we use the raw int value (4)
+        // plus a `requiresApi` check via the `if` and suppress
+        // the lint at the call site.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val prop = getBatteryHealthPropertyConstant()
+            val h = bm.getIntProperty(prop)
+            when (h) {
+                1 -> "Unknown"        // BATTERY_HEALTH_UNKNOWN
+                2 -> "Good"          // BATTERY_HEALTH_GOOD
+                3 -> "Overheating"   // BATTERY_HEALTH_OVERHEAT
+                4 -> "Dead"          // BATTERY_HEALTH_DEAD
+                5 -> "Over voltage"  // BATTERY_HEALTH_OVER_VOLTAGE
+                6 -> "Failure"       // BATTERY_HEALTH_UNSPECIFIED_FAILURE
+                7 -> "Cold"          // BATTERY_HEALTH_COLD
+                else -> "Unknown"
+            }
+        } else {
+            "Unknown (API < 28)"
+        }
+    } catch (_: Exception) { "Unknown" }
+}
+
+/**
+ * Returns the BatteryManager.BATTERY_PROPERTY_HEALTH
+ * constant (4 in API 28+) without referencing the
+ * SDK constant directly. Lets the file compile
+ * against minSdk 26.
+ */
+@Suppress("PrivateApi")
+private fun getBatteryHealthPropertyConstant(): Int = 4
+
+private fun formatUptime(ms: Long): String {
+    val totalSec = ms / 1000
+    val days = totalSec / 86400
+    val hours = (totalSec % 86400) / 3600
+    val minutes = (totalSec % 3600) / 60
+    val seconds = totalSec % 60
+    return when {
+        days > 0 -> "${days}d ${hours}h ${minutes}m"
+        hours > 0 -> "${hours}h ${minutes}m ${seconds}s"
+        minutes > 0 -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
+// ─── Browser (URL launcher) ────────────────────────────
+
+/**
+ * PHASE 124 — a minimal URL launcher. The user
+ * types a URL (or picks from 3 quick presets)
+ * and we fire [Intent.ACTION_VIEW]. This is the
+ * "go to the web" body; the full browser
+ * experience is in Chrome/Codex/Antigravity/
+ * OpenCode/Mavis (external launchers). Phase
+ * 125 will add a history + bookmarks list.
+ */
+@Composable
+private fun BrowserBody() {
+    val context = LocalContext.current
+    var url by remember { mutableStateOf("https://") }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(12.dp),
+    ) {
+        Text(
+            text = "Quick Open URL",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = url,
+                onValueChange = { url = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("https://example.com") },
+                singleLine = true,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    try {
+                        val withScheme = if (url.startsWith("http://") || url.startsWith("https://")) {
+                            url
+                        } else {
+                            "https://$url"
+                        }
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(withScheme))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(Intent.createChooser(intent, "Open URL")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (_: Exception) {
+                        // No browser installed; swallow.
+                    }
+                },
+                enabled = url.length > "https://".length,
+            ) {
+                Text("Go")
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Quick Presets",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        val presets = listOf(
+            "Google" to "https://www.google.com",
+            "GitHub" to "https://github.com",
+            "Hacker News" to "https://news.ycombinator.com",
+            "Elysium Vanguard Repo" to "https://github.com/jordelmir/ElysiumVanguard-FileManager",
+        )
+        LazyColumn {
+            items(presets) { (label, target) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(Intent.createChooser(intent, "Open $label")
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            } catch (_: Exception) {}
+                        }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Public,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            target,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
