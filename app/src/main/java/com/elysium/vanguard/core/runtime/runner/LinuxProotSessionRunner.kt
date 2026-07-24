@@ -209,7 +209,22 @@ class LinuxProotSessionRunner(
         handle?.stop?.invoke()
         val stopped = SessionState.Stopped
         states[key] = stopped
-        val exitCode = (current as? SessionState.Running)?.let { 0 } ?: -1
+        // PHASE 119 — read the real OS exit code from the
+        // launched process via its `waitFor` callback (same
+        // seam Phase 117 wired into the disk image + package
+        // installer backends). The handle is non-null iff
+        // the session was `Running` (the `isStoppable()`
+        // check + the `Starting` branch never reach this
+        // point with a handle). If `waitFor` itself throws
+        // (e.g. a custom backend that races on the OS pid),
+        // fall back to `-1` — the runner must never let a
+        // stop callback failure cascade into a process
+        // crash; the worst case is a sentinel exit code.
+        val exitCode = try {
+            handle?.waitFor?.invoke() ?: -1
+        } catch (t: Throwable) {
+            -1
+        }
         eventBus.publish(
             RuntimeEvent.SessionStoppedEvent(
                 atMs = nowMs,

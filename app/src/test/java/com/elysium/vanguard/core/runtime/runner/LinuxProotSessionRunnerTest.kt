@@ -219,6 +219,84 @@ class LinuxProotSessionRunnerTest {
         assertTrue(result.exceptionOrNull() is SessionRunnerError.SessionNotRunning)
     }
 
+    // --- PHASE 119 — real waitFor on stop() ---
+
+    @Test
+    fun `stop reads the real OS exit code from the process launcher's waitFor and publishes it`() {
+        val backend = FakeBackend().withInstalled("debian", launcherKind = LauncherKind.JAILED_SHELL)
+        // Simulate a process that exited cleanly via `proot --help2map`
+        // style success — the real OS exit code is 0.
+        val launcher = RecordingProcessLauncher(pid = 1, waitForExitCode = 0)
+        val runner = LinuxProotSessionRunner(backend, launcher, bus, clock = clock::get)
+        val (workspace, session) = workspaceWithLinux("ws-1", "debian", "s-1")
+
+        runner.start(workspace, session)
+        runner.stop(workspace, session)
+
+        val stopped = bus.events.filterIsInstance<RuntimeEvent.SessionStoppedEvent>().single()
+        assertEquals(0, stopped.exitCode)
+        // waitFor was consulted exactly once for the OS exit code.
+        assertEquals(1, launcher.waitForCount.get())
+    }
+
+    @Test
+    fun `stop propagates a non-zero exit code (SIGTERM = 143) from waitFor`() {
+        val backend = FakeBackend().withInstalled("debian", launcherKind = LauncherKind.JAILED_SHELL)
+        // 128 + 15 (SIGTERM) = 143 — the typical exit code a
+        // proot session emits when killed by a stop signal.
+        val launcher = RecordingProcessLauncher(pid = 4242, waitForExitCode = 143)
+        val runner = LinuxProotSessionRunner(backend, launcher, bus, clock = clock::get)
+        val (workspace, session) = workspaceWithLinux("ws-1", "debian", "s-1")
+
+        runner.start(workspace, session)
+        runner.stop(workspace, session)
+
+        val stopped = bus.events.filterIsInstance<RuntimeEvent.SessionStoppedEvent>().single()
+        assertEquals(143, stopped.exitCode)
+        assertEquals(1, launcher.waitForCount.get())
+    }
+
+    @Test
+    fun `stop propagates an unusual exit code verbatim (137 = SIGKILL)`() {
+        val backend = FakeBackend().withInstalled("debian", launcherKind = LauncherKind.JAILED_SHELL)
+        val launcher = RecordingProcessLauncher(pid = 7, waitForExitCode = 137)
+        val runner = LinuxProotSessionRunner(backend, launcher, bus, clock = clock::get)
+        val (workspace, session) = workspaceWithLinux("ws-1", "debian", "s-1")
+
+        runner.start(workspace, session)
+        runner.stop(workspace, session)
+
+        val stopped = bus.events.filterIsInstance<RuntimeEvent.SessionStoppedEvent>().single()
+        // 128 + 9 (SIGKILL) = 137 — verbatim from the OS, no
+        // translation, no clamping. Pre-Phase-119 the runner
+        // hardcoded `0` here.
+        assertEquals(137, stopped.exitCode)
+    }
+
+    @Test
+    fun `stop falls back to exit code -1 when waitFor throws and still publishes the event`() {
+        val backend = FakeBackend().withInstalled("debian", launcherKind = LauncherKind.JAILED_SHELL)
+        // A ProcessLauncher that supplies a waitFor callback
+        // which throws — simulates an OS that loses the pid
+        // mid-stop (e.g. a process already reaped by a sibling
+        // signal handler). The runner must NOT crash; it must
+        // publish a sentinel exit code so the operator sees the
+        // anomaly.
+        val launcher = ThrowingWaitForProcessLauncher(pid = 1, exception = IllegalStateException("pid reaped"))
+        val runner = LinuxProotSessionRunner(backend, launcher, bus, clock = clock::get)
+        val (workspace, session) = workspaceWithLinux("ws-1", "debian", "s-1")
+
+        runner.start(workspace, session)
+        val result = runner.stop(workspace, session)
+
+        // The stop itself succeeded (the runner caught the
+        // waitFor throw and fell back).
+        assertTrue("stop must succeed even when waitFor throws; failure: ${result.exceptionOrNull()?.message}", result.isSuccess)
+        assertEquals(SessionState.Stopped, result.getOrThrow())
+        val stopped = bus.events.filterIsInstance<RuntimeEvent.SessionStoppedEvent>().single()
+        assertEquals(-1, stopped.exitCode)
+    }
+
     @Test
     fun `a session can be restarted after stop`() {
         val backend = FakeBackend().withInstalled("debian", launcherKind = LauncherKind.JAILED_SHELL)
@@ -403,15 +481,32 @@ class LinuxProotSessionRunnerTest {
     /**
      * A [ProcessLauncher] that records the last call and returns
      * a [LaunchedProcess] with the configured pid. The stop
-     * callback increments [stopCount].
+     * callback increments [stopCount]; the waitFor callback
+     * returns [waitForExitCode] (default `0` so existing tests
+     * that don't care about exit code keep passing).
+     *
+     * PHASE 119 — `waitForCount` records how many times the
+     * runner's `stop()` calls `waitFor` so tests can assert the
+     * runner only consults the OS exit code once per session.
      */
-    private class RecordingProcessLauncher(val pid: Int) : ProcessLauncher {
+    private class RecordingProcessLauncher(
+        val pid: Int,
+        val waitForExitCode: Int = 0,
+    ) : ProcessLauncher {
         val stopCount = AtomicInteger(0)
+        val waitForCount = AtomicInteger(0)
         var lastCall: Triple<List<String>, List<Pair<String, String>>, File>? = null
 
         override fun start(command: List<String>, env: List<Pair<String, String>>, cwd: File): LaunchedProcess {
             lastCall = Triple(command, env, cwd)
-            return LaunchedProcess(pid = pid, stop = { stopCount.incrementAndGet() })
+            return LaunchedProcess(
+                pid = pid,
+                stop = { stopCount.incrementAndGet() },
+                waitFor = {
+                    waitForCount.incrementAndGet()
+                    waitForExitCode
+                },
+            )
         }
     }
 
@@ -422,6 +517,28 @@ class LinuxProotSessionRunnerTest {
     private class ThrowingProcessLauncher(val toThrow: Throwable) : ProcessLauncher {
         override fun start(command: List<String>, env: List<Pair<String, String>>, cwd: File): LaunchedProcess {
             throw toThrow
+        }
+    }
+
+    /**
+     * A [ProcessLauncher] whose [LaunchedProcess.waitFor]
+     * callback throws on invocation. Used to test the
+     * Phase 119 fallback that swallows a waitFor throw and
+     * publishes a `-1` exit code instead of crashing the
+     * runner.
+     */
+    private class ThrowingWaitForProcessLauncher(
+        val pid: Int,
+        val exception: Throwable,
+    ) : ProcessLauncher {
+        val stopCount = AtomicInteger(0)
+
+        override fun start(command: List<String>, env: List<Pair<String, String>>, cwd: File): LaunchedProcess {
+            return LaunchedProcess(
+                pid = pid,
+                stop = { stopCount.incrementAndGet() },
+                waitFor = { throw exception },
+            )
         }
     }
 }
