@@ -32,12 +32,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.SpeakerNotes
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -249,6 +251,13 @@ class WindowContentRegistry @Inject constructor(
         "clock" to WindowContent(
             icon = Icons.Filled.Schedule,
             body = { ClockBody() },
+        ),
+        // PHASE 128 — Task Manager: running
+        // processes (PID + name + RSS) with
+        // kill-on-tap. Reads /proc every 3s.
+        "tasks" to WindowContent(
+            icon = Icons.AutoMirrored.Filled.List,
+            body = { TaskManagerBody() },
         ),
     )
 
@@ -3049,6 +3058,208 @@ private fun ClockBody() {
             }
         }
     }
+}
+
+// ─── Task Manager (processes) ──────────────────────────
+
+/**
+ * PHASE 128 — real task manager. Reads the
+ * /proc filesystem to enumerate running
+ * processes (pid + name + RSS in KiB). The
+ * user can tap a row to "kill" the process
+ * via [android.os.Process.killProcess]. The
+ * list refreshes every 3 seconds via a
+ * coroutine ticker. Sorted by RSS
+ * (descending) so the heaviest processes
+ * surface first.
+ *
+ * "Kill" on Android only works for processes
+ * the user owns (same UID); the OS rejects
+ * kills on system processes. We catch the
+ * [SecurityException] silently — the user
+ * sees the process remain in the list
+ * (since the next refresh picks it up
+ * again). This is the same UX as
+ * `top`/`htop` on a real shell.
+ */
+@Composable
+private fun TaskManagerBody() {
+    var processes by remember { mutableStateOf<List<ProcessRow>>(emptyList()) }
+    var sortBy by remember { mutableStateOf(SortBy.Memory) }
+    var lastUpdateMs by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            processes = readProcessList()
+            lastUpdateMs = System.currentTimeMillis()
+            kotlinx.coroutines.delay(3000)
+        }
+    }
+    val sorted = remember(processes, sortBy) {
+        when (sortBy) {
+            SortBy.Memory -> processes.sortedByDescending { it.rssKb }
+            SortBy.Pid -> processes.sortedBy { it.pid }
+            SortBy.Name -> processes.sortedBy { it.name.lowercase() }
+        }
+    }
+    val totalRss = remember(processes) { processes.sumOf { it.rssKb } }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Task Manager",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "${processes.size} processes · ${formatKb(totalRss)} total",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = when (sortBy) {
+                    SortBy.Memory -> "Sort: Memory"
+                    SortBy.Pid -> "Sort: PID"
+                    SortBy.Name -> "Sort: Name"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable {
+                        sortBy = when (sortBy) {
+                            SortBy.Memory -> SortBy.Pid
+                            SortBy.Pid -> SortBy.Name
+                            SortBy.Name -> SortBy.Memory
+                        }
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // Column header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text("PID", style = HeaderLabel, modifier = Modifier.width(60.dp))
+            Text("Name", style = HeaderLabel, modifier = Modifier.weight(1f))
+            Text("RSS", style = HeaderLabel, modifier = Modifier.width(70.dp))
+        }
+        // List
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(sorted, key = { it.pid }) { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                android.os.Process.killProcess(row.pid)
+                            } catch (_: Exception) {
+                                // SecurityException for
+                                // system processes; the
+                                // process remains in
+                                // the list.
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = row.pid.toString(),
+                        style = MonoSmall,
+                        modifier = Modifier.width(60.dp),
+                    )
+                    Text(
+                        text = row.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = formatKb(row.rssKb),
+                        style = MonoSmall,
+                        modifier = Modifier.width(70.dp),
+                        color = if (row.rssKb > 200_000) Color(0xFFFF5555)
+                            else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        Text(
+            text = "Tap a row to kill · refreshes every 3s",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(8.dp),
+        )
+    }
+}
+
+private enum class SortBy { Memory, Pid, Name }
+
+private data class ProcessRow(val pid: Int, val name: String, val rssKb: Long)
+
+private val HeaderLabel = TextStyle(
+    fontSize = 11.sp,
+    fontWeight = FontWeight.Bold,
+    fontFamily = FontFamily.Monospace,
+    color = Color(0xFFBD93F9),
+)
+
+/**
+ * Read the /proc filesystem for the list of
+ * running processes. Each /proc/<pid>/comm
+ * file holds the executable name (truncated
+ * to 15 chars); /proc/<pid>/status holds
+ * VmRSS in KiB on the "VmRSS:" line. We
+ * read all of /proc, filter to numeric
+ * entries, then read each /proc/<pid>/{comm,status}.
+ *
+ * Cheap: a few dozen file reads every 3s.
+ * The OS keeps the directory listing in
+ * memory; each /proc file is small.
+ */
+private fun readProcessList(): List<ProcessRow> = try {
+    val procDir = java.io.File("/proc")
+    procDir.listFiles()
+        ?.filter { it.isDirectory && it.name.all(Char::isDigit) }
+        ?.mapNotNull { dir ->
+            val pid = dir.name.toIntOrNull() ?: return@mapNotNull null
+            val name = try {
+                java.io.File(dir, "comm").readText().trim().ifEmpty { "?" }
+            } catch (_: Exception) { "?" }
+            val rssKb = try {
+                java.io.File(dir, "status")
+                    .bufferedReader()
+                    .useLines { lines ->
+                        lines.firstOrNull { it.startsWith("VmRSS:") }
+                            ?.split(Regex("\\s+"))
+                            ?.getOrNull(1)
+                            ?.toLongOrNull() ?: 0L
+                    }
+            } catch (_: Exception) { 0L }
+            ProcessRow(pid = pid, name = name, rssKb = rssKb)
+        }
+        ?: emptyList()
+} catch (_: Exception) {
+    emptyList()
+}
+
+private fun formatKb(kb: Long): String = when {
+    kb < 1024 -> "${kb}K"
+    kb < 1024 * 1024 -> "%.1fM".format(kb / 1024.0)
+    else -> "%.1fG".format(kb / (1024.0 * 1024.0))
 }
 
 // ============================== Hilt bridge ==============================
