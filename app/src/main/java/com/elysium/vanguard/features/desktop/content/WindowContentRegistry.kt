@@ -940,6 +940,45 @@ private fun ProgramsBody() {
             iconTint = Color(0xFFBD93F9),
             onClick = { registry.launchExternal("mavis") },
         ),
+        // PHASE 124-128 — new built-in bodies.
+        // Programs body is the catalog of
+        // every Elysium app; new built-ins get
+        // added here so the user can find them.
+        ProgramEntry(
+            label = "Calculator",
+            subtitle = "Standard keypad with /, *, %, ±, √",
+            icon = Icons.Filled.Calculate,
+            iconTint = Color(0xFFFF79C6),
+            onClick = { registry.requestOpenInternal("calc", "Calculator") },
+        ),
+        ProgramEntry(
+            label = "System Info",
+            subtitle = "Real-time CPU, RAM, storage, battery",
+            icon = Icons.Filled.Memory,
+            iconTint = Color(0xFF8BE9FD),
+            onClick = { registry.requestOpenInternal("sysinfo", "System Info") },
+        ),
+        ProgramEntry(
+            label = "Browser",
+            subtitle = "Open a URL with the system browser",
+            icon = Icons.Filled.Public,
+            iconTint = Color(0xFF50FA7B),
+            onClick = { registry.requestOpenInternal("browser", "Browser") },
+        ),
+        ProgramEntry(
+            label = "Clock",
+            subtitle = "Live time + 7-day forecast",
+            icon = Icons.Filled.Schedule,
+            iconTint = Color(0xFFFFB86C),
+            onClick = { registry.requestOpenInternal("clock", "Clock") },
+        ),
+        ProgramEntry(
+            label = "Task Manager",
+            subtitle = "Running processes — tap to kill",
+            icon = Icons.AutoMirrored.Filled.List,
+            iconTint = Color(0xFFFF5555),
+            onClick = { registry.requestOpenInternal("tasks", "Task Manager") },
+        ),
     )
 
     LazyColumn(
