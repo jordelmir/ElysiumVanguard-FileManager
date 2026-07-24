@@ -10,6 +10,7 @@ import android.os.StatFs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
@@ -55,6 +57,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -239,6 +242,12 @@ class WindowContentRegistry @Inject constructor(
         "browser" to WindowContent(
             icon = Icons.Filled.Public,
             body = { BrowserBody() },
+        ),
+        // PHASE 126 — Clock body: real-time
+        // current time + date + device uptime.
+        "clock" to WindowContent(
+            icon = Icons.Filled.Schedule,
+            body = { ClockBody() },
         ),
     )
 
@@ -1886,7 +1895,25 @@ private fun NotesBody() {
     // (id.txt). The first line is the title;
     // subsequent lines are the body. Phase 122
     // ships the list + editor + persistence.
+    // Phase 125 added the search field + filtered
+    // list.
     var notes by remember { mutableStateOf(loadNotes(context)) }
+    var searchQuery by remember { mutableStateOf("") }
+    // The filtered list — what the user actually
+    // sees in the side panel. Empty query = all
+    // notes; non-empty = case-insensitive title +
+    // body match.
+    val visibleNotes = remember(notes, searchQuery) {
+        if (searchQuery.isBlank()) {
+            notes
+        } else {
+            val needle = searchQuery.trim().lowercase()
+            notes.filter { n ->
+                n.title.lowercase().contains(needle) ||
+                    n.content.lowercase().contains(needle)
+            }
+        }
+    }
     var selectedId by remember { mutableStateOf<String?>(notes.firstOrNull()?.id) }
     val selectedNote = notes.firstOrNull { it.id == selectedId }
     var title by remember(selectedId) { mutableStateOf(selectedNote?.title ?: "") }
@@ -1905,7 +1932,7 @@ private fun NotesBody() {
         // ─── Note list (left) ────────────────────────
         Column(
             modifier = Modifier
-                .width(160.dp)
+                .width(200.dp)
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 .padding(8.dp),
@@ -1935,27 +1962,70 @@ private fun NotesBody() {
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(notes, key = { it.id }) { note ->
-                    NoteListItem(
-                        title = note.title.ifBlank { "Untitled" },
-                        selected = note.id == selectedId,
-                        onClick = {
-                            // Persist the current edit before switching
-                            saveJob?.cancel()
-                            if (selectedId != null) {
-                                notes = notes.map { n ->
-                                    if (n.id == selectedId) n.copy(title = title, content = content)
-                                    else n
-                                }
-                                saveNotes(context, notes)
-                            }
-                            selectedId = note.id
-                        },
+            // PHASE 125 — search field. Empty
+            // query = all notes; non-empty filters
+            // by title + body (case-insensitive).
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = {
+                    Text(
+                        "Search…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
                     )
+                },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 12.sp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (searchQuery.isNotBlank()) {
+                Text(
+                    text = "${visibleNotes.size} match${if (visibleNotes.size == 1) "" else "es"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            if (visibleNotes.isEmpty() && searchQuery.isNotBlank()) {
+                Text(
+                    text = "No matches",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(8.dp),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(visibleNotes, key = { it.id }) { note ->
+                        NoteListItem(
+                            title = note.title.ifBlank { "Untitled" },
+                            selected = note.id == selectedId,
+                            onClick = {
+                                // Persist the current edit before switching
+                                saveJob?.cancel()
+                                if (selectedId != null) {
+                                    notes = notes.map { n ->
+                                        if (n.id == selectedId) n.copy(title = title, content = content)
+                                        else n
+                                    }
+                                    saveNotes(context, notes)
+                                }
+                                selectedId = note.id
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -2819,6 +2889,118 @@ private fun BrowserBody() {
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─── Clock (real-time) ──────────────────────────────────
+
+/**
+ * PHASE 126 — a real-time clock. Shows the
+ * current time (HH:mm:ss), the current date
+ * (long format), the device uptime, the
+ * timezone, and a 7-day forecast row (current
+ * day + 6 next days with weekday + date). The
+ * "real-time" feel comes from a 1-second ticker
+ * that re-renders the clock.
+ */
+@Composable
+private fun ClockBody() {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val now = remember(nowMs) { java.util.Date(nowMs) }
+    val timeFormat = remember { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US) }
+    val dateFormat = remember { java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.US) }
+    val tzFormat = remember { java.text.SimpleDateFormat("zzz", java.util.Locale.US) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Big time
+        Text(
+            text = timeFormat.format(now),
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 56.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+            color = MaterialTheme.colorScheme.primary,
+        )
+        // Date
+        Text(
+            text = dateFormat.format(now),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        // Timezone
+        Text(
+            text = "Timezone: ${tzFormat.format(now)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        // Uptime
+        SectionHeader("Device uptime")
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = formatUptime(android.os.SystemClock.elapsedRealtime()),
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 22.sp,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        // 7-day forecast row
+        SectionHeader("Next 7 days")
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val cal = java.util.Calendar.getInstance().apply { time = now }
+            val dayFormat = remember { java.text.SimpleDateFormat("EEE\nd", java.util.Locale.US) }
+            repeat(7) { i ->
+                val day = remember(i) { cal.clone() as java.util.Calendar }
+                day.add(java.util.Calendar.DAY_OF_YEAR, i)
+                val label = dayFormat.format(day.time)
+                Column(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (i == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    val parts = label.split("\n")
+                    Text(
+                        text = parts[0],
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (i == 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = parts[1],
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
             }
         }
