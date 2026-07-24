@@ -130,6 +130,14 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
                         iconKey = action.iconKey,
                     )
                 }
+                is com.elysium.vanguard.features.desktop.content.DesktopAction.UpdateWindowTitle -> {
+                    // PHASE 133 — the body pushed a
+                    // title change (e.g. after
+                    // navigating into a subfolder).
+                    // Update the window's title in
+                    // the session state.
+                    viewModel.renameWindow(action.windowId, action.title)
+                }
             }
         }
     }
@@ -423,7 +431,15 @@ private fun PositionedWindow(
             onClose = onClose,
             modifier = Modifier.fillMaxSize(),
         ) {
-            content.body()
+            // PHASE 133 — provide the window id to the
+            // body via a CompositionLocal so bodies
+            // like [RealFilesBody] can push title
+            // updates back to the shell.
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.elysium.vanguard.features.desktop.content.LocalWindowId provides window.id,
+            ) {
+                content.body()
+            }
         }
     }
 }

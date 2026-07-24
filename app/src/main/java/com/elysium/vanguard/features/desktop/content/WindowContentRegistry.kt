@@ -142,6 +142,18 @@ data class WindowContent(
 )
 
 /**
+ * PHASE 133 — the id of the window currently being
+ * composed. The shell sets this before composing the
+ * body so [RealFilesBody] can push title updates
+ * back to the shell (via [DesktopAction.UpdateWindowTitle])
+ * without needing the id as a parameter to the body
+ * lambda.
+ */
+val LocalWindowId = androidx.compose.runtime.staticCompositionLocalOf<String?> {
+    null
+}
+
+/**
  * Cross-window actions the registry can request of the
  * active shell. The bodies fire actions (e.g. when the
  * user taps a drive in "My PC") and the shell opens a
@@ -169,6 +181,16 @@ sealed class DesktopAction {
      * window id and uses [title] as the title bar.
      */
     data class OpenInternal(val iconKey: String, val title: String) : DesktopAction()
+
+    /**
+     * PHASE 133 — update the title of an existing
+     * window. Used by [RealFilesBody] when the user
+     * navigates so the title bar reflects the current
+     * path (e.g. `Files · /sdcard/MyDocuments`). The
+     * shell finds the window by [windowId] and updates
+     * its title in the session state.
+     */
+    data class UpdateWindowTitle(val windowId: String, val title: String) : DesktopAction()
 }
 
 @Singleton
@@ -347,6 +369,19 @@ class WindowContentRegistry @Inject constructor(
      */
     fun requestOpenInternal(iconKey: String, title: String) {
         _actions.tryEmit(DesktopAction.OpenInternal(iconKey = iconKey, title = title))
+    }
+
+    /**
+     * PHASE 133 — request a title update for an
+     * existing window. Used by [RealFilesBody]
+     * when the user navigates so the title bar
+     * reflects the current path. The shell
+     * updates the window's title in the session
+     * state (no rebuild — the body keeps its
+     * state).
+     */
+    fun requestUpdateWindowTitle(windowId: String, title: String) {
+        _actions.tryEmit(DesktopAction.UpdateWindowTitle(windowId = windowId, title = title))
     }
 
     /**
@@ -640,11 +675,29 @@ private fun RealFilesBody(initialPath: String) {
     // [initialPath] directly. (We no longer need to read
     // a pending field at first composition — the shell
     // does the routing.)
+    // PHASE 133 — we read [LocalWindowId] (set by
+    // the shell before composing this body) so we
+    // can push title updates back when the user
+    // navigates. Without this, the title bar would
+    // stay at the initial path even after entering
+    // a subfolder.
     val registry = rememberWindowContentRegistry()
+    val windowId = LocalWindowId.current
     var currentPath by remember { mutableStateOf(initialPath) }
     var items by remember { mutableStateOf<List<TitanFile>>(emptyList()) }
     var selectedInfo by remember { mutableStateOf<TitanFile?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // PHASE 133 — push the title update when the
+    // path changes. We skip the initial composition
+    // (the shell already set the title from the
+    // initial path) and only fire on real
+    // navigations.
+    androidx.compose.runtime.LaunchedEffect(currentPath) {
+        if (windowId != null) {
+            registry.requestUpdateWindowTitle(windowId, "Files · $currentPath")
+        }
+    }
 
     // Refresh the listing when the path changes. The
     // [registry] is the same instance we built at the top

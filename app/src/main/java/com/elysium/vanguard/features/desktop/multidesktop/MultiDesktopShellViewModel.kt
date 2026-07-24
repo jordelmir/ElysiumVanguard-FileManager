@@ -487,6 +487,29 @@ open class MultiDesktopShellViewModel(
     }
 
     /**
+     * PHASE 133 — update the title of an existing
+     * window in the active session. Same semantics
+     * as the single-session [DesktopShellViewModel.renameWindow].
+     */
+    fun renameWindow(id: String, newTitle: String): Result<Unit> {
+        if (id.isBlank() || newTitle.isBlank()) return Result.success(Unit)
+        _state.update { current ->
+            val active = current.activeSession
+            val updatedActive = active.copy(
+                windows = active.windows.map { w ->
+                    if (w.id == id) w.copy(title = newTitle) else w
+                },
+            )
+            current.copy(
+                sessions = current.sessions.toMutableList().apply {
+                    this[current.activeIndex] = updatedActive
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    /**
      * Pin an app to the dock of the active
      * session. The pin is a no-op when an
      * app with the same iconKey is already

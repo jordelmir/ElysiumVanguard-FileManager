@@ -75,6 +75,9 @@ fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
                         iconKey = action.iconKey,
                     )
                 }
+                is com.elysium.vanguard.features.desktop.content.DesktopAction.UpdateWindowTitle -> {
+                    viewModel.renameWindow(action.windowId, action.title)
+                }
             }
         }
     }

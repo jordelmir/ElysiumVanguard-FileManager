@@ -211,6 +211,32 @@ open class DesktopShellViewModel(
         return Result.success(Unit)
     }
 
+    /**
+     * PHASE 133 — update the title of an existing
+     * window. Used by [RealFilesBody] when the user
+     * navigates so the title bar reflects the current
+     * path. The window's bounds + state are untouched;
+     * only the [DesktopWindow.title] field changes.
+     */
+    fun renameWindow(id: String, newTitle: String): Result<Unit> {
+        if (id.isBlank() || newTitle.isBlank()) {
+            return Result.failure(
+                FoundryError.VehicleDefinitionInvalid(
+                    field = "Window.title",
+                    reason = "id and title must not be blank",
+                ),
+            )
+        }
+        _state.update { current ->
+            current.copy(
+                windows = current.windows.map { w ->
+                    if (w.id == id) w.copy(title = newTitle) else w
+                },
+            )
+        }
+        return Result.success(Unit)
+    }
+
     fun pinApp(iconKey: String, label: String): Result<Unit> {
         if (iconKey.isBlank() || label.isBlank()) {
             return Result.failure(
