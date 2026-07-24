@@ -2275,8 +2275,15 @@ private fun NotesBody() {
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
+                    // PHASE 132 — words + lines count alongside
+                    // the existing chars count. The split is
+                    // `\s+` for words, `\n` for lines. We keep
+                    // the chars last so the long number doesn't
+                    // dominate the visual weight.
+                    val wordCount = content.split(Regex("\\s+")).count { it.isNotEmpty() }
+                    val lineCount = content.count { it == '\n' } + (if (content.isEmpty()) 0 else 1)
                     Text(
-                        text = "${content.length} chars",
+                        text = "$wordCount words · $lineCount lines · ${content.length} chars",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
