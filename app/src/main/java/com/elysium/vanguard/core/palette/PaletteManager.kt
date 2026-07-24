@@ -134,4 +134,27 @@ class PaletteManager @Inject constructor(
     fun reload() {
         _current.value = store.loadCurrent()
     }
+
+    // ── PHASE 127 — theme mode (Dark / Light / System) ─────────────
+
+    private val _themeMode: MutableStateFlow<com.elysium.vanguard.ui.theme.ThemeMode> =
+        MutableStateFlow(store.loadThemeMode())
+
+    /** The active theme mode. Read-only [StateFlow]. */
+    val themeMode: kotlinx.coroutines.flow.StateFlow<com.elysium.vanguard.ui.theme.ThemeMode> =
+        _themeMode.asStateFlow()
+
+    /** Synchronous accessor. */
+    val currentThemeMode: com.elysium.vanguard.ui.theme.ThemeMode
+        get() = _themeMode.value
+
+    /**
+     * Set the theme mode. The change is visible to all
+     * subscribers immediately (MainActivity re-renders the
+     * [ElysiumTheme]); the persistence write is async.
+     */
+    fun setThemeMode(mode: com.elysium.vanguard.ui.theme.ThemeMode) {
+        _themeMode.value = mode
+        scope.launch { store.saveThemeMode(mode) }
+    }
 }

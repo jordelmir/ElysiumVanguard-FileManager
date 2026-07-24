@@ -164,6 +164,7 @@ sealed class DesktopAction {
 class WindowContentRegistry @Inject constructor(
     @ApplicationContext private val context: Context,
     val fileManagerRepository: FileManagerRepositoryDual,
+    private val paletteManager: com.elysium.vanguard.core.palette.PaletteManager,
 ) {
     /**
      * The map of `iconKey → WindowContent`. The keys are stable
@@ -310,6 +311,27 @@ class WindowContentRegistry @Inject constructor(
      */
     fun requestOpenInternal(iconKey: String, title: String) {
         _actions.tryEmit(DesktopAction.OpenInternal(iconKey = iconKey, title = title))
+    }
+
+    /**
+     * PHASE 127 — public read of the active theme mode
+     * (so the [SettingsBody] — a top-level private
+     * Composable — can read the current value without
+     * touching the [paletteManager] field directly).
+     */
+    val currentThemeMode: com.elysium.vanguard.ui.theme.ThemeMode
+        get() = paletteManager.currentThemeMode
+
+    /**
+     * PHASE 127 — public write of the theme mode. The
+     * setter goes through the [PaletteManager] which
+     * updates the [StateFlow] that [MainActivity]
+     * observes; the whole UI re-renders with the new
+     * M3 colorScheme. Persisted to SharedPreferences
+     * via [PaletteStore.saveThemeMode].
+     */
+    fun setThemeMode(mode: com.elysium.vanguard.ui.theme.ThemeMode) {
+        paletteManager.setThemeMode(mode)
     }
 
     /**
@@ -1677,12 +1699,25 @@ private fun SettingsBody() {
     val storage = readStorageInfo()
     val memory = readMemoryInfo(context)
     val battery = readBatteryPercent(context)
-    // Theme state is shared across the app via the
-    // [ThemePreference] singleton (a simple file in
-    // filesDir). Phase 122 ships the read + write
-    // path; Phase 123 will wire the actual theme
-    // switch to MaterialTheme.
-    var theme by remember { mutableStateOf(readThemePreference(context)) }
+    // PHASE 127 — the theme mode is now bound to
+    // the PaletteManager singleton (a Hilt-scoped
+    // StateFlow). The Settings body writes through
+    // the manager via the registry's public
+    // [setThemeMode] / [currentThemeMode] accessors;
+    // MainActivity observes the same flow and
+    // re-renders the ElysiumTheme. The legacy
+    // filesDir/settings/theme.txt is still used
+    // as a one-shot bootstrap value (read by the
+    // manager on first launch).
+    val registry = rememberWindowContentRegistry()
+    var currentMode by remember { mutableStateOf(registry.currentThemeMode) }
+    // PHASE 127 — re-read on every recomposition in
+    // case the user picks a theme from a different
+    // window. The MutableState is local; the source
+    // of truth is still the PaletteManager singleton.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        currentMode = registry.currentThemeMode
+    }
 
     Column(
         modifier = Modifier
@@ -1698,17 +1733,26 @@ private fun SettingsBody() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ThemeChip("Sovereign Dark", theme == "dark") {
-                theme = "dark"
-                writeThemePreference(context, "dark")
+            ThemeChip(
+                "Sovereign Dark",
+                selected = currentMode == com.elysium.vanguard.ui.theme.ThemeMode.Dark,
+            ) {
+                currentMode = com.elysium.vanguard.ui.theme.ThemeMode.Dark
+                registry.setThemeMode(com.elysium.vanguard.ui.theme.ThemeMode.Dark)
             }
-            ThemeChip("Sovereign Light", theme == "light") {
-                theme = "light"
-                writeThemePreference(context, "light")
+            ThemeChip(
+                "Sovereign Light",
+                selected = currentMode == com.elysium.vanguard.ui.theme.ThemeMode.Light,
+            ) {
+                currentMode = com.elysium.vanguard.ui.theme.ThemeMode.Light
+                registry.setThemeMode(com.elysium.vanguard.ui.theme.ThemeMode.Light)
             }
-            ThemeChip("System", theme == "system") {
-                theme = "system"
-                writeThemePreference(context, "system")
+            ThemeChip(
+                "System",
+                selected = currentMode == com.elysium.vanguard.ui.theme.ThemeMode.System,
+            ) {
+                currentMode = com.elysium.vanguard.ui.theme.ThemeMode.System
+                registry.setThemeMode(com.elysium.vanguard.ui.theme.ThemeMode.System)
             }
         }
         Spacer(modifier = Modifier.height(20.dp))

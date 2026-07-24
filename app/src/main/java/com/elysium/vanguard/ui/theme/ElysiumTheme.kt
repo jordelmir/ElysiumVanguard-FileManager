@@ -1,7 +1,11 @@
 package com.elysium.vanguard.ui.theme
 
+import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -9,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.elysium.vanguard.core.palette.ColorPalette
 import com.elysium.vanguard.core.palette.PalettePresets
 
@@ -37,25 +42,58 @@ import com.elysium.vanguard.core.palette.PalettePresets
  * This keeps the theme itself free of Hilt / ViewModel lookups
  * so it works in previews, in tests, and at the root of
  * setContent.
+ *
+ * PHASE 127 — added [themeMode] parameter. The user can pick
+ * Dark, Light, or System from the Settings body of the
+ * proprietary Windows desktop. Light uses M3's
+ * [lightColorScheme] (with a slightly desaturated palette);
+ * System reads the OS preference via [isSystemInDarkTheme].
  */
+enum class ThemeMode { Dark, Light, System }
+
 @Composable
 fun ElysiumTheme(
     palette: ColorPalette = PalettePresets.Default,
+    themeMode: ThemeMode = ThemeMode.Dark,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = remember(palette) {
-        darkColorScheme(
-            primary = palette.primary.base,
-            onPrimary = if (palette.isDark) Color.Black else Color.White,
-            secondary = palette.secondary.base,
-            onSecondary = if (palette.isDark) Color.Black else Color.White,
-            tertiary = palette.tertiary.base,
-            onTertiary = if (palette.isDark) Color.Black else Color.White,
-            background = palette.background,
-            onBackground = palette.onBackground,
-            surface = palette.surface,
-            onSurface = palette.onSurface
-        )
+    val useDark = when (themeMode) {
+        ThemeMode.Dark -> true
+        ThemeMode.Light -> false
+        ThemeMode.System -> isSystemInDarkTheme()
+    }
+    val colorScheme = remember(palette, useDark) {
+        if (useDark) {
+            darkColorScheme(
+                primary = palette.primary.base,
+                onPrimary = Color.Black,
+                secondary = palette.secondary.base,
+                onSecondary = Color.Black,
+                tertiary = palette.tertiary.base,
+                onTertiary = Color.Black,
+                background = palette.background,
+                onBackground = palette.onBackground,
+                surface = palette.surface,
+                onSurface = palette.onSurface
+            )
+        } else {
+            // Light mode: invert the surface / background so
+            // text-on-surface remains readable. The four
+            // accent slots stay the same; they're already
+            // saturation-tuned.
+            lightColorScheme(
+                primary = palette.primary.base,
+                onPrimary = Color.White,
+                secondary = palette.secondary.base,
+                onSecondary = Color.White,
+                tertiary = palette.tertiary.base,
+                onTertiary = Color.White,
+                background = Color(0xFFF7F7F8),
+                onBackground = Color(0xFF1A1A1F),
+                surface = Color.White,
+                onSurface = Color(0xFF1A1A1F),
+            )
+        }
     }
 
     val globalColors = remember(palette) {

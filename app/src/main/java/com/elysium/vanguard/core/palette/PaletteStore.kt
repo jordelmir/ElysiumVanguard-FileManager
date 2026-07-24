@@ -86,12 +86,33 @@ class PaletteStore(
         prefs.edit().remove(KEY_CURRENT_PALETTE).apply()
     }
 
+    // ── PHASE 127 — theme mode (Dark / Light / System) ─────────────
+
+    /**
+     * Load the saved theme mode. Defaults to [ThemeMode.Dark]
+     * (the historical Elysium default).
+     */
+    fun loadThemeMode(): com.elysium.vanguard.ui.theme.ThemeMode {
+        val raw = prefs.getString(KEY_THEME_MODE, null) ?: return com.elysium.vanguard.ui.theme.ThemeMode.Dark
+        return try {
+            com.elysium.vanguard.ui.theme.ThemeMode.valueOf(raw)
+        } catch (_: Exception) {
+            com.elysium.vanguard.ui.theme.ThemeMode.Dark
+        }
+    }
+
+    /** Persist the theme mode. Async via `apply()`. */
+    fun saveThemeMode(mode: com.elysium.vanguard.ui.theme.ThemeMode) {
+        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+    }
+
     // ── Companion: factory + key constants ────────────────────────
 
     companion object {
         const val PREFS_NAME = "elysium_palette_prefs"
         const val KEY_CURRENT_PALETTE = "current_palette_json"
         const val KEY_SAVED_PALETTES = "saved_palettes_json_set"
+        const val KEY_THEME_MODE = "theme_mode_v1"
 
         /** Factory: build a store backed by the app's SharedPreferences. */
         fun fromContext(context: Context): PaletteStore {

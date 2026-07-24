@@ -72,8 +72,13 @@ class MainActivity : ComponentActivity() {
             // M3 widget (Button, TextField, etc.) reacts
             // immediately.
             val palette by paletteManager.current.collectAsState()
+            // PHASE 127 — the live theme mode (Dark / Light /
+            // System). The Settings body in the proprietary
+            // Windows desktop writes to this; the whole UI
+            // re-renders with the new M3 colorScheme.
+            val themeMode by paletteManager.themeMode.collectAsState()
 
-            ElysiumTheme(palette = palette) {
+            ElysiumTheme(palette = palette, themeMode = themeMode) {
                 NavHost(
                     navController = navController,
                     startDestination = "splash"
