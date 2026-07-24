@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Computer
@@ -307,6 +309,14 @@ class WindowContentRegistry @Inject constructor(
         "image_viewer" to WindowContent(
             icon = Icons.Filled.Image,
             body = { ImageViewerBody() },
+        ),
+        // PHASE 136 — Calendar: real
+        // month-view grid. Tap a day to
+        // select it. No event store yet
+        // (Phase 137).
+        "calendar" to WindowContent(
+            icon = Icons.Filled.CalendarMonth,
+            body = { CalendarBody() },
         ),
     )
 
@@ -1140,6 +1150,13 @@ private fun ProgramsBody() {
             icon = Icons.Filled.Image,
             iconTint = Color(0xFFFF79C6),
             onClick = { registry.requestOpenInternal("image_viewer", "Image Viewer") },
+        ),
+        ProgramEntry(
+            label = "Calendar",
+            subtitle = "Month view with day selection",
+            icon = Icons.Filled.CalendarMonth,
+            iconTint = Color(0xFF8BE9FD),
+            onClick = { registry.requestOpenInternal("calendar", "Calendar") },
         ),
     )
 
@@ -3793,6 +3810,165 @@ private fun ImageViewerBody() {
                     )
                 }
             }
+        }
+    }
+}
+
+// ─── Calendar (real month grid) ─────────────────────────
+
+/**
+ * PHASE 136 — a real month-view calendar. Shows
+ * the current month with weekday headers, a 6×7
+ * grid of days, navigation arrows for previous
+ * / next month, and a "today" highlight. Tapping
+ * a day sets [selectedDay] (highlighted in
+ * primary). Phase 137 will add event persistence.
+ */
+@Composable
+private fun CalendarBody() {
+    val today = remember { java.util.Calendar.getInstance() }
+    var viewYear by remember { mutableStateOf(today.get(java.util.Calendar.YEAR)) }
+    var viewMonth by remember { mutableStateOf(today.get(java.util.Calendar.MONTH)) }
+    var selectedDay by remember { mutableStateOf(today.get(java.util.Calendar.DAY_OF_MONTH)) }
+    val monthFormat = remember { java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.US) }
+    val dayFormat = remember { java.text.SimpleDateFormat("EEEE", java.util.Locale.US) }
+    val selectedFormat = remember { java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.US) }
+    val daysOfWeek = remember { listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+    ) {
+        // Header (month nav)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.TextButton(onClick = {
+                if (viewMonth == 0) {
+                    viewMonth = 11
+                    viewYear -= 1
+                } else {
+                    viewMonth -= 1
+                }
+            }) {
+                Text("◀", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+            }
+            Text(
+                text = monthFormat.format(
+                    java.util.GregorianCalendar(viewYear, viewMonth, 1).time,
+                ),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            androidx.compose.material3.TextButton(onClick = {
+                if (viewMonth == 11) {
+                    viewMonth = 0
+                    viewYear += 1
+                } else {
+                    viewMonth += 1
+                }
+            }) {
+                Text("▶", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // Day-of-week header
+        Row(modifier = Modifier.fillMaxWidth()) {
+            daysOfWeek.forEach { d ->
+                Text(
+                    text = d.take(3),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 4.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        }
+        // Day grid
+        val firstDayCal = java.util.GregorianCalendar(viewYear, viewMonth, 1)
+        val firstDayOfWeek = firstDayCal.get(java.util.Calendar.DAY_OF_WEEK) - 1  // 0..6 (Sun..Sat)
+        val daysInMonth = firstDayCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+        val totalCells = ((firstDayOfWeek + daysInMonth + 6) / 7) * 7
+        val isToday = viewYear == today.get(java.util.Calendar.YEAR) &&
+            viewMonth == today.get(java.util.Calendar.MONTH)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            for (week in 0 until totalCells / 7) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (dow in 0..6) {
+                        val cellIndex = week * 7 + dow
+                        val dayOfMonth = cellIndex - firstDayOfWeek + 1
+                        val isCurrentMonth = dayOfMonth in 1..daysInMonth
+                        val isTodayCell = isToday && dayOfMonth == today.get(java.util.Calendar.DAY_OF_MONTH)
+                        val isSelected = isCurrentMonth && dayOfMonth == selectedDay &&
+                            viewYear == today.get(java.util.Calendar.YEAR) &&
+                            viewMonth == today.get(java.util.Calendar.MONTH)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        isSelected -> MaterialTheme.colorScheme.primary
+                                        isTodayCell -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .let { m ->
+                                    if (isCurrentMonth) m.clickable {
+                                        selectedDay = dayOfMonth
+                                    } else m
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isCurrentMonth) {
+                                Text(
+                                    text = dayOfMonth.toString(),
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (isTodayCell) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        // Selected day + today
+        val selectedCal = java.util.GregorianCalendar(
+            today.get(java.util.Calendar.YEAR),
+            today.get(java.util.Calendar.MONTH),
+            selectedDay,
+        )
+        Text(
+            text = selectedFormat.format(selectedCal.time),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = "Day of week: ${dayFormat.format(selectedCal.time)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        androidx.compose.material3.TextButton(
+            onClick = {
+                viewYear = today.get(java.util.Calendar.YEAR)
+                viewMonth = today.get(java.util.Calendar.MONTH)
+                selectedDay = today.get(java.util.Calendar.DAY_OF_MONTH)
+            },
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text("Jump to today", color = MaterialTheme.colorScheme.primary)
         }
     }
 }
