@@ -122,6 +122,14 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
                         iconKey = "files",
                     )
                 }
+                is com.elysium.vanguard.features.desktop.content.DesktopAction.OpenInternal -> {
+                    val id = "${action.iconKey}-${System.currentTimeMillis()}"
+                    viewModel.openWindow(
+                        id = id,
+                        title = action.title,
+                        iconKey = action.iconKey,
+                    )
+                }
             }
         }
     }
