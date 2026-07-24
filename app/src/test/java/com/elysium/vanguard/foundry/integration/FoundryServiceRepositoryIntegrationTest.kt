@@ -22,10 +22,17 @@ import com.elysium.vanguard.foundry.persistence.repository.InMemoryProvenanceRec
 import com.elysium.vanguard.foundry.persistence.repository.InMemoryVehicleProgramRepository
 import com.elysium.vanguard.foundry.persistence.repository.InMemoryVehicleRevisionRepository
 import com.elysium.vanguard.foundry.fixture.VehicleDefinitionFixture
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -55,6 +62,35 @@ import org.junit.Test
  * persistence layer.
  */
 class FoundryServiceRepositoryIntegrationTest {
+
+    /**
+     * PHASE 118 — install a `UnconfinedTestDispatcher` as
+     * `Dispatchers.Main` for the duration of the test. The
+     * foundry services touch the Main dispatcher indirectly
+     * (e.g. via `kotlinx.coroutines.flow.MutableStateFlow`
+     * updates that propagate through the test scope); without
+     * `setMain`, the first test that uses `runTest` failed
+     * with `Module with the Main dispatcher had failed to
+     * initialize` (the JVM test classpath has no Android
+     * Main looper).
+     *
+     * `UnconfinedTestDispatcher` is the right shape for a
+     * `runTest`-based integration test: it doesn't queue
+     * coroutines (the test scope + the `runTest` scheduler
+     * drive them), so the assertion in the test body runs
+     * as soon as the last coroutine in the body completes.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Before
+    fun setUpMainDispatcher() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @After
+    fun tearDownMainDispatcher() {
+        Dispatchers.resetMain()
+    }
 
     private val fixedTimestamp: Timestamp.Companion.TimestampSource = object : Timestamp.Companion.TimestampSource {
         private val fixed = Timestamp(1_700_000_000_000L)
