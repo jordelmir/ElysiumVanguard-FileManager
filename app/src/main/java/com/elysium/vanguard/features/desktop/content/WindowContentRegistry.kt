@@ -892,6 +892,14 @@ private fun FileInfoBanner(file: TitanFile, onDismiss: () -> Unit) {
 
 @Composable
 private fun FileRow(file: TitanFile, onOpen: () -> Unit) {
+    // PHASE 135 — show "size · modified" instead of
+    // just the size. The modified date is the
+    // relative format (e.g. "2 min ago") so the
+    // user can see recency at a glance.
+    val relativeTime = remember(file.lastModified) {
+        if (file.lastModified == 0L) ""
+        else formatRelativeTime(file.lastModified)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -913,13 +921,37 @@ private fun FileRow(file: TitanFile, onOpen: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = file.size,
+                text = if (relativeTime.isEmpty()) file.size
+                    else "${file.size} · $relativeTime",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/**
+ * Format a millisecond timestamp as a human-readable
+ * relative time. e.g. "5 min ago", "2 days ago",
+ * "3 weeks ago", "1 year ago", or "now" for very
+ * recent files. Returns "" for the 0L sentinel
+ * (the file system didn't report a mtime).
+ */
+private fun formatRelativeTime(ms: Long): String {
+    val now = System.currentTimeMillis()
+    val delta = (now - ms).coerceAtLeast(0L)
+    val sec = delta / 1000
+    return when {
+        sec < 30 -> "now"
+        sec < 60 -> "${sec}s ago"
+        sec < 3600 -> "${sec / 60} min ago"
+        sec < 86400 -> "${sec / 3600} hr ago"
+        sec < 7 * 86400 -> "${sec / 86400} days ago"
+        sec < 30L * 86400 -> "${sec / (7 * 86400)} weeks ago"
+        sec < 365L * 86400 -> "${sec / (30L * 86400)} months ago"
+        else -> "${sec / (365L * 86400)} years ago"
     }
 }
 
