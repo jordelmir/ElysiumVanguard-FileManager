@@ -717,11 +717,47 @@ private fun RealFilesBody(initialPath: String) {
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
     ) {
-        // Breadcrumb: shows the path as clickable segments
-        Breadcrumb(
-            path = currentPath,
-            onNavigate = { newPath -> currentPath = newPath },
-        )
+        // PHASE 134 — Up button + breadcrumb. The Up
+        // button goes to the parent directory (one
+        // level up); it's disabled at the filesystem
+        // root. The breadcrumb still does the same
+        // thing — tap a segment to jump.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val parent = currentPath.let { File(it).parent }
+            val canGoUp = parent != null && currentPath != "/"
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        if (canGoUp) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        else Color.Transparent
+                    )
+                    .let { m ->
+                        if (canGoUp) m.clickable { currentPath = parent!! } else m
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "↑",
+                    color = if (canGoUp) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    style = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Breadcrumb(
+                path = currentPath,
+                onNavigate = { newPath -> currentPath = newPath },
+            )
+        }
         // Selected file info banner (only when one is selected)
         selectedInfo?.let { info ->
             FileInfoBanner(
