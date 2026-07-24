@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.elysium.vanguard.features.desktop.content.WindowContentRegistry
+import com.elysium.vanguard.features.desktop.content.rememberWindowContentRegistry
 import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
 
@@ -99,7 +100,8 @@ private fun DockItemView(
     isFocused: Boolean,
     onClick: () -> Unit,
 ) {
-    val content = WindowContentRegistry.resolve(item.iconKey)
+    val registry = rememberWindowContentRegistry()
+    val content = registry.resolve(item.iconKey)
     val iconTint = if (isFocused) {
         MaterialTheme.colorScheme.primary
     } else {

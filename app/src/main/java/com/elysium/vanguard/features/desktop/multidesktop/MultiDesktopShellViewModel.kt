@@ -535,14 +535,32 @@ open class MultiDesktopShellViewModel(
      */
     private fun defaultDockItems(sessionName: String): List<com.elysium.vanguard.features.desktop.model.DockItem> = listOf(
         com.elysium.vanguard.features.desktop.model.DockItem(
-            iconKey = "terminal",
-            label = "Terminal · $sessionName",
+            iconKey = "my_pc",
+            label = "This PC · $sessionName",
             kind = DockItemKind.PINNED_APP,
             windowId = null,
         ),
         com.elysium.vanguard.features.desktop.model.DockItem(
             iconKey = "files",
             label = "Files · $sessionName",
+            kind = DockItemKind.PINNED_APP,
+            windowId = null,
+        ),
+        com.elysium.vanguard.features.desktop.model.DockItem(
+            iconKey = "terminal",
+            label = "Terminal · $sessionName",
+            kind = DockItemKind.PINNED_APP,
+            windowId = null,
+        ),
+        com.elysium.vanguard.features.desktop.model.DockItem(
+            iconKey = "programs",
+            label = "Programs · $sessionName",
+            kind = DockItemKind.PINNED_APP,
+            windowId = null,
+        ),
+        com.elysium.vanguard.features.desktop.model.DockItem(
+            iconKey = "chrome",
+            label = "Chrome · $sessionName",
             kind = DockItemKind.PINNED_APP,
             windowId = null,
         ),

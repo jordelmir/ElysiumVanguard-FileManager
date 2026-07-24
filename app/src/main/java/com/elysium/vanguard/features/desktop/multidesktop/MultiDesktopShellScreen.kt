@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.elysium.vanguard.features.desktop.DesktopShellContent
+import com.elysium.vanguard.features.desktop.content.rememberWindowContentRegistry
 import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
 import com.elysium.vanguard.features.desktop.model.WindowState
@@ -42,16 +43,49 @@ import com.elysium.vanguard.features.desktop.model.WindowState
 fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
     val state by viewModel.state.collectAsState()
     val active = state.activeSession
+    // PHASE 121 — the registry's external app launchers
+    // (chrome, codex, antigravity, opencode, mavis) must
+    // be checked BEFORE the window-opening path so they
+    // fire the Android Intent instead of opening a window.
+    val registry = rememberWindowContentRegistry()
+    // PHASE 121 — collect the registry's cross-window
+    // actions (e.g. "My PC" drive tap → open Files at
+    // /sdcard) and open a new Files window for each one.
+    // The pendingPaths map is read by [PositionedWindow]
+    // inside [DesktopShellContent] to inject the path
+    // into the Files body.
+    val pendingPaths = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    androidx.compose.runtime.LaunchedEffect(registry) {
+        registry.actions.collect { action ->
+            when (action) {
+                is com.elysium.vanguard.features.desktop.content.DesktopAction.OpenFilesAtPath -> {
+                    val id = "files-${action.path}-${System.currentTimeMillis()}"
+                    pendingPaths[id] = action.path
+                    viewModel.openWindow(
+                        id = id,
+                        title = "Files · ${action.path}",
+                        iconKey = "files",
+                    )
+                }
+            }
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         DesktopShellContent(
             state = active,
+            pendingPaths = pendingPaths,
             onWindowClick = { id -> viewModel.focusWindow(id) },
             onWindowMinimize = { id -> viewModel.minimizeWindow(id) },
             onWindowMaximize = { id -> viewModel.maximizeWindow(id) },
             onWindowRestore = { id -> viewModel.restoreWindow(id) },
             onWindowClose = { id -> viewModel.closeWindow(id) },
             onWindowDragged = { id, bounds -> viewModel.updateWindowBounds(id, bounds) },
-            onDockItemClick = { item -> handleDockItemClick(viewModel, item) },
+            onDockItemClick = { item ->
+                val launched = registry.launchExternal(item.iconKey)
+                if (!launched) {
+                    handleDockItemClick(viewModel, item)
+                }
+            },
             onLayoutModeSelected = { mode -> viewModel.setLayoutMode(mode) },
         )
         // The session tab strip sits at the

@@ -266,9 +266,20 @@ open class DesktopShellViewModel(
         fun defaultInitialState(): DesktopSessionState = DesktopSessionState(
             windows = emptyList(),
             focusedWindowId = null,
+            // PHASE 121 — the proprietary Windows desktop
+            // starts with 7 pinned apps: my_pc (drives),
+            // files (real explorer), terminal (Phase 122
+            // rewires), programs (Start menu), chrome
+            // (external app launcher), settings, notes.
+            // This list mirrors the multi-shell's
+            // defaultDockItems() so single-session and
+            // multi-session shells share the same dock.
             dockItems = listOf(
-                DockItem("terminal", "Terminal", DockItemKind.PINNED_APP, null),
+                DockItem("my_pc", "This PC", DockItemKind.PINNED_APP, null),
                 DockItem("files", "Files", DockItemKind.PINNED_APP, null),
+                DockItem("terminal", "Terminal", DockItemKind.PINNED_APP, null),
+                DockItem("programs", "Programs", DockItemKind.PINNED_APP, null),
+                DockItem("chrome", "Chrome", DockItemKind.PINNED_APP, null),
                 DockItem("settings", "Settings", DockItemKind.PINNED_APP, null),
                 DockItem("notes", "Notes", DockItemKind.PINNED_APP, null),
             ),

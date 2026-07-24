@@ -48,11 +48,14 @@ class MultiDesktopShellViewModelTest {
     }
 
     @Test
-    fun `initial session is the default FREEFORM desktop with 4 pinned apps`() {
+    fun `initial session is the default FREEFORM desktop with 7 pinned apps`() {
         val session = viewModel.activeSession
         assertEquals(LayoutMode.FREEFORM, session.layoutMode)
         assertEquals(0, session.windows.size)
-        assertEquals(4, session.dockItems.size)
+        // PHASE 121 — the proprietary Windows desktop
+        // starts with 7 pinned apps: my_pc, files,
+        // terminal, programs, chrome, settings, notes.
+        assertEquals(7, session.dockItems.size)
     }
 
     // --- createSession ---
@@ -99,14 +102,19 @@ class MultiDesktopShellViewModelTest {
     }
 
     @Test
-    fun `each new session starts with the standard 4 pinned apps`() {
+    fun `each new session starts with the standard 7 pinned apps`() {
         viewModel.createSession()
         val session = viewModel.activeSession
-        assertEquals(4, session.dockItems.size)
-        // The 4 standard apps.
+        // Phase 121 grew the standard dock from 4 to 7 pinned
+        // apps: my_pc, files, terminal, programs, chrome,
+        // settings, notes.
+        assertEquals(7, session.dockItems.size)
         val iconKeys = session.dockItems.map { it.iconKey }
-        assertTrue(iconKeys.contains("terminal"))
+        assertTrue(iconKeys.contains("my_pc"))
         assertTrue(iconKeys.contains("files"))
+        assertTrue(iconKeys.contains("terminal"))
+        assertTrue(iconKeys.contains("programs"))
+        assertTrue(iconKeys.contains("chrome"))
         assertTrue(iconKeys.contains("settings"))
         assertTrue(iconKeys.contains("notes"))
     }

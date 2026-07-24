@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.elysium.vanguard.features.desktop.content.WindowContentRegistry
+import com.elysium.vanguard.features.desktop.content.rememberWindowContentRegistry
 
 /**
  * Phase 78 — the **real** window frame.
@@ -111,7 +112,8 @@ fun WindowFrame(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val content = WindowContentRegistry.resolve(iconKey)
+            val registry = rememberWindowContentRegistry()
+            val content = registry.resolve(iconKey)
             Icon(
                 imageVector = content.icon,
                 contentDescription = null,

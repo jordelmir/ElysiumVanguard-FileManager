@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.elysium.vanguard.features.desktop.content.WindowContentRegistry
+import com.elysium.vanguard.features.desktop.content.rememberWindowContentRegistry
 import com.elysium.vanguard.features.desktop.dock.Dock
 import com.elysium.vanguard.features.desktop.dock.DockStatusBadge
 import com.elysium.vanguard.features.desktop.dock.LayoutModeToggle
@@ -101,8 +102,32 @@ import com.elysium.vanguard.features.desktop.window.WindowFrame
 @Composable
 fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
     val state by viewModel.state.collectAsState()
+    val registry = rememberWindowContentRegistry()
+    // PHASE 121 — registry actions (e.g. "My PC" drive
+    // tap → open Files at /sdcard) are routed through
+    // a SharedFlow. We collect + dispatch here. The
+    // pending path map is read by [PositionedWindow]
+    // to render the right initial path for each
+    // Files window.
+    val pendingPaths = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    androidx.compose.runtime.LaunchedEffect(registry) {
+        registry.actions.collect { action ->
+            when (action) {
+                is com.elysium.vanguard.features.desktop.content.DesktopAction.OpenFilesAtPath -> {
+                    val id = "files-${action.path}-${System.currentTimeMillis()}"
+                    pendingPaths[id] = action.path
+                    viewModel.openWindow(
+                        id = id,
+                        title = "Files · ${action.path}",
+                        iconKey = "files",
+                    )
+                }
+            }
+        }
+    }
     DesktopShellContent(
         state = state,
+        pendingPaths = pendingPaths,
         onWindowClick = { id -> viewModel.focusWindow(id) },
         onWindowMinimize = { id -> viewModel.minimizeWindow(id) },
         onWindowMaximize = { id -> viewModel.maximizeWindow(id) },
@@ -123,12 +148,20 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
                     }
                 }
                 DockItemKind.PINNED_APP -> {
-                    val id = "${item.iconKey}-${System.currentTimeMillis()}"
-                    viewModel.openWindow(
-                        id = id,
-                        title = item.label,
-                        iconKey = item.iconKey,
-                    )
+                    // Phase 123: external app launchers (chrome,
+                    // codex, antigravity, opencode, mavis) are
+                    // handled by the registry's intent catalog
+                    // — they don't open a window. The registry
+                    // returns true if it consumed the click.
+                    val launched = registry.launchExternal(item.iconKey)
+                    if (!launched) {
+                        val id = "${item.iconKey}-${System.currentTimeMillis()}"
+                        viewModel.openWindow(
+                            id = id,
+                            title = item.label,
+                            iconKey = item.iconKey,
+                        )
+                    }
                 }
             }
         },
@@ -139,6 +172,15 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
 @Composable
 fun DesktopShellContent(
     state: DesktopSessionState,
+    /**
+     * PHASE 121 — per-window path overrides for the
+     * "Files" body. The shell populates this when a
+     * "My PC" drive tap arrives; [PositionedWindow]
+     * reads + removes the entry on first render so the
+     * override applies only to the window's first
+     * composition.
+     */
+    pendingPaths: androidx.compose.runtime.snapshots.SnapshotStateMap<String, String> = androidx.compose.runtime.mutableStateMapOf(),
     onWindowClick: (String) -> Unit = {},
     onWindowMinimize: (String) -> Unit = {},
     onWindowMaximize: (String) -> Unit = {},
@@ -258,6 +300,7 @@ fun DesktopShellContent(
                     desktopSize = measuredSize,
                     titleBarHeightPx = titleBarHeightPx,
                     dockHeightPx = dockHeightPx,
+                    pendingPaths = pendingPaths,
                     onClick = { onWindowClick(window.id) },
                     onMinimize = { onWindowMinimize(window.id) },
                     onMaximize = { onWindowMaximize(window.id) },
@@ -317,6 +360,7 @@ private fun PositionedWindow(
     desktopSize: IntSize,
     titleBarHeightPx: Int,
     dockHeightPx: Int,
+    pendingPaths: androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>,
     onClick: () -> Unit,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
@@ -329,7 +373,13 @@ private fun PositionedWindow(
     val heightDp = with(density) { window.bounds.height.toDp() }
     val xDp = with(density) { window.bounds.x.toDp() }
     val yDp = with(density) { window.bounds.y.toDp() }
-    val content = WindowContentRegistry.resolve(window.iconKey)
+    val registry = rememberWindowContentRegistry()
+    // PHASE 121 — if a pending path is registered for this
+    // window id, the Files body opens at that path; we
+    // remove the entry on first read so the override is
+    // a one-shot (the user can still navigate afterwards).
+    val pendingPath = remember(window.id) { pendingPaths.remove(window.id) }
+    val content = registry.resolve(window.iconKey, path = pendingPath)
     Box(
         modifier = Modifier
             .offset(x = xDp, y = yDp)
