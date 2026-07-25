@@ -30,22 +30,32 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.SpeakerNotes
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Code
@@ -58,6 +68,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Save
@@ -76,6 +87,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -85,6 +97,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -95,6 +108,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -137,8 +151,8 @@ import kotlin.math.roundToInt
  *  - [ProgramsBody] is a 2-section catalog of Elysium System +
  *    installed user apps
  *  - [CalculatorBody], [SystemInfoBody], [BrowserBody], [ClockBody],
- *    [TaskManagerBody], [HelpBody], [ImageViewerBody], [CalendarBody]
- *    are all real, functional built-in apps
+ *    [TaskManagerBody], [HelpBody], [ImageViewerBody], [CalendarBody],
+ *    [PaintBody] are all real, functional built-in apps
  *
  * The Hilt conversion was required because the bodies need access
  * to the application Context (for [FileProvider] + SAF) and the
@@ -332,6 +346,15 @@ class WindowContentRegistry @Inject constructor(
         "calendar" to WindowContent(
             icon = Icons.Filled.CalendarMonth,
             body = { CalendarBody() },
+        ),
+        // PHASE 138 — Paint: real canvas
+        // body (Compose Canvas + drag
+        // gestures + brush + color + save
+        // PNG). 8-color palette, 1..20 dp
+        // brush size, undo + clear + save.
+        "paint" to WindowContent(
+            icon = Icons.Filled.Brush,
+            body = { PaintBody() },
         ),
     )
 
@@ -1172,6 +1195,13 @@ private fun ProgramsBody() {
             icon = Icons.Filled.CalendarMonth,
             iconTint = Color(0xFF8BE9FD),
             onClick = { registry.requestOpenInternal("calendar", "Calendar") },
+        ),
+        ProgramEntry(
+            label = "Paint",
+            subtitle = "Canvas + 8-color palette + save PNG",
+            icon = Icons.Filled.Brush,
+            iconTint = Color(0xFF50FA7B),
+            onClick = { registry.requestOpenInternal("paint", "Paint") },
         ),
     )
 
@@ -4264,6 +4294,359 @@ private fun AddEventDialog(
             }
         },
     )
+}
+
+// ─── Paint (canvas + brush + save PNG) ────────────────
+
+/**
+ * PHASE 138 — a real canvas body. Compose `Canvas` +
+ * `pointerInput` + `detectDragGestures` captures the
+ * finger/stylus path. Each stroke is stored as a
+ * [PaintStroke] data class (ordered list of offsets +
+ * color + width) so we can re-render to any bitmap at
+ * any time, and so `undo()` is just a `removeLast()`.
+ *
+ * The 8-color palette and 1..20 dp brush-size slider
+ * cover the practical use cases without overwhelming
+ * the body. Save renders the current strokes to a
+ * software [Bitmap] via [android.graphics.Canvas] and
+ * writes it as PNG to `/sdcard/Pictures/Elysium/Paint_<ts>.png`
+ * (then fires a media-scan so the image shows up in the
+ * system gallery).
+ */
+private data class PaintStroke(
+    val color: Color,
+    val widthDp: Float,
+    val points: List<Offset>,
+)
+
+/**
+ * The 8-color picker palette. Fixed set so the body stays
+ * tiny; the user can change the color but not add new ones
+ * (a future phase can swap this for an HSV wheel).
+ */
+private val PAINT_PALETTE: List<Color> = listOf(
+    Color(0xFF000000),  // black
+    Color(0xFFFFFFFF),  // white
+    Color(0xFFFF5555),  // red
+    Color(0xFFFFB86C),  // orange
+    Color(0xFFF1FA8C),  // yellow
+    Color(0xFF50FA7B),  // green
+    Color(0xFF8BE9FD),  // cyan
+    Color(0xFFBD93F9),  // purple
+)
+
+private const val PAINT_MAX_STROKES = 200  // hard cap on the undo stack
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PaintBody() {
+    val context = LocalContext.current
+    // The undo-able list of strokes. Each entry is one
+    // completed drag (finger down → drag → finger up). The
+    // current in-progress stroke is held in [inProgress]
+    // so the user sees the line as they draw it.
+    val strokes = remember { mutableStateListOf<PaintStroke>() }
+    var inProgress by remember { mutableStateOf<List<Offset>?>(null) }
+    var color by remember { mutableStateOf(PAINT_PALETTE[0]) }
+    var widthDp by remember { mutableStateOf(6f) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // ─── The body ──────────────────────────────────────────
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Toolbar: color swatches + brush size slider + undo / clear / save
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            PAINT_PALETTE.forEach { swatch ->
+                val selected = swatch == color
+                Box(
+                    modifier = Modifier
+                        .size(if (selected) 32.dp else 24.dp)
+                        .clip(CircleShape)
+                        .background(swatch)
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                            shape = CircleShape,
+                        )
+                        .clickable { color = swatch },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) {
+                        androidx.compose.material3.Icon(
+                            imageVector = Icons.Filled.Brush,
+                            contentDescription = null,
+                            tint = if (swatch.luminance() > 0.5f) Color.Black else Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
+        }
+        // Brush size slider + numeric label
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = Icons.Filled.Palette,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Slider(
+                value = widthDp,
+                onValueChange = { widthDp = it.coerceIn(1f, 20f) },
+                valueRange = 1f..20f,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${widthDp.toInt()} px",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(48.dp),
+            )
+        }
+        // Action row: undo / clear / save
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = {
+                    if (strokes.isNotEmpty()) strokes.removeAt(strokes.lastIndex)
+                },
+                enabled = strokes.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Undo,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Undo", fontSize = 12.sp)
+            }
+            androidx.compose.material3.OutlinedButton(
+                onClick = { strokes.clear() },
+                enabled = strokes.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Clear", fontSize = 12.sp)
+            }
+            androidx.compose.material3.Button(
+                onClick = {
+                    val saved = savePaintToGallery(context, strokes)
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            if (saved != null) "Saved: ${saved.substringAfterLast('/')}"
+                            else "Save failed",
+                        )
+                    }
+                },
+                enabled = strokes.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = Icons.Filled.Save,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Save", fontSize = 12.sp)
+            }
+        }
+        // Canvas
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White)
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { start ->
+                            inProgress = listOf(start)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            val current = inProgress.orEmpty()
+                            inProgress = current + change.position
+                        },
+                        onDragEnd = {
+                            inProgress?.let { finished ->
+                                if (finished.size > 1) {
+                                    if (strokes.size >= PAINT_MAX_STROKES) {
+                                        strokes.removeAt(0)
+                                    }
+                                    strokes.add(
+                                        PaintStroke(
+                                            color = color,
+                                            widthDp = widthDp,
+                                            points = finished,
+                                        )
+                                    )
+                                }
+                                inProgress = null
+                            }
+                        },
+                        onDragCancel = { inProgress = null },
+                    )
+                },
+        ) {
+            // Re-draw every stroke + the in-progress one.
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                strokes.forEach { stroke -> drawStroke(stroke, density) }
+                inProgress?.let { pts ->
+                    if (pts.isNotEmpty()) {
+                        drawStroke(
+                            PaintStroke(color = color, widthDp = widthDp, points = pts),
+                            density,
+                        )
+                    }
+                }
+            }
+            // Empty-state hint (only when truly empty)
+            if (strokes.isEmpty() && inProgress == null) {
+                Text(
+                    text = "Draw something!\nUse the palette above to pick a color.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Black.copy(alpha = 0.4f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
+        Text(
+            text = "${strokes.size} stroke${if (strokes.size == 1) "" else "s"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    androidx.compose.material3.SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(8.dp),
+    )
+    }
+}
+
+/**
+ * Draw a single [PaintStroke] into the active Compose [DrawScope].
+ * Splits the points into segments and draws a thick line per
+ * segment so very fast drags don't show as polylines.
+ */
+private fun DrawScope.drawStroke(stroke: PaintStroke, density: Float) {
+    if (stroke.points.isEmpty()) return
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = stroke.widthDp * density
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+        color = android.graphics.Color.argb(
+            (stroke.color.alpha * 255).toInt(),
+            (stroke.color.red * 255).toInt(),
+            (stroke.color.green * 255).toInt(),
+            (stroke.color.blue * 255).toInt(),
+        )
+    }
+    val path = android.graphics.Path().apply {
+        moveTo(stroke.points.first().x, stroke.points.first().y)
+        for (i in 1 until stroke.points.size) {
+            val p = stroke.points[i]
+            lineTo(p.x, p.y)
+        }
+    }
+    drawIntoCanvas { canvas -> canvas.nativeCanvas.drawPath(path, paint) }
+}
+
+/**
+ * Render the current strokes to a software [android.graphics.Bitmap]
+ * and write it to `/sdcard/Pictures/Elysium/Paint_<ts>.png`. Returns
+ * the saved path on success or null on failure. Triggers a media
+ * scan so the image shows up in the system gallery.
+ */
+private fun savePaintToGallery(
+    context: Context,
+    strokes: List<PaintStroke>,
+): String? {
+    if (strokes.isEmpty()) return null
+    return try {
+        val width = 2048
+        val height = 1536
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        // Scale the captured Compose coordinates into the
+        // export bitmap. The body's drawing Canvas isn't
+        // observable from here, so we use a fixed aspect
+        // (4:3) for export. The strokes are re-rendered at
+        // the export scale.
+        val exportScale = minOf(width / 1920f, height / 1080f)
+        strokes.forEach { stroke ->
+            val paint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = stroke.widthDp * 4f * exportScale
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+                color = android.graphics.Color.argb(
+                    (stroke.color.alpha * 255).toInt(),
+                    (stroke.color.red * 255).toInt(),
+                    (stroke.color.green * 255).toInt(),
+                    (stroke.color.blue * 255).toInt(),
+                )
+            }
+            val path = android.graphics.Path().apply {
+                if (stroke.points.isNotEmpty()) {
+                    moveTo(stroke.points.first().x * exportScale, stroke.points.first().y * exportScale)
+                    for (i in 1 until stroke.points.size) {
+                        val p = stroke.points[i]
+                        lineTo(p.x * exportScale, p.y * exportScale)
+                    }
+                }
+            }
+            canvas.drawPath(path, paint)
+        }
+        val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+        val picturesDir = java.io.File("/sdcard/Pictures/Elysium").apply { mkdirs() }
+        val outFile = java.io.File(picturesDir, "Paint_$ts.png")
+        java.io.FileOutputStream(outFile).use { os ->
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, os)
+        }
+        bitmap.recycle()
+        // Tell the system gallery about the new file so it
+        // shows up immediately.
+        context.sendBroadcast(
+            android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                .setData(android.net.Uri.fromFile(outFile))
+        )
+        outFile.absolutePath
+    } catch (_: Exception) {
+        null
+    }
 }
 
 // ============================== Hilt bridge ==============================
