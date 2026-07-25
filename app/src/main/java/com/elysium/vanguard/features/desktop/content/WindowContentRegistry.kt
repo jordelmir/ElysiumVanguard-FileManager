@@ -101,6 +101,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import com.elysium.vanguard.core.runtime.distros.terminal.rememberProotTerminalRunner
+import com.elysium.vanguard.core.runtime.distros.terminal.ProotTerminalRunner
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -252,7 +254,12 @@ class WindowContentRegistry @Inject constructor(
         ),
         "terminal" to WindowContent(
             icon = Icons.Filled.Terminal,
-            body = { TerminalBody() },
+            // PHASE 142 — RealTerminalBody uses
+            // ProotTerminalRunner to spawn a real proot
+            // + Alpine shell. The Phase 122 client-side
+            // shell mock (TerminalBody) is kept for
+            // reference and will be removed in Phase 143.
+            body = { RealTerminalBody() },
         ),
         "settings" to WindowContent(
             icon = Icons.Filled.Settings,
@@ -1583,6 +1590,272 @@ private sealed class TerminalLine {
 }
 
 @Composable
+/**
+ * PHASE 142 — the real terminal body.
+ *
+ * Replaces the Phase 122 client-side shell mock. Wires
+ * the [ProotTerminalRunner] to a Compose UI:
+ *   - On first composition, calls [ProotTerminalRunner.start]
+ *     which spawns a real `proot` process running Alpine
+ *     Linux's `/bin/ash` inside the bundled rootfs.
+ *   - Subscribes to the runner's `output` SharedFlow and
+ *     appends each chunk to a renderable list.
+ *   - Subscribes to the runner's `state` StateFlow and
+ *     shows a banner while the process is starting, an
+ *     error banner on failure, and the live process
+ *     status while running.
+ *   - On every keystroke, writes the UTF-8 bytes to the
+ *     runner (which forwards them to the shell's stdin).
+ *     On Enter, also writes `\n` so the shell runs the
+ *     command.
+ *
+ * The UI is intentionally minimal — a vertical column
+ * of monospace text (no ANSI escape parsing, no line
+ * editing, no terminal emulator). The shell's own line
+ * editor (ash's readline) handles the visible prompt +
+ * history; the runner pipes raw bytes through. For
+ * interactive programs (vi, top) the user would need
+ * a proper PTY-backed terminal emulator (Phase 143
+ * will swap the `TerminalSurfaceView` in once
+ * `libelysium_runtime.so` is cross-compiled for Android).
+ *
+ * For now: the user gets a real Linux shell, real
+ * `apk add`, real `ls`, real `cat`. That's the
+ * "terminal real y funcional" the master vision asks
+ * for.
+ */
+private fun RealTerminalBody() {
+    val runner = rememberProotTerminalRunner()
+    val scope = rememberCoroutineScope()
+    // The terminal's renderable output. We collect every
+    // chunk from [ProotTerminalRunner.output] into a
+    // snapshot list — the UI re-renders on every change.
+    var lines by remember {
+        mutableStateOf<List<TerminalLine>>(seedTerminalHistory())
+    }
+    // The current input buffer (what the user has typed
+    // but not yet pressed Enter on). We don't send every
+    // keystroke to the shell (that would compete with the
+    // shell's own line editor); we send it on Enter.
+    var input by remember { mutableStateOf("") }
+    // Connection status banner. The runner publishes
+    // state transitions; we render a one-line status
+    // when the state is Starting/Error/Exited.
+    val runnerState by runner.state.collectAsState()
+
+    // Subscribe to the runner's stdout stream. We use a
+    // LaunchedEffect tied to the runner so the collection
+    // starts when the body composes and is cancelled when
+    // it leaves. Each chunk is appended to the renderable
+    // list as an Output line.
+    androidx.compose.runtime.LaunchedEffect(runner) {
+        runner.start()
+        runner.output.collect { chunk ->
+            // A single chunk may contain many lines (the
+            // shell doesn't always flush per-line). Split
+            // on \n so each rendered row is a single line.
+            val newLines = chunk.split('\n').map { TerminalLine.Output(it, Color(0xFFF8F8F2)) }
+            lines = lines + newLines
+        }
+    }
+    // Subscribe to the runner's lifecycle events. Failed
+    // events become Error lines; Stderr events become
+    // Error lines too (so the user sees stderr in red);
+    // Exited events become an Info banner.
+    androidx.compose.runtime.LaunchedEffect(runner) {
+        runner.events.collect { event ->
+            when (event) {
+                is ProotTerminalRunner.Event.Failed -> {
+                    lines = lines + TerminalLine.Error("terminal: ${event.message}")
+                }
+                is ProotTerminalRunner.Event.Stderr -> {
+                    val newLines = event.chunk.split('\n')
+                        .filter { it.isNotEmpty() }
+                        .map { TerminalLine.Error(it) }
+                    lines = lines + newLines
+                }
+                is ProotTerminalRunner.Event.Exited -> {
+                    lines = lines + TerminalLine.Info("terminal: exited with code ${event.exitCode}")
+                }
+            }
+        }
+    }
+    // Cleanup: dispose the runner on body exit so the
+    // proot process is killed (the Application-scoped
+    // singleton survives, but the process it spawned
+    // does not).
+    androidx.compose.runtime.DisposableEffect(runner) {
+        onDispose { runner.stop() }
+    }
+
+    // Auto-scroll to the bottom on new lines.
+    val scrollState = androidx.compose.foundation.rememberScrollState()
+    androidx.compose.runtime.LaunchedEffect(lines.size) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0F14))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        // Status banner — tells the user what the
+        // runner is doing. We render this above the
+        // scrollable output so the user always sees
+        // the connection state.
+        val statusText = when (val s = runnerState) {
+            ProotTerminalRunner.State.NotStarted -> "terminal: not started"
+            ProotTerminalRunner.State.Starting -> "terminal: starting proot…"
+            is ProotTerminalRunner.State.Running -> {
+                val pidPart = s.pid?.let { " pid=$it" } ?: ""
+                "terminal: running (Alpine 3.20.3, proot$pidPart)"
+            }
+            is ProotTerminalRunner.State.Exited -> "terminal: exited (code ${s.exitCode})"
+            is ProotTerminalRunner.State.Error -> "terminal: error — ${s.message}"
+        }
+        val statusColor = when (runnerState) {
+            is ProotTerminalRunner.State.Error -> Color(0xFFFF5555)
+            is ProotTerminalRunner.State.Exited -> Color(0xFFFF5555)
+            ProotTerminalRunner.State.Starting -> Color(0xFFFFB86C)
+            else -> Color(0xFF8BE9FD)
+        }
+        Text(
+            text = statusText,
+            color = statusColor,
+            style = MonoSmall,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        // Output history (scrollable)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(scrollState),
+        ) {
+            lines.forEach { line ->
+                when (line) {
+                    is TerminalLine.Input -> Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = line.prompt,
+                            color = Color(0xFF50FA7B),
+                            style = MonoSmall,
+                        )
+                        Text(
+                            text = line.command,
+                            color = Color(0xFFF8F8F2),
+                            style = MonoSmall,
+                        )
+                    }
+                    is TerminalLine.Output -> Text(
+                        text = line.text,
+                        color = line.color,
+                        style = MonoSmall,
+                    )
+                    is TerminalLine.Error -> Text(
+                        text = line.text,
+                        color = Color(0xFFFF5555),
+                        style = MonoSmall,
+                    )
+                    is TerminalLine.Info -> Text(
+                        text = line.text,
+                        color = Color(0xFF8BE9FD),
+                        style = MonoSmall,
+                    )
+                }
+            }
+        }
+        // Input row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "> ",
+                color = Color(0xFF50FA7B),
+                style = MonoSmall,
+            )
+            TextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 4.dp),
+                placeholder = {
+                    Text(
+                        text = "type a Linux command and press Enter (try 'ls /', 'cat /etc/os-release', 'apk add curl')",
+                        color = Color(0xFF6272A4),
+                        style = MonoSmall,
+                    )
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    cursorColor = Color(0xFF50FA7B),
+                    focusedTextColor = Color(0xFFF8F8F2),
+                    unfocusedTextColor = Color(0xFFF8F8F2),
+                ),
+                textStyle = MonoSmall,
+                singleLine = true,
+                enabled = runnerState is ProotTerminalRunner.State.Running ||
+                    runnerState is ProotTerminalRunner.State.Starting,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSend = {
+                        if (input.isNotBlank() && runnerState is ProotTerminalRunner.State.Running) {
+                            val cmd = input
+                            // Record the user-typed line in
+                            // the transcript (echoed by the
+                            // shell too, but we render it
+                            // here so the prompt is shown
+                            // immediately).
+                            lines = lines + TerminalLine.Input(
+                                prompt = "> ",
+                                command = cmd,
+                            )
+                            // Send the command + newline to
+                            // the shell's stdin. The shell
+                            // runs the command and writes
+                            // the output to stdout, which
+                            // we collect in the LaunchedEffect
+                            // above.
+                            runner.write((cmd + "\n").toByteArray(Charsets.UTF_8))
+                            input = ""
+                        }
+                    },
+                ),
+            )
+            // Ctrl+C button — interrupts the running
+            // command without killing the shell.
+            Text(
+                text = "^C",
+                color = Color(0xFFFF5555),
+                style = MonoSmall,
+                modifier = Modifier
+                    .clickable {
+                        runner.sendInterrupt()
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/**
+ * @deprecated Phase 142 — replaced by [RealTerminalBody]
+ * which uses [ProotTerminalRunner] (real proot + real
+ * Alpine). Kept as a doc reference for the colors +
+ * TerminalLine sealed class. Will be deleted in Phase
+ * 143.
+ */
+@androidx.compose.runtime.Composable
 private fun TerminalBody() {
     val registry = rememberWindowContentRegistry()
     val context = LocalContext.current
@@ -1770,13 +2043,14 @@ private val MonoSmall = TextStyle(
 
 /**
  * Build the seed history shown when the terminal
- * first opens. Includes a banner + a hint to
- * run `help`.
+ * first opens. PHASE 142 — the banner now describes
+ * the real Linux underneath (was the Phase 122
+ * client-side shell mock).
  */
 private fun seedTerminalHistory(): List<TerminalLine> = listOf(
     TerminalLine.Info("Elysium Vanguard Terminal v1.0.0-TITAN"),
-    TerminalLine.Info("Proprietary client-side shell — wired to the device filesystem."),
-    TerminalLine.Info("Type 'help' to see available commands. 'clear' to wipe the screen."),
+    TerminalLine.Info("Real Linux via proot + Alpine minirootfs 3.20.3 (aarch64)."),
+    TerminalLine.Info("Type a Linux command and press Enter. Ctrl+C to interrupt."),
     TerminalLine.Output("", Color(0xFFF8F8F2)),
 )
 
