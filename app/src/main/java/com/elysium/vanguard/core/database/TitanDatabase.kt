@@ -232,9 +232,10 @@ interface SmartFolderDao {
         TrashEntity::class,
         VaultEntity::class,
         FileMetadataEntity::class,
-        SmartFolderEntity::class
+        SmartFolderEntity::class,
+        CalendarEventEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class TitanDatabase : RoomDatabase() {
@@ -243,6 +244,7 @@ abstract class TitanDatabase : RoomDatabase() {
     abstract fun vaultDao(): VaultDao
     abstract fun fileMetadataDao(): FileMetadataDao
     abstract fun smartFolderDao(): SmartFolderDao
+    abstract fun calendarEventDao(): CalendarEventDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -322,6 +324,33 @@ abstract class TitanDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_smart_folders_created_at ON smart_folders(created_at)")
+            }
+        }
+
+        /**
+         * PHASE 137 — Adds the calendar_events table for the in-app
+         * calendar's persistent event store. The schema mirrors
+         * [CalendarEventEntity] 1:1; the (year, month, day) prefix
+         * index supports the month-view aggregation query.
+         */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS calendar_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        year INTEGER NOT NULL,
+                        month INTEGER NOT NULL,
+                        day INTEGER NOT NULL,
+                        hour INTEGER NOT NULL,
+                        minute INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        note TEXT NOT NULL DEFAULT '',
+                        color_hex TEXT,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_calendar_events_year_month_day ON calendar_events(year, month, day)")
             }
         }
     }

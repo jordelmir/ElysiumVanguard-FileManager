@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,19 +66,27 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -109,7 +118,7 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 
 /**
- * PHASE 121 — the registry of real window content.
+ * PHASE 121-136 — the registry of real window content.
  *
  * Phase 78 shipped a placeholder registry (object) with 4 fake
  * bodies (TerminalBody, FilesBody, etc. were hardcoded text). That
@@ -118,12 +127,18 @@ import kotlin.math.roundToInt
  * actually work — read folders, open files, run .exe via Wine, etc.
  *
  * The registry is now an Hilt-injected @Singleton that owns a
- * [FileManagerRepositoryDual] and surfaces three real bodies:
+ * [FileManagerRepositoryDual] and surfaces 18 real bodies:
  *  - [MyPcBody] shows the available "drives" (filesystem roots)
  *  - [RealFilesBody] is a real Windows Explorer: path navigation,
- *    breadcrumb, tap to enter, long-press for details
- *  - The Terminal / Settings / Notes bodies stay as placeholders
- *    until Phase 122+ rewires them
+ *    breadcrumb, tap to enter, long-press for details, ↑ button
+ *  - [TerminalBody] is a client-side shell with 22 built-in commands
+ *  - [SettingsBody] is a live system-info dashboard
+ *  - [NotesBody] is a 2-pane multi-note editor with auto-save
+ *  - [ProgramsBody] is a 2-section catalog of Elysium System +
+ *    installed user apps
+ *  - [CalculatorBody], [SystemInfoBody], [BrowserBody], [ClockBody],
+ *    [TaskManagerBody], [HelpBody], [ImageViewerBody], [CalendarBody]
+ *    are all real, functional built-in apps
  *
  * The Hilt conversion was required because the bodies need access
  * to the application Context (for [FileProvider] + SAF) and the
@@ -3814,15 +3829,22 @@ private fun ImageViewerBody() {
     }
 }
 
-// ─── Calendar (real month grid) ─────────────────────────
+// ─── Calendar (real month grid + event persistence) ─────
 
 /**
- * PHASE 136 — a real month-view calendar. Shows
- * the current month with weekday headers, a 6×7
- * grid of days, navigation arrows for previous
- * / next month, and a "today" highlight. Tapping
- * a day sets [selectedDay] (highlighted in
- * primary). Phase 137 will add event persistence.
+ * PHASE 137 — a real month-view calendar with persistent events.
+ *
+ * The grid (Phase 136) is preserved: month nav, weekday header,
+ * 6×7 day grid, today highlight, "Jump to today" button. New in
+ * Phase 137:
+ *  - Days with events show a small dot under the day number
+ *  - Selecting a day reveals a list of that day's events
+ *    (ordered by hour; all-day events listed first)
+ *  - "+ Add event" opens a dialog (title required, note + optional
+ *    time). Time may be left blank for all-day events.
+ *  - Each event has a delete affordance (trash icon)
+ *  - All events are persisted to the [com.elysium.vanguard.core.calendar.CalendarEventRepository]
+ *    which is Hilt-injected via the EntryPoint bridge in this file.
  */
 @Composable
 private fun CalendarBody() {
@@ -3835,142 +3857,413 @@ private fun CalendarBody() {
     val selectedFormat = remember { java.text.SimpleDateFormat("EEEE, MMMM d, yyyy", java.util.Locale.US) }
     val daysOfWeek = remember { listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(8.dp),
-    ) {
-        // Header (month nav)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+    val repo = rememberCalendarEventRepository()
+    val monthEvents by produceState(initialValue = emptyList<com.elysium.vanguard.core.database.CalendarEventEntity>(), viewYear, viewMonth) {
+        repo.observeForMonth(viewYear, viewMonth).collect { value = it }
+    }
+    val dayEvents by produceState(initialValue = emptyList<com.elysium.vanguard.core.database.CalendarEventEntity>(), viewYear, viewMonth, selectedDay) {
+        repo.observeForDay(viewYear, viewMonth, selectedDay).collect { value = it }
+    }
+    val daysWithEvents = remember(monthEvents) { monthEvents.map { it.day }.toSet() }
+    var showAddDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // ─── The body ──────────────────────────────────────────
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(8.dp)
+                .verticalScroll(rememberScrollState()),
         ) {
-            androidx.compose.material3.TextButton(onClick = {
-                if (viewMonth == 0) {
-                    viewMonth = 11
-                    viewYear -= 1
-                } else {
-                    viewMonth -= 1
+            // Header (month nav)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.TextButton(onClick = {
+                    if (viewMonth == 0) {
+                        viewMonth = 11
+                        viewYear -= 1
+                    } else {
+                        viewMonth -= 1
+                    }
+                }) {
+                    Text("◀", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
                 }
-            }) {
-                Text("◀", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
-            }
-            Text(
-                text = monthFormat.format(
-                    java.util.GregorianCalendar(viewYear, viewMonth, 1).time,
-                ),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            androidx.compose.material3.TextButton(onClick = {
-                if (viewMonth == 11) {
-                    viewMonth = 0
-                    viewYear += 1
-                } else {
-                    viewMonth += 1
-                }
-            }) {
-                Text("▶", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        // Day-of-week header
-        Row(modifier = Modifier.fillMaxWidth()) {
-            daysOfWeek.forEach { d ->
                 Text(
-                    text = d.take(3),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 4.dp),
+                    text = monthFormat.format(
+                        java.util.GregorianCalendar(viewYear, viewMonth, 1).time,
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
+                androidx.compose.material3.TextButton(onClick = {
+                    if (viewMonth == 11) {
+                        viewMonth = 0
+                        viewYear += 1
+                    } else {
+                        viewMonth += 1
+                    }
+                }) {
+                    Text("▶", color = MaterialTheme.colorScheme.primary, fontSize = 18.sp)
+                }
             }
-        }
-        // Day grid
-        val firstDayCal = java.util.GregorianCalendar(viewYear, viewMonth, 1)
-        val firstDayOfWeek = firstDayCal.get(java.util.Calendar.DAY_OF_WEEK) - 1  // 0..6 (Sun..Sat)
-        val daysInMonth = firstDayCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-        val totalCells = ((firstDayOfWeek + daysInMonth + 6) / 7) * 7
-        val isToday = viewYear == today.get(java.util.Calendar.YEAR) &&
-            viewMonth == today.get(java.util.Calendar.MONTH)
-        Column(modifier = Modifier.fillMaxWidth()) {
-            for (week in 0 until totalCells / 7) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    for (dow in 0..6) {
-                        val cellIndex = week * 7 + dow
-                        val dayOfMonth = cellIndex - firstDayOfWeek + 1
-                        val isCurrentMonth = dayOfMonth in 1..daysInMonth
-                        val isTodayCell = isToday && dayOfMonth == today.get(java.util.Calendar.DAY_OF_MONTH)
-                        val isSelected = isCurrentMonth && dayOfMonth == selectedDay &&
-                            viewYear == today.get(java.util.Calendar.YEAR) &&
-                            viewMonth == today.get(java.util.Calendar.MONTH)
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .aspectRatio(1f)
-                                .padding(2.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    when {
-                                        isSelected -> MaterialTheme.colorScheme.primary
-                                        isTodayCell -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                                        else -> Color.Transparent
+            Spacer(modifier = Modifier.height(4.dp))
+            // Day-of-week header
+            Row(modifier = Modifier.fillMaxWidth()) {
+                daysOfWeek.forEach { d ->
+                    Text(
+                        text = d.take(3),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 4.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+            // Day grid
+            val firstDayCal = java.util.GregorianCalendar(viewYear, viewMonth, 1)
+            val firstDayOfWeek = firstDayCal.get(java.util.Calendar.DAY_OF_WEEK) - 1  // 0..6 (Sun..Sat)
+            val daysInMonth = firstDayCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            val totalCells = ((firstDayOfWeek + daysInMonth + 6) / 7) * 7
+            val isToday = viewYear == today.get(java.util.Calendar.YEAR) &&
+                viewMonth == today.get(java.util.Calendar.MONTH)
+            // Phase 137 — cap the grid height so the calendar fits in
+            // windowed containers (the body width can be much larger
+            // than its height). 320.dp gives ~53dp per row, which is
+            // enough for the day number + the event-dot indicator.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp),
+            ) {
+                for (week in 0 until totalCells / 7) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    ) {
+                        for (dow in 0..6) {
+                            val cellIndex = week * 7 + dow
+                            val dayOfMonth = cellIndex - firstDayOfWeek + 1
+                            val isCurrentMonth = dayOfMonth in 1..daysInMonth
+                            val isTodayCell = isToday && dayOfMonth == today.get(java.util.Calendar.DAY_OF_MONTH)
+                            val isSelected = isCurrentMonth && dayOfMonth == selectedDay &&
+                                viewYear == today.get(java.util.Calendar.YEAR) &&
+                                viewMonth == today.get(java.util.Calendar.MONTH)
+                            val hasEvents = isCurrentMonth && dayOfMonth in daysWithEvents
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .padding(2.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        when {
+                                            isSelected -> MaterialTheme.colorScheme.primary
+                                            isTodayCell -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                            else -> Color.Transparent
+                                        }
+                                    )
+                                    .let { m ->
+                                        if (isCurrentMonth) m.clickable {
+                                            selectedDay = dayOfMonth
+                                        } else m
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isCurrentMonth) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = dayOfMonth.toString(),
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = if (isTodayCell) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                        // Phase 137 — event indicator dot.
+                                        if (hasEvents) {
+                                            val dotColor = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.primary
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            androidx.compose.foundation.Canvas(
+                                                modifier = Modifier.size(4.dp)
+                                            ) {
+                                                drawCircle(color = dotColor)
+                                            }
+                                        }
                                     }
-                                )
-                                .let { m ->
-                                    if (isCurrentMonth) m.clickable {
-                                        selectedDay = dayOfMonth
-                                    } else m
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isCurrentMonth) {
-                                Text(
-                                    text = dayOfMonth.toString(),
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                                        else MaterialTheme.colorScheme.onSurface,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (isTodayCell) FontWeight.Bold else FontWeight.Normal,
-                                )
+                                }
                             }
                         }
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            // Selected day + today
+            val selectedCal = java.util.GregorianCalendar(
+                today.get(java.util.Calendar.YEAR),
+                today.get(java.util.Calendar.MONTH),
+                selectedDay,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedFormat.format(selectedCal.time),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = "${dayFormat.format(selectedCal.time)} · ${dayEvents.size} event${if (dayEvents.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.FilledIconButton(
+                    onClick = { showAddDialog = true },
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Filled.Add,
+                        contentDescription = "Add event",
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            // Event list for the selected day
+            if (dayEvents.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No events for this day.\nTap + to add one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(dayEvents, key = { it.id }) { event ->
+                        EventRow(
+                            event = event,
+                            onDelete = {
+                                scope.launch {
+                                    repo.delete(event)
+                                    snackbarHostState.showSnackbar("Deleted: ${event.title}")
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    viewYear = today.get(java.util.Calendar.YEAR)
+                    viewMonth = today.get(java.util.Calendar.MONTH)
+                    selectedDay = today.get(java.util.Calendar.DAY_OF_MONTH)
+                },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Jump to today", color = MaterialTheme.colorScheme.primary)
+            }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        // Selected day + today
-        val selectedCal = java.util.GregorianCalendar(
-            today.get(java.util.Calendar.YEAR),
-            today.get(java.util.Calendar.MONTH),
-            selectedDay,
+        androidx.compose.material3.SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
-        Text(
-            text = selectedFormat.format(selectedCal.time),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = "Day of week: ${dayFormat.format(selectedCal.time)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        androidx.compose.material3.TextButton(
-            onClick = {
-                viewYear = today.get(java.util.Calendar.YEAR)
-                viewMonth = today.get(java.util.Calendar.MONTH)
-                selectedDay = today.get(java.util.Calendar.DAY_OF_MONTH)
+    }
+    // Add-event dialog
+    if (showAddDialog) {
+        AddEventDialog(
+            year = viewYear,
+            month = viewMonth,
+            day = selectedDay,
+            onDismiss = { showAddDialog = false },
+            onConfirm = { title, note, hour, minute ->
+                scope.launch {
+                    repo.add(
+                        year = viewYear,
+                        month = viewMonth,
+                        day = selectedDay,
+                        title = title,
+                        note = note,
+                        hour = hour,
+                        minute = minute,
+                    )
+                    showAddDialog = false
+                    snackbarHostState.showSnackbar("Added: $title")
+                }
             },
-            modifier = Modifier.align(Alignment.End),
+        )
+    }
+}
+
+@Composable
+private fun EventRow(
+    event: com.elysium.vanguard.core.database.CalendarEventEntity,
+    onDelete: () -> Unit,
+) {
+    val timeLabel = if (event.hour in 0..23 && event.minute in 0..59) {
+        "%02d:%02d".format(event.hour, event.minute)
+    } else {
+        "all day"
+    }
+    val accent = event.colorHex?.let { runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+        ?: MaterialTheme.colorScheme.primary
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Jump to today", color = MaterialTheme.colorScheme.primary)
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
+                drawCircle(color = accent)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = event.title.ifBlank { "(untitled)" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = buildString {
+                        append(timeLabel)
+                        if (event.note.isNotBlank()) {
+                            append(" · ")
+                            append(event.note.take(80))
+                            if (event.note.length > 80) append("…")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.IconButton(onClick = onDelete) {
+                androidx.compose.material3.Icon(
+                    imageVector = androidx.compose.material.icons.Icons.Filled.Delete,
+                    contentDescription = "Delete event",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AddEventDialog(
+    year: Int,
+    month: Int,
+    day: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (title: String, note: String, hour: Int, minute: Int) -> Unit,
+) {
+    var title by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var allDay by remember { mutableStateOf(true) }
+    var hourText by remember { mutableStateOf("9") }
+    var minuteText by remember { mutableStateOf("0") }
+    val monthName = remember(month) {
+        java.text.SimpleDateFormat("MMMM", java.util.Locale.US).format(
+            java.util.GregorianCalendar(year, month, 1).time,
+        )
+    }
+    val titleOk = title.trim().isNotEmpty()
+    val parsedHour = hourText.toIntOrNull()?.coerceIn(0, 23) ?: -1
+    val parsedMinute = minuteText.toIntOrNull()?.coerceIn(0, 59) ?: -1
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New event · $monthName $day, $year") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note (optional)") },
+                    singleLine = false,
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    androidx.compose.material3.Switch(
+                        checked = !allDay,
+                        onCheckedChange = { allDay = !it },
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (allDay) "All day" else "At specific time", style = MaterialTheme.typography.bodySmall)
+                }
+                if (!allDay) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = hourText,
+                            onValueChange = { hourText = it.filter { ch -> ch.isDigit() }.take(2) },
+                            label = { Text("Hour (0-23)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        androidx.compose.material3.OutlinedTextField(
+                            value = minuteText,
+                            onValueChange = { minuteText = it.filter { ch -> ch.isDigit() }.take(2) },
+                            label = { Text("Min (0-59)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    val h = if (allDay) -1 else parsedHour
+                    val m = if (allDay) -1 else parsedMinute
+                    onConfirm(title.trim(), note.trim(), h, m)
+                },
+                enabled = titleOk && (allDay || (parsedHour >= 0 && parsedMinute >= 0)),
+            ) {
+                Text("Add", color = MaterialTheme.colorScheme.primary)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 // ============================== Hilt bridge ==============================
@@ -4019,4 +4312,40 @@ private fun contentRegistryFor(context: Context): WindowContentRegistry {
 fun rememberWindowContentRegistry(): WindowContentRegistry {
     val context = LocalContext.current
     return remember(context) { contentRegistryFor(context) }
+}
+
+/**
+ * Hilt EntryPoint to fetch the [com.elysium.vanguard.core.calendar.CalendarEventRepository]
+ * from a Composable-only context. The repository is @Singleton + @Inject,
+ * so the EntryPoint just looks it up from the application context.
+ *
+ * Used by [CalendarBody] (Phase 137) to read + write the persistent
+ * event store without having to thread a ViewModel through the
+ * desktop shell's windowing layer.
+ */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface CalendarEventRepositoryEntryPoint {
+    fun calendarEventRepository(): com.elysium.vanguard.core.calendar.CalendarEventRepository
+}
+
+private fun calendarEventRepositoryFor(context: Context): com.elysium.vanguard.core.calendar.CalendarEventRepository {
+    val app = context.applicationContext
+    val entryPoint = dagger.hilt.android.EntryPointAccessors.fromApplication(
+        app,
+        CalendarEventRepositoryEntryPoint::class.java,
+    )
+    return entryPoint.calendarEventRepository()
+}
+
+/**
+ * PHASE 137 — Composable helper for resolving the calendar event
+ * repository from any UI tree. The result is `remember`-ed on the
+ * application context so recompositions don't repeatedly hit the
+ * EntryPoint machinery.
+ */
+@Composable
+fun rememberCalendarEventRepository(): com.elysium.vanguard.core.calendar.CalendarEventRepository {
+    val context = LocalContext.current
+    return remember(context) { calendarEventRepositoryFor(context) }
 }

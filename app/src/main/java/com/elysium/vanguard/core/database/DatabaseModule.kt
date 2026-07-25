@@ -25,7 +25,8 @@ object DatabaseModule {
                 TitanDatabase.MIGRATION_1_2,
                 TitanDatabase.MIGRATION_2_3,
                 TitanDatabase.MIGRATION_3_4,
-                TitanDatabase.MIGRATION_4_5
+                TitanDatabase.MIGRATION_4_5,
+                TitanDatabase.MIGRATION_5_6
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
@@ -54,5 +55,10 @@ object DatabaseModule {
     @Provides
     fun provideSmartFolderDao(database: TitanDatabase): SmartFolderDao {
         return database.smartFolderDao()
+    }
+
+    @Provides
+    fun provideCalendarEventDao(database: TitanDatabase): CalendarEventDao {
+        return database.calendarEventDao()
     }
 }

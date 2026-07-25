@@ -93,11 +93,14 @@ import com.elysium.vanguard.features.desktop.window.WindowFrame
  *    edges and the window can never slide under
  *    the dock.
  *
- * 7. **Real apps**. The 4 placeholder bodies
- *    (terminal / files / settings / notes) are
+ * 7. **Real apps**. All 18 window bodies
+ *    (Files, Terminal, Settings, Notes, Programs,
+ *    Calculator, SystemInfo, Browser, Clock,
+ *    Task Manager, Help, Image Viewer, Calendar,
+ *    This PC, plus 4 external launchers) are
  *    registered in the [WindowContentRegistry]
- *    and resolve at render time. A real terminal
- *    is a one-line change in the registry.
+ *    and resolve at render time. A new app is a
+ *    one-line registry addition.
  */
 @Composable
 fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
