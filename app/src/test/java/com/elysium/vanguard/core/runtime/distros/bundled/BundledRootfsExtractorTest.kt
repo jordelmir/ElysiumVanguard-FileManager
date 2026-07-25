@@ -49,7 +49,7 @@ class BundledRootfsExtractorTest {
         // Path is relative to the working directory of the
         // test runner, which is the module root for
         // `testDebugUnitTest`.
-        File("src/main/assets/distros/alpine-mini-aarch64.tar.gz")
+        File("src/main/assets/distros/alpine-mini-aarch64.tar")
     }
 
     @Before fun setUp() {

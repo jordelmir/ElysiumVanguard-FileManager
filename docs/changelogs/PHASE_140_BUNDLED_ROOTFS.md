@@ -28,9 +28,9 @@ hash-verified extractor that unpacks it on first use.
 
 ### 1. The asset
 
-`app/src/main/assets/distros/alpine-mini-aarch64.tar.gz`
-(3 947 906 bytes; SHA-256
-`041fa34a81788242df9e78fa69b97ab45b8ec47ddbf88864755610414a7bf3de`).
+`app/src/main/assets/distros/alpine-mini-aarch64.tar`
+(9 113 600 bytes; SHA-256
+`909cd5ea844eecebecee4b5e80e98709c7cfbb2e95748c787c211bf1698aaae2`).
 
 **Alpine Linux 3.20.3 minirootfs for aarch64** — upstream
 artifact from `dl-cdn.alpinelinux.org`. Contains a real
@@ -41,6 +41,16 @@ The minirootfs is the smallest *real* distro Alpine ships
 — about 4 MB compressed vs Debian's 30+ MB. The user can
 get a working shell in seconds and `apk add` any other
 package they need.
+
+**Why a `.tar` and not a `.tar.gz`**: AAPT2's default
+behavior is to *decompress* `.gz` assets at build time,
+storing the unpacked `.tar` in the APK. We tried the
+`.tar.gz` path first — APK grew by 5 MB vs the deflate
+path. AAPT2's deflate compresses the `.tar` from 9.1 MB
+to ~4.2 MB on disk (54% ratio; tar entries are heavy
+on zero-padding + similar patterns, which deflate loves).
+Storing the tar uncompressed (`noCompress`) makes the APK
+4 MB bigger. So the .tar approach wins.
 
 ### 2. The registry
 

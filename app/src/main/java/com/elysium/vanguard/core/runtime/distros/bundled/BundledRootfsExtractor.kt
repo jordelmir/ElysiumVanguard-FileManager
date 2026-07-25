@@ -4,7 +4,6 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
-import java.util.zip.GZIPInputStream
 
 /**
  * PHASE 140 — extracts a bundled rootfs to a host directory
@@ -155,13 +154,18 @@ class BundledRootfsExtractor(
     }
 
     private fun unpackGzippedTar(source: BundledRootfsSource, into: File) {
-        val gzip = GZIPInputStream(BufferedInputStream(source.openStream()))
+        // The asset is stored as a plain `.tar` (not gzipped)
+        // — see the noCompress note in build.gradle.kts.
+        // The function name is retained for the existing
+        // test seam + to make the intent clear at the call
+        // site ("unpack the tar").
+        val input = BufferedInputStream(source.openStream())
         // We need a tar reader that does NOT depend on
         // org.apache.commons (the platform has none) and
         // handles the GNU tar long-name extension (paths
         // longer than 100 chars use the @LongLink pseudo-
         // file). Implement a small subset here.
-        TarInputStream(gzip).use { tar ->
+        TarInputStream(input).use { tar ->
             while (true) {
                 val entry = tar.nextEntry() ?: break
                 val outFile = File(into, entry.name)

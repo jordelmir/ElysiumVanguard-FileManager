@@ -28,10 +28,12 @@ object BundledDistroRegistry {
      *
      * Source: `https://dl-cdn.alpinelinux.org/alpine/v3.20/
      * releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz`
+     * (decompressed to `.tar` for the asset — see the
+     * build.gradle note on `noCompress`).
      *
      * Pinned: 2026-07-25.
-     * Size:   3 947 906 bytes (gzipped).
-     * SHA-256: `041fa34a81788242df9e78fa69b97ab45b8ec47ddbf88864755610414a7bf3de`
+     * Size:   9 113 600 bytes (uncompressed tar).
+     * SHA-256: `909cd5ea844eecebecee4b5e80e98709c7cfbb2e95748c787c211bf1698aaae2`
      *
      * Why Alpine first? It is the smallest *real* distro
      * that ships with a package manager (`apk`), a working
@@ -47,9 +49,9 @@ object BundledDistroRegistry {
         family = "alpine",
         architecture = "aarch64",
         version = "3.20.3",
-        assetPath = "distros/alpine-mini-aarch64.tar.gz",
-        sha256 = "041fa34a81788242df9e78fa69b97ab45b8ec47ddbf88864755610414a7bf3de",
-        sizeBytes = 3_947_906L,
+        assetPath = "distros/alpine-mini-aarch64.tar",
+        sha256 = "909cd5ea844eecebecee4b5e80e98709c7cfbb2e95748c787c211bf1698aaae2",
+        sizeBytes = 9_113_600L,
     )
 
     /**

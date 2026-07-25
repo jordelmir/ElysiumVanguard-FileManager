@@ -58,6 +58,26 @@ android {
         }
     }
 
+    // PHASE 140 — the bundled rootfs is shipped as a
+    // plain `.tar` (not gzipped). AAPT2's default is to
+    // *decompress* `.gz` assets at build time (it stores
+    // the `.tar.gz` as a `.tar` inside the APK), but the
+    // storage cost of the uncompressed 9.1 MB is worse
+    // than the runtime cost of the gzip decompression
+    // (AssetManager already returns raw bytes via a
+    // memory-mapped FD for compressed assets; the gzip
+    // happens once at first use). So we ship the
+    // already-decompressed tar; AAPT2's deflate reduces
+    // the 9.1 MB to ~3 MB on disk.
+    //
+    // The old .tar.gz approach (Phase 140 first build)
+    // cost us 5 MB more APK size than the current .tar
+    // approach; the .tar.gz + AAPT2-decompress path is
+    // strictly worse for storage AND a wasted
+    // decompression step at first use. See
+    // docs/changelogs/PHASE_140_BUNDLED_ROOTFS.md for
+    // the data.
+
     // PHASE 7.7 (Security Hardening): real release signing config.
     // Reads from gradle.properties (which is .gitignored) or env vars.
     // Falls back to the debug keystore so `./gradlew assembleRelease`
