@@ -233,9 +233,10 @@ interface SmartFolderDao {
         VaultEntity::class,
         FileMetadataEntity::class,
         SmartFolderEntity::class,
-        CalendarEventEntity::class
+        CalendarEventEntity::class,
+        RecentFileEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class TitanDatabase : RoomDatabase() {
@@ -245,6 +246,7 @@ abstract class TitanDatabase : RoomDatabase() {
     abstract fun fileMetadataDao(): FileMetadataDao
     abstract fun smartFolderDao(): SmartFolderDao
     abstract fun calendarEventDao(): CalendarEventDao
+    abstract fun recentFileDao(): RecentFileDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -351,6 +353,29 @@ abstract class TitanDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_calendar_events_year_month_day ON calendar_events(year, month, day)")
+            }
+        }
+
+        /**
+         * PHASE 139 — Adds the recent_files table for the file
+         * manager's persistent "recent files" list. The schema
+         * mirrors [RecentFileEntity] 1:1; the (path) primary key
+         * + the `last_opened_at` index support the "newest first"
+         * listing and the trim-to-N eviction.
+         */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS recent_files (
+                        path TEXT NOT NULL PRIMARY KEY,
+                        display_name TEXT NOT NULL,
+                        size_bytes INTEGER NOT NULL,
+                        mime_type TEXT,
+                        last_opened_at INTEGER NOT NULL,
+                        open_count INTEGER NOT NULL DEFAULT 1
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_recent_files_last_opened_at ON recent_files(last_opened_at)")
             }
         }
     }

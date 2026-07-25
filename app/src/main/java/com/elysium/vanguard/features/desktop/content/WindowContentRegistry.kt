@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Environment
 import android.os.StatFs
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -96,6 +97,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -730,11 +732,28 @@ private fun RealFilesBody(initialPath: String) {
     // stay at the initial path even after entering
     // a subfolder.
     val registry = rememberWindowContentRegistry()
+    val recentRepo = rememberRecentFileRepository()
     val windowId = LocalWindowId.current
     var currentPath by remember { mutableStateOf(initialPath) }
     var items by remember { mutableStateOf<List<TitanFile>>(emptyList()) }
     var selectedInfo by remember { mutableStateOf<TitanFile?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    // PHASE 139 — coroutine scope tied to the
+    // composable's lifecycle. We use this (NOT
+    // GlobalScope) for the recent-files repository
+    // writes so the coroutines are cancelled when the
+    // body leaves the composition. GlobalScope would
+    // leak.
+    val recentScope = rememberCoroutineScope()
+
+    // PHASE 139 — observe the persistent recent-files
+    // list so the user can re-open files they were
+    // just working on without having to navigate the
+    // whole tree. The list is capped at 50 by the
+    // repository (FIFO eviction).
+    val recentFiles by recentRepo.observeRecent().collectAsState(
+        initial = emptyList()
+    )
 
     // PHASE 133 — push the title update when the
     // path changes. We skip the initial composition
@@ -806,6 +825,41 @@ private fun RealFilesBody(initialPath: String) {
                 onNavigate = { newPath -> currentPath = newPath },
             )
         }
+        // PHASE 139 — Recent files section. Tapping a
+        // recent file navigates to its parent folder
+        // and re-opens it. The section is collapsed to
+        // a single row of file icons (no scroll) so it
+        // doesn't eat the file list's space.
+        if (recentFiles.isNotEmpty()) {
+            RecentFilesRow(
+                recent = recentFiles,
+                onClick = { entry ->
+                    val parent = File(entry.path).parent
+                    if (parent != null) currentPath = parent
+                    registry.openWithDefaultApp(entry.path)
+                    // Re-record the access (it'll be
+                    // re-stamped to the top of the list).
+                    // The record happens here too so the
+                    // "last opened" reflects the user's
+                    // intent even if the openWithDefaultApp
+                    // fires the activity.
+                    // (No need to call recordAccess here —
+                    // the openWithDefaultApp path below
+                    // already records.)
+                },
+                onClearAll = {
+                    // Quick clear-all via a small × icon
+                    // at the right end of the section.
+                    // recentScope is the lifecycle-tied
+                    // rememberCoroutineScope() declared
+                    // above (NOT GlobalScope — that would
+                    // leak across screen changes).
+                    recentScope.launch {
+                        recentRepo.clear()
+                    }
+                },
+            )
+        }
         // Selected file info banner (only when one is selected)
         selectedInfo?.let { info ->
             FileInfoBanner(
@@ -850,11 +904,144 @@ private fun RealFilesBody(initialPath: String) {
                             } else {
                                 selectedInfo = file
                                 registry.openWithDefaultApp(file.path)
+                                // PHASE 139 — record the
+                                // access in the recent-files
+                                // list. The list is capped
+                                // at 50 (FIFO). recentScope
+                                // is the lifecycle-tied
+                                // rememberCoroutineScope()
+                                // declared above (NOT
+                                // GlobalScope — that would
+                                // leak across screen changes).
+                                recentScope.launch {
+                                    recentRepo.recordAccess(
+                                        path = file.path,
+                                        displayName = file.name,
+                                        sizeBytes = parseSizeString(file.size),
+                                    )
+                                }
                             }
                         },
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * PHASE 139 — convert the human-readable size string
+ * (e.g. "12 KB", "1.4 MB") that [TitanFile.size] exposes
+ * to a raw byte count. The recent-files table stores
+ * [RecentFileEntity.sizeBytes] as Long. We only need a
+ * rough estimate for "did the file change" tracking
+ * (the list is FIFO), so the conversion is best-effort.
+ */
+private fun parseSizeString(size: String): Long {
+    val parts = size.trim().split(" ", limit = 2)
+    if (parts.size != 2) return 0L
+    val num = parts[0].toDoubleOrNull() ?: return 0L
+    val unit = parts[1].uppercase()
+    return (num * when (unit) {
+        "B" -> 1.0
+        "KB" -> 1024.0
+        "MB" -> 1024.0 * 1024
+        "GB" -> 1024.0 * 1024 * 1024
+        "TB" -> 1024.0 * 1024 * 1024 * 1024
+        else -> 1.0
+    }).toLong()
+}
+
+/**
+ * PHASE 139 — a horizontal strip of file icons
+ * representing the most-recently-opened files. Tapping
+ * a chip navigates to the file's parent folder and
+ * re-opens it via the system's default app. The strip
+ * is capped at 8 visible chips to keep the Files body
+ * compact; the full list is available via
+ * [RecentFileRepository.observeRecent] (limit param).
+ */
+@Composable
+private fun RecentFilesRow(
+    recent: List<com.elysium.vanguard.core.database.RecentFileEntity>,
+    onClick: (com.elysium.vanguard.core.database.RecentFileEntity) -> Unit,
+    onClearAll: () -> Unit,
+) {
+    // Cap the strip at 8 visible chips.
+    val visible = remember(recent) { recent.take(8) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Recent",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(visible, key = { it.path }) { entry ->
+                RecentChip(entry = entry, onClick = { onClick(entry) })
+            }
+        }
+        IconButton(
+            onClick = onClearAll,
+            modifier = Modifier.size(24.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = "Clear all recent",
+                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentChip(
+    entry: com.elysium.vanguard.core.database.RecentFileEntity,
+    onClick: () -> Unit,
+) {
+    val accent = when {
+        entry.path.endsWith(".png", true) || entry.path.endsWith(".jpg", true) ||
+            entry.path.endsWith(".jpeg", true) || entry.path.endsWith(".webp", true) -> Color(0xFF8BE9FD)
+        entry.path.endsWith(".pdf", true) -> Color(0xFFFF5555)
+        entry.path.endsWith(".doc", true) || entry.path.endsWith(".docx", true) -> Color(0xFFBD93F9)
+        entry.path.endsWith(".xls", true) || entry.path.endsWith(".xlsx", true) -> Color(0xFF50FA7B)
+        else -> Color(0xFFF1FA8C)
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Canvas(
+                modifier = Modifier.size(8.dp)
+            ) {
+                drawCircle(color = accent)
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = entry.displayName,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -4731,4 +4918,41 @@ private fun calendarEventRepositoryFor(context: Context): com.elysium.vanguard.c
 fun rememberCalendarEventRepository(): com.elysium.vanguard.core.calendar.CalendarEventRepository {
     val context = LocalContext.current
     return remember(context) { calendarEventRepositoryFor(context) }
+}
+
+/**
+ * Hilt EntryPoint to fetch the
+ * [com.elysium.vanguard.core.recent.RecentFileRepository] from
+ * a Composable-only context. The repository is `@Singleton` +
+ * `@Inject`, so the EntryPoint just looks it up from the
+ * application context.
+ *
+ * Used by [RealFilesBody] (Phase 139) to record + display
+ * the persistent recent-files list.
+ */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface RecentFileRepositoryEntryPoint {
+    fun recentFileRepository(): com.elysium.vanguard.core.recent.RecentFileRepository
+}
+
+private fun recentFileRepositoryFor(context: Context): com.elysium.vanguard.core.recent.RecentFileRepository {
+    val app = context.applicationContext
+    val entryPoint = dagger.hilt.android.EntryPointAccessors.fromApplication(
+        app,
+        RecentFileRepositoryEntryPoint::class.java,
+    )
+    return entryPoint.recentFileRepository()
+}
+
+/**
+ * PHASE 139 — Composable helper for resolving the recent
+ * files repository. The result is `remember`-ed on the
+ * application context so recompositions don't repeatedly
+ * hit the EntryPoint machinery.
+ */
+@Composable
+fun rememberRecentFileRepository(): com.elysium.vanguard.core.recent.RecentFileRepository {
+    val context = LocalContext.current
+    return remember(context) { recentFileRepositoryFor(context) }
 }

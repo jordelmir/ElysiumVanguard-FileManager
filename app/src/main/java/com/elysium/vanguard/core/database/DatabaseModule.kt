@@ -26,7 +26,8 @@ object DatabaseModule {
                 TitanDatabase.MIGRATION_2_3,
                 TitanDatabase.MIGRATION_3_4,
                 TitanDatabase.MIGRATION_4_5,
-                TitanDatabase.MIGRATION_5_6
+                TitanDatabase.MIGRATION_5_6,
+                TitanDatabase.MIGRATION_6_7
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
@@ -60,5 +61,10 @@ object DatabaseModule {
     @Provides
     fun provideCalendarEventDao(database: TitanDatabase): CalendarEventDao {
         return database.calendarEventDao()
+    }
+
+    @Provides
+    fun provideRecentFileDao(database: TitanDatabase): com.elysium.vanguard.core.database.RecentFileDao {
+        return database.recentFileDao()
     }
 }
