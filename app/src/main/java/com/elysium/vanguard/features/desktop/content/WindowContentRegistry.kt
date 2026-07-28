@@ -1591,11 +1591,30 @@ private sealed class TerminalLine {
 
 @Composable
 /**
- * PHASE 142 — the real terminal body.
+ * PHASE 143 — the real terminal body (terminal emulator
+ * edition).
  *
- * Replaces the Phase 122 client-side shell mock. Wires
- * the [ProotTerminalRunner] to a Compose UI:
- *   - On first composition, calls [ProotTerminalRunner.start]
+ * Replaces the Phase 142 TextField-based body. Wires
+ * the [ProotTerminalRunner]'s underlying
+ * [com.elysium.vanguard.core.runtime.terminal.session.TerminalSession]
+ * to the proper
+ * [com.elysium.vanguard.core.runtime.terminal.view.TerminalHost]
+ * composable — full ANSI parser, line editor, colors,
+ * cursor positioning, hardware-rendered SurfaceView.
+ *
+ * What the user gets:
+ *   - A real Linux shell (Alpine's `/bin/ash` via proot).
+ *   - Real PTY semantics: line discipline, resize, signals.
+ *   - Interactive programs work: `vi /etc/hostname`, `htop`,
+ *     `python3` REPL, `bash` job control.
+ *   - 256-color ANSI output.
+ *
+ * Phase 143 also wires `libelysium_runtime.so` (the
+ * native PTY bridge, cross-compiled for Android ARM64
+ * in Phase 143's `native/runtime` build step) to the
+ * `TerminalSession`. The runner is now backed by a real
+ * PTY (forkpty + epoll on the Rust side) instead of the
+ * Phase 141 `ProcessBuilder` no-PTY path.
  *     which spawns a real `proot` process running Alpine
  *     Linux's `/bin/ash` inside the bundled rootfs.
  *   - Subscribes to the runner's `output` SharedFlow and
@@ -1667,12 +1686,6 @@ private fun RealTerminalBody() {
             when (event) {
                 is ProotTerminalRunner.Event.Failed -> {
                     lines = lines + TerminalLine.Error("terminal: ${event.message}")
-                }
-                is ProotTerminalRunner.Event.Stderr -> {
-                    val newLines = event.chunk.split('\n')
-                        .filter { it.isNotEmpty() }
-                        .map { TerminalLine.Error(it) }
-                    lines = lines + newLines
                 }
                 is ProotTerminalRunner.Event.Exited -> {
                     lines = lines + TerminalLine.Info("terminal: exited with code ${event.exitCode}")

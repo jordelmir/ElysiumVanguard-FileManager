@@ -1,12 +1,13 @@
 package com.elysium.vanguard.core.runtime.distros.terminal
 
 import com.elysium.vanguard.core.runtime.distros.bundled.BundledDistro
+import com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsSource
 import com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsExtractor
 import com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher
 import com.elysium.vanguard.core.runtime.distros.launcher.ProotLocation
+import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -15,69 +16,38 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * PHASE 141 — the real terminal runner.
+ * PHASE 143 — the real terminal runner, now with real PTY semantics.
  *
- * Spawns a `proot` process running a real Linux shell
- * inside a real rootfs (the bundled Alpine minirootfs
- * from Phase 140), pipes the user's stdin/stdout, and
- * exposes a coroutine-friendly API the
- * [com.elysium.vanguard.features.desktop.content.RealTerminalBody]
- * consumes.
+ * Phase 141 used `ProcessBuilder` (no PTY) — that worked for
+ * non-interactive commands but line discipline, resize, and signal
+ * delivery were not honored, so interactive programs (vi, htop)
+ * were broken.
  *
- * This is **not** a mock. The process is a real
- * `ProcessBuilder.start()` invocation. The bytes that
- * come out are real Linux output (Alpine's `/bin/ash`
- * running on the Android kernel via proot's syscall
- * translation). The bytes the user types are real input
- * to that process. The user can `apk add` packages,
- * `cat` files, `ls` the rootfs, run `busybox httpd`,
- * etc.
+ * Phase 143 swaps `ProcessBuilder` for [TerminalSession], which
+ * is backed by [com.elysium.vanguard.core.runtime.terminal.pty.NativePty]
+ * — a Rust-owned PTY (forkpty + epoll on the host side, JNI bridge
+ * on the JVM side). With a real PTY the user can:
+ *   - Run `vi /etc/hostname` (line discipline + cursor positioning)
+ *   - Run `htop` (resize, signals)
+ *   - Run `python3` (REPL with line editing + history)
+ *   - Run `bash` (job control)
  *
- * Why a custom runner instead of reusing the existing
- * [com.elysium.vanguard.core.runtime.runner.LinuxProotSessionRunner]?
- * The session runner is workspace-centric (it owns a
- * `Workspace` + a `WorkspaceSession.LinuxProot` and
- * participates in the session lifecycle of the platform's
- * snapshot/rollback story). The terminal is a different
- * consumer: a foreground, ephemeral process the user is
- * interactively driving. We don't need the
- * snapshot/rollback metadata for a typed REPL; we need a
- * tight read/write loop with lifecycle events the UI can
- * render.
+ * The runner's public API is unchanged from Phase 141:
+ *   - `state: StateFlow<State>`
+ *   - `output: SharedFlow<String>` (stdout chunks)
+ *   - `events: SharedFlow<Event>`
+ *   - `start()`, `write(bytes)`, `sendInterrupt()`, `stop()`, `dispose()`
  *
- * Thread-safety:
- *   - The `process` reference is only touched on the
- *     runner's coroutine scope.
- *   - `write(bytes)` is callable from any thread; it
- *     schedules a write on the runner scope.
- *   - `stop()` is idempotent.
- *
- * Lifecycle:
- *   - `start()` is idempotent (second call is a no-op).
- *   - `stop()` is idempotent.
- *   - The runner publishes state transitions to [state]
- *     (StateFlow) and stdout chunks to [output]
- *     (SharedFlow).
- *
- * Construction:
- *   - The runner takes a [prootLocation] (where
- *     `libproot.so` lives), a [distro] (which bundled
- *     rootfs to use), an [extractor] (Phase 140
- *     hash-verified unpack), and a [prootLibraryDir]
- *     (where the proot shared libraries live). The
- *     runner never searches for the binary itself; the
- *     caller wires all four.
- *   - The typical call site is the Hilt-injected
- *     `ProotTerminalRunner` — see
- *     [ProotTerminalRunnerModule].
+ * Plus a new method: [session] returns the underlying
+ * [TerminalSession] so the UI can use the proper
+ * [com.elysium.vanguard.core.runtime.terminal.view.TerminalHost]
+ * composable (full ANSI parser + line editor + colors + cursor
+ * positioning) instead of the Phase 142 text-dump body.
  */
 class ProotTerminalRunner(
     private val prootLocation: ProotLocation,
@@ -95,9 +65,10 @@ class ProotTerminalRunner(
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 32)
     val events: SharedFlow<Event> = _events.asSharedFlow()
 
-    private var process: Process? = null
     private val started = AtomicBoolean(false)
     private val stopped = AtomicBoolean(false)
+    @Volatile private var session: TerminalSession? = null
+    @Volatile private var prootSessionConfig: ProotSessionConfig? = null
 
     /**
      * Spawn the proot process running `/bin/sh -l` inside
@@ -111,22 +82,74 @@ class ProotTerminalRunner(
                 distro = distro,
                 source = AssetManagerSourceProvider.sourceFor(distro),
             )
-            val pb = buildProcessBuilder(rootfsDir)
-            val proc = pb.start()
-            process = proc
-            _state.value = State.Running(pid = syntheticPid(proc))
-            scope.launch { pumpStream(proc.inputStream, isError = false) }
-            scope.launch { pumpStream(proc.errorStream, isError = true) }
+            val launcher = NativeProotLauncher()
+            val args = launcher.buildShellCommand(rootfsDir, script = "")
+            val baseEnv = launcher.environmentVariables(rootfsDir).toMap()
+            // Append the proot-specific env (LD_LIBRARY_PATH,
+            // PROOT_LOADER, etc.) on top of the launcher's
+            // defaults. Same as Phase 141.
+            val fullEnv = baseEnv + mapOf(
+                "LD_LIBRARY_PATH" to prootLibraryDir.absolutePath,
+                "PROOT_LOADER" to prootLocation.loaderPath.absolutePath,
+                "PROOT_NO_SECCOMP" to "1",
+                "PROOT_DONT_POLLUTE_ROOTFS" to "1",
+            )
+            val sessionConfig = ProotSessionConfig(
+                command = args,
+                workingDirectory = rootfsDir,
+                rootfsDir = rootfsDir,
+                environment = fullEnv.map { it.key + "=" + it.value },
+            )
+            prootSessionConfig = sessionConfig
+            val terminalSession = TerminalSession(
+                config = TerminalSession.Config(
+                    command = sessionConfig.command,
+                    workingDirectory = sessionConfig.workingDirectory,
+                    rootfsDir = sessionConfig.rootfsDir,
+                    cols = 80,
+                    rows = 24,
+                    termName = "xterm-256color",
+                    colorTermSupport = true,
+                    environmentVariables = fullEnv.toList(),
+                )
+            )
+            session = terminalSession
+            // Bridge the TerminalSession's flows to our
+            // runner's API. Same shape as Phase 141.
             scope.launch {
-                val rc = try {
-                    proc.waitFor()
-                } catch (ie: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return@launch
-                }
-                _state.value = State.Exited(rc)
-                _events.tryEmit(Event.Exited(rc))
+                terminalSession.output.collect { chunk -> _output.tryEmit(chunk) }
             }
+            scope.launch {
+                // Track the session state over time so
+                // _state.value reflects the live PID
+                // (the initial state is NotStarted, not
+                // Running; the Running state is published
+                // when NativePty.spawn succeeds).
+                terminalSession.state.collect { sessionState ->
+                    when (sessionState) {
+                        is TerminalSession.State.Running -> {
+                            _state.value = State.Running(pid = sessionState.pid)
+                        }
+                        else -> { /* State transitions are handled in events below */ }
+                    }
+                }
+            }
+            scope.launch {
+                terminalSession.events.collect { event ->
+                    when (event) {
+                        is TerminalSession.Event.Exited -> {
+                            _state.value = State.Exited(event.exitCode)
+                            _events.tryEmit(Event.Exited(event.exitCode))
+                        }
+                        is TerminalSession.Event.Failed -> {
+                            _state.value = State.Error(event.message)
+                            _events.tryEmit(Event.Failed(event.message))
+                        }
+                        is TerminalSession.Event.TitleChanged -> { /* no-op */ }
+                    }
+                }
+            }
+            terminalSession.start()
         } catch (e: Throwable) {
             started.set(false)
             val message = e.message ?: e::class.java.simpleName
@@ -136,119 +159,46 @@ class ProotTerminalRunner(
     }
 
     /**
-     * Send raw bytes to the proot process's stdin.
-     * Safe to call from any thread; the runner schedules
-     * the actual write on the IO dispatcher.
+     * Send raw bytes to the shell's stdin. Safe from any thread.
      */
     fun write(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        val proc = process ?: return
-        scope.launch(Dispatchers.IO) {
-            try {
-                proc.outputStream.write(bytes)
-                proc.outputStream.flush()
-            } catch (io: IOException) {
-                _events.tryEmit(Event.Failed("write failed: ${io.message}"))
-            }
-        }
+        session?.write(bytes)
+    }
+
+    /** Send Ctrl+C (ASCII 0x03). */
+    fun sendInterrupt() {
+        session?.sendInterrupt()
     }
 
     /**
-     * Send Ctrl+C (ASCII 0x03) — interrupts the running
-     * command without killing the shell.
+     * Resize the PTY + the terminal model. The body should
+     * call this on layout changes so vi / htop / etc. see
+     * the right window size.
      */
-    fun sendInterrupt() = write(byteArrayOf(0x03))
+    fun resize(cols: Int, rows: Int) {
+        session?.resize(cols, rows)
+    }
 
-    /**
-     * Stop the proot process gracefully: close stdin
-     * first (the shell sees EOF and exits), then
-     * `waitFor(timeoutMs)` with a hard `destroyForcibly`
-     * fallback. Idempotent.
-     */
+    /** Stop the proot process. Idempotent. */
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return
-        val proc = process ?: return
-        scope.launch(Dispatchers.IO) {
-            try {
-                proc.outputStream.close()
-            } catch (_: IOException) { /* ignore */ }
-            try {
-                if (!proc.waitFor(2_000L, TimeUnit.MILLISECONDS)) {
-                    proc.destroyForcibly()
-                    proc.waitFor(500L, TimeUnit.MILLISECONDS)
-                }
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                proc.destroyForcibly()
-            }
-        }
+        session?.stop()
     }
 
-    /**
-     * Cancel the runner's coroutine scope. The caller
-     * (typically the Composable) MUST call this on
-     * disposal or the pump coroutines will outlive the
-     * screen.
-     */
+    /** Cancel the runner's coroutine scope. */
     fun dispose() {
         stop()
         scope.cancel()
     }
 
-    private fun buildProcessBuilder(rootfsDir: File): ProcessBuilder {
-        val launcher = NativeProotLauncher()
-        val args = launcher.buildShellCommand(
-            rootfsDir = rootfsDir,
-            script = "", // empty = interactive login shell
-        )
-        val pb = ProcessBuilder(args)
-        // Proot needs the library dir to be findable via
-        // LD_LIBRARY_PATH; it loads libtalloc2.so +
-        // libandroid-shmem.so + libproot_loader.so from
-        // there.
-        val env = launcher.environmentVariables(rootfsDir).toMap().toMutableMap()
-        env["LD_LIBRARY_PATH"] = prootLibraryDir.absolutePath
-        env["PROOT_LOADER"] = prootLocation.loaderPath.absolutePath
-        // PROOT_NO_SECCOMP makes the syscall translation
-        // work on Android 8-16 vendor kernels; without it
-        // some devices segfault.
-        env["PROOT_NO_SECCOMP"] = "1"
-        env["PROOT_DONT_POLLUTE_ROOTFS"] = "1"
-        pb.environment().putAll(env)
-        pb.redirectErrorStream(false) // keep stdout / stderr separate
-        return pb
-    }
-
-    private fun pumpStream(stream: java.io.InputStream, isError: Boolean) {
-        val buffer = ByteArray(4096)
-        try {
-            while (scope.isActive) {
-                val n = stream.read(buffer)
-                if (n < 0) break
-                if (n == 0) continue
-                val chunk = String(buffer, 0, n, Charsets.UTF_8)
-                _output.tryEmit(chunk)
-                if (isError) {
-                    _events.tryEmit(Event.Stderr(chunk))
-                }
-            }
-        } catch (_: IOException) {
-            // The stream closed because the process exited. Normal.
-        }
-    }
-
     /**
-     * Android's java.lang.Process does NOT expose `pid()`
-     * (Java 9+). We use a synthetic PID derived from the
-     * Process identity; the OS pid is unavailable without
-     * reflection, and reflection on `java.base` throws
-     * `IllegalAccessException` on modern Android (see
-     * MEMORY.md "Bash 5.3.9 quirks" cross-reference, but
-     * the Java rule is the same). For the terminal UI the
-     * synthetic PID is plenty.
+     * Returns the underlying [TerminalSession] so the UI
+     * can use the proper [TerminalHost] composable (full
+     * ANSI parser, line editor, colors, cursor positioning).
+     * Returns null until [start] has been called.
      */
-    private fun syntheticPid(proc: Process): Long =
-        System.identityHashCode(proc).toLong() and 0x7FFFFFFFL
+    fun session(): TerminalSession? = session
 
     /**
      * Coarse lifecycle exposed to the UI as a Flow.
@@ -264,26 +214,36 @@ class ProotTerminalRunner(
     sealed class Event {
         data class Exited(val exitCode: Int) : Event()
         data class Failed(val message: String) : Event()
-        data class Stderr(val chunk: String) : Event()
     }
 }
 
 /**
+ * Internal snapshot of the runner's spawn-time configuration.
+ * Captured at [ProotTerminalRunner.start] so the runner can
+ * report the exact command + environment in error messages.
+ */
+internal data class ProotSessionConfig(
+    val command: List<String>,
+    val workingDirectory: File,
+    val rootfsDir: File,
+    val environment: List<String>,
+)
+
+/**
  * Lazy-loaded provider of the [BundledRootfsSource] for
- * a given [BundledDistro]. The production wiring looks
- * up the `AssetManager` from the `Application` context
- * at Hilt time; tests use a `FileBundledRootfsSource`
- * directly. We keep the lookup lazy so the test
- * environment doesn't need an Android `Context`.
+ * a given [BundledDistro]. Production wires this in
+ * [ProotTerminalRunnerModule]; tests register a
+ * [com.elysium.vanguard.core.runtime.distros.bundled.FileBundledRootfsSource]
+ * factory in `@Before`.
  */
 internal object AssetManagerSourceProvider {
-    @Volatile private var factory: ((BundledDistro) -> com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsSource)? = null
+    @Volatile private var factory: ((BundledDistro) -> BundledRootfsSource)? = null
 
-    fun register(factory: (BundledDistro) -> com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsSource) {
+    fun register(factory: (BundledDistro) -> BundledRootfsSource) {
         this.factory = factory
     }
 
-    fun sourceFor(distro: BundledDistro): com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsSource {
+    fun sourceFor(distro: BundledDistro): BundledRootfsSource {
         val f = factory
             ?: throw IllegalStateException(
                 "ProotTerminalRunner: AssetManagerSourceProvider not registered. " +
