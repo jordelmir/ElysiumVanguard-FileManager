@@ -1,9 +1,19 @@
 package com.elysium.vanguard.core.util
 
+import android.util.Log
+import com.github.junrar.Archive
+import com.github.junrar.rarfile.FileHeader
+import com.sprylab.xar.FileXarSource
+import com.sprylab.xar.XarEntry
+import com.sprylab.xar.XarSource
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveException
 import org.apache.commons.compress.archivers.ArchiveInputStream
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
+import org.apache.commons.compress.archivers.ar.ArArchiveInputStream
+import org.apache.commons.compress.archivers.arj.ArjArchiveInputStream
+import org.apache.commons.compress.archivers.cpio.CpioArchiveInputStream
+import org.apache.commons.compress.archivers.dump.DumpArchiveInputStream
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import org.apache.commons.compress.archivers.sevenz.SevenZMethod
 import org.apache.commons.compress.archivers.sevenz.SevenZMethodConfiguration
@@ -20,19 +30,25 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
+import org.apache.commons.compress.compressors.lz4.FramedLZ4CompressorInputStream
+import org.apache.commons.compress.compressors.lz4.FramedLZ4CompressorOutputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorOutputStream
+import org.apache.commons.compress.utils.IOUtils
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
 import java.util.zip.Deflater
+import java.util.zip.Inflater
+import java.util.zip.InflaterInputStream
 
 /**
  * PHASE 10.3 — ZArchiver-grade compression engine.
@@ -55,7 +71,14 @@ import java.util.zip.Deflater
 object CompressionEngine {
 
     interface ProgressListener {
-        fun onProgress(percentage: Int, currentFile: String)
+        fun onProgress(
+            percentage: Int,
+            currentFile: String,
+            speed: Long = 0,           // bytes/second
+            etaSeconds: Long = 0,      // estimated time remaining in seconds
+            totalBytes: Long = 0,      // total bytes to process
+            processedBytes: Long = 0   // bytes processed so far
+        )
     }
 
     // PHASE 8.6 / 10.3: ZIP bomb defense. The original 1 GB / 512 MB
@@ -66,6 +89,80 @@ object CompressionEngine {
     const val MAX_ENTRY_BYTES: Long = 1L * 1024 * 1024 * 1024          // 1 GB per entry
 
     private const val BUFFER_SIZE = 64 * 1024
+
+    // ─────────────────────────────────────────────────────────────────
+    // Advanced Compression Options
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Compression level for formats that support it (ZIP, 7Z, TAR.*, GZIP, etc.)
+     */
+    enum class CompressionLevel(val deflaterLevel: Int, val displayName: String) {
+        STORE(Deflater.NO_COMPRESSION, "Store (no compression)"),
+        FASTEST(Deflater.BEST_SPEED, "Fastest"),
+        FAST(6, "Fast"),
+        NORMAL(Deflater.DEFAULT_COMPRESSION, "Normal"),
+        MAXIMUM(Deflater.BEST_COMPRESSION, "Maximum"),
+        ULTRA(9, "Ultra");
+    }
+
+    /**
+     * Dictionary size for LZMA2/7Z compression (in MB)
+     */
+    enum class DictionarySize(val sizeMB: Int, val displayName: String) {
+        MB_4(4, "4 MB"),
+        MB_8(8, "8 MB"),
+        MB_16(16, "16 MB (default)"),
+        MB_32(32, "32 MB"),
+        MB_64(64, "64 MB"),
+        MB_128(128, "128 MB"),
+        MB_256(256, "256 MB"),
+        MB_512(512, "512 MB"),
+        MB_1024(1024, "1 GB");
+    }
+
+    /**
+     * Split archive size (for multi-part archives)
+     */
+    enum class SplitSize(val sizeBytes: Long?, val displayName: String) {
+        NONE(null, "No split"),
+        MB_1(1_048_576L, "1 MB"),
+        MB_5(5_242_880L, "5 MB"),
+        MB_10(10_485_760L, "10 MB"),
+        MB_50(52_428_800L, "50 MB"),
+        MB_100(104_857_600L, "100 MB"),
+        MB_500(524_288_000L, "500 MB"),
+        GB_1(1_073_741_824L, "1 GB"),
+        GB_2(2_147_483_648L, "2 GB"),
+        GB_4(4_294_967_296L, "4 GB"),
+        CUSTOM(null, "Custom…");
+    }
+
+    /**
+     * Encryption method for password-protected archives
+     */
+    enum class EncryptionMethod(val displayName: String, val supportedFormats: List<ArchiveFormat>) {
+        ZIP_CRYPTO("ZipCrypto (legacy, compatible)", listOf(ArchiveFormat.ZIP)),
+        AES_256("AES-256 (strong)", listOf(ArchiveFormat.SEVEN_Z)),
+        AES_256_ZIP("AES-256 (ZIP, requires Zip4j)", listOf(ArchiveFormat.ZIP));
+    }
+
+    /**
+     * Configuration for advanced compression options
+     */
+    data class CompressionOptions(
+        val level: CompressionLevel = CompressionLevel.NORMAL,
+        val dictionarySize: DictionarySize = DictionarySize.MB_16,
+        val splitSize: SplitSize = SplitSize.NONE,
+        val encryptionMethod: EncryptionMethod? = null,
+        val encryptFileNames: Boolean = false,
+        val solidArchive: Boolean = false,
+        val customSplitSize: Long? = null
+    ) {
+        fun withSplitSize(split: SplitSize, customBytes: Long? = null): CompressionOptions {
+            return copy(splitSize = split, customSplitSize = if (split == SplitSize.CUSTOM) customBytes else null)
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────
     // PUBLIC: format detection
@@ -99,17 +196,18 @@ object CompressionEngine {
                     head[0] == 0x52.toByte() && head[1] == 0x61.toByte() &&
                         head[2] == 0x72.toByte() && head[3] == 0x21.toByte() &&
                         head[4] == 0x1A.toByte() && head[5] == 0x07.toByte() &&
-                        head[6] == 0x00.toByte() -> null  // RAR4 — unsupported
+                        head[6] == 0x00.toByte() ->
+                        ArchiveFormat.RAR
                     // RAR5: "Rar!\x1A\x07\x01\x00"
                     head[0] == 0x52.toByte() && head[1] == 0x61.toByte() &&
                         head[2] == 0x72.toByte() && head[3] == 0x21.toByte() &&
                         head[4] == 0x1A.toByte() && head[5] == 0x07.toByte() &&
                         head[6] == 0x01.toByte() && head[7] == 0x00.toByte() ->
-                        null  // RAR5 — unsupported
+                        ArchiveFormat.RAR5
                     // GZIP: 1F 8B
                     head[0] == 0x1F.toByte() && head[1] == 0x8B.toByte() ->
                         ArchiveFormat.GZIP
-                    // BZ2: "BZ"
+                    // BZ2: "BZh"
                     head[0] == 0x42.toByte() && head[1] == 0x5A.toByte() &&
                         head[2] == 0x68.toByte() ->
                         ArchiveFormat.BZIP2
@@ -122,6 +220,27 @@ object CompressionEngine {
                     head[0] == 0x28.toByte() && head[1] == 0xB5.toByte() &&
                         head[2] == 0x2F.toByte() && head[3] == 0xFD.toByte() ->
                         ArchiveFormat.ZSTANDARD
+                    // XAR (macOS PKG): xar! (0x78 0x61 0x72 0x21)
+                    head[0] == 0x78.toByte() && head[1] == 0x61.toByte() &&
+                        head[2] == 0x72.toByte() && head[3] == 0x21.toByte() ->
+                        ArchiveFormat.PKG
+                    // ARJ: 0x60 0xEA
+                    head[0] == 0x60.toByte() && head[1] == 0xEA.toByte() ->
+                        ArchiveFormat.ARJ
+                    // CPIO: "070701" or "070702" (ASCII)
+                    head[0] == 0x30.toByte() && head[1] == 0x37.toByte() &&
+                        head[2] == 0x30.toByte() && head[3] == 0x37.toByte() &&
+                        (head[4] == 0x30.toByte() || head[4] == 0x31.toByte()) ->
+                        ArchiveFormat.CPIO
+                    // LZ4: 0x04 0x22 0x4D 0x18 (frame) or 0x40 0x30 0x26 0x4D (legacy)
+                    (head[0] == 0x04.toByte() && head[1] == 0x22.toByte() &&
+                        head[2] == 0x4D.toByte() && head[3] == 0x18.toByte()) ||
+                    (head[0] == 0x40.toByte() && head[1] == 0x30.toByte() &&
+                        head[2] == 0x26.toByte() && head[3] == 0x4D.toByte()) ->
+                        ArchiveFormat.LZ4
+                    // Z: 0x1F 0x9D or 0x1F 0xA0
+                    head[0] == 0x1F.toByte() && (head[1] == 0x9D.toByte() || head[1] == 0xA0.toByte()) ->
+                        ArchiveFormat.Z
                     // TAR: 257-byte header starting with a filename.
                     // We can't safely detect TAR without a footer (the
                     // format has no magic at offset 0). We rely on the
@@ -132,7 +251,8 @@ object CompressionEngine {
                     else -> null
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("CompressionEngine", "Format detection failed", e)
             null
         }
     }
@@ -173,7 +293,8 @@ object CompressionEngine {
         outputFile: File,
         format: ArchiveFormat,
         password: String? = null,
-        listener: ProgressListener? = null
+        listener: ProgressListener? = null,
+        options: CompressionOptions = CompressionOptions()
     ): Result<File> = runCatching {
         if (!format.canCreate) {
             throw IllegalArgumentException("$format cannot be created by the engine")
@@ -185,6 +306,7 @@ object CompressionEngine {
         val work = collectForCompression(files)
         val totalBytes = work.sumOf { it.first.length() }.coerceAtLeast(1L)
         var processedBytes = 0L
+        val startTime = System.currentTimeMillis()
 
         // Make sure the parent directory exists. /sdcard is writable
         // for us with the new Phase 10.2 perms, but the parent might
@@ -193,6 +315,7 @@ object CompressionEngine {
 
         when (format) {
             ArchiveFormat.ZIP -> {
+                val compressionLevel = options.level.deflaterLevel
                 if (password != null) {
                     // Password-protected ZIP — we use the JDK's built-in
                     // ZipOutputStream which supports the legacy ZipCrypto
@@ -203,9 +326,9 @@ object CompressionEngine {
                     java.util.zip.ZipOutputStream(
                         BufferedOutputStream(FileOutputStream(outputFile))
                     ).use { zos ->
-                        zos.setLevel(Deflater.BEST_SPEED)
+                        zos.setLevel(compressionLevel)
                         for ((file, relPath) in work) {
-                            emitProgress(listener, processedBytes, totalBytes, relPath)
+                            emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
                             val entry = java.util.zip.ZipEntry(
                                 if (file.isDirectory) "$relPath/" else relPath
                             )
@@ -214,7 +337,7 @@ object CompressionEngine {
                                 file.inputStream().use { fis ->
                                     transferWithProgress(fis, zos) { len ->
                                         processedBytes += len
-                                        emitProgress(listener, processedBytes, totalBytes, relPath)
+                                        emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
                                     }
                                 }
                             }
@@ -225,9 +348,9 @@ object CompressionEngine {
                     // Unencrypted ZIP — use commons-compress for better
                     // ZIP64 / unicode-filename support.
                     ZipArchiveOutputStream(outputFile).use { zos ->
-                        zos.setLevel(Deflater.BEST_SPEED)
+                        zos.setLevel(compressionLevel)
                         for ((file, relPath) in work) {
-                            emitProgress(listener, processedBytes, totalBytes, relPath)
+                            emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
                             val entry = ZipArchiveEntry(file, relPath)
                             if (file.isDirectory) {
                                 zos.putArchiveEntry(entry)
@@ -237,7 +360,7 @@ object CompressionEngine {
                                 file.inputStream().use { fis ->
                                     transferWithProgress(fis, zos) { len ->
                                         processedBytes += len
-                                        emitProgress(listener, processedBytes, totalBytes, relPath)
+                                        emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
                                     }
                                 }
                                 zos.closeArchiveEntry()
@@ -306,6 +429,10 @@ object CompressionEngine {
                 singleStream(files.single(), outputFile, ::XZCompressorOutputStream, listener)
             ArchiveFormat.ZSTANDARD ->
                 singleStream(files.single(), outputFile, ::ZstdCompressorOutputStream, listener)
+            ArchiveFormat.PKG ->
+                throw UnsupportedOperationException("PKG/XAR format is read-only (macOS package format)")
+            else ->
+                throw UnsupportedOperationException("$format is extraction-only and cannot be created")
         }
         listener?.onProgress(100, "Done")
         outputFile
@@ -352,6 +479,12 @@ object CompressionEngine {
             ArchiveFormat.TAR_BZ2 -> extractTar(archive, outputDir, ::BZip2CompressorInputStream, listener)
             ArchiveFormat.TAR_XZ -> extractTar(archive, outputDir, ::XZCompressorInputStream, listener)
             ArchiveFormat.TAR_ZST -> extractTar(archive, outputDir, ::ZstdCompressorInputStream, listener)
+            ArchiveFormat.PKG -> extractXar(archive, outputDir, listener)
+            ArchiveFormat.RAR, ArchiveFormat.RAR5 -> extractRar(archive, outputDir, password, listener)
+            ArchiveFormat.ARJ -> extractArj(archive, outputDir, listener)
+            ArchiveFormat.CPIO -> extractCpio(archive, outputDir, listener)
+            ArchiveFormat.LZ4 -> extractLz4(archive, outputDir, listener)
+            ArchiveFormat.Z -> extractZ(archive, outputDir, listener)
             // The "single-file" stream formats are a corner case: we
             // still decompress them — just into a single file next to
             // the archive with the compression extension stripped.
@@ -455,6 +588,183 @@ object CompressionEngine {
                     }
                 }
                 entry = szf.nextEntry
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // XAR (macOS PKG) — using SpryLab XAR (pure Java)
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun extractXar(
+        archive: File, outputDir: File, listener: ProgressListener?
+    ) {
+        val source = FileXarSource(archive)
+        try {
+            var totalBytes = 0L
+            val entries = source.entries
+            for (entry in entries) {
+                extractXarEntry(entry, outputDir, listener, archive) { bytes ->
+                    totalBytes += bytes
+                    if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                        throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                    }
+                }
+            }
+        } finally {
+            source.getRange(0, 0) // Ensure resources are cleaned up
+        }
+    }
+
+    private fun extractXarEntry(
+        entry: XarEntry,
+        outputDir: File,
+        listener: ProgressListener?,
+        archive: File,
+        onProgress: (Long) -> Unit
+    ) {
+        val target = safeTarget(outputDir, entry.name)
+        if (entry.isDirectory) {
+            target.mkdirs()
+        } else {
+            target.parentFile?.mkdirs()
+            entry.extract(target, true)
+            // The SpryLab XAR library doesn't provide per-chunk progress during extraction.
+            // We report the full entry size as a single progress update.
+            val size = entry.size
+            onProgress(size)
+            emitProgress(listener, size, archive.length().coerceAtLeast(1L), entry.name)
+        }
+        // Recursively extract children
+        for (child in entry.children) {
+            extractXarEntry(child, outputDir, listener, archive, onProgress)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RAR/RAR5 — using JUnrar (pure Java)
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun extractRar(
+        archive: File, outputDir: File, password: String?, listener: ProgressListener?
+    ) {
+        Archive(archive).use { rarArchive ->
+            if (password != null) {
+                rarArchive.setPassword(password)
+            }
+            val fileHeaders = rarArchive.getFileHeaders()
+            var totalBytes = 0L
+            val totalSize = fileHeaders.sumOf { it.fullUnpackSize }
+            for (fileHeader in fileHeaders) {
+                val current = fileHeader
+                val target = safeTarget(outputDir, current.fileNameString)
+                if (current.isDirectory) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile?.mkdirs()
+                    FileOutputStream(target).use { fos ->
+                        rarArchive.extractFile(current, fos)
+                        totalBytes += current.fullUnpackSize
+                        if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                            throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                        }
+                        emitProgress(listener, totalBytes, totalSize.coerceAtLeast(1L), current.fileNameString)
+                    }
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Generic ArchiveStreamFactory-based extractors
+    // ─────────────────────────────────────────────────────────────────
+
+    private fun extractWithArchiveStreamFactory(
+        archive: File,
+        outputDir: File,
+        formatName: String,
+        listener: ProgressListener?
+    ) {
+        val ais = ArchiveStreamFactory().createArchiveInputStream(
+            formatName, BufferedInputStream(FileInputStream(archive))
+        ) as ArchiveInputStream<*>
+        ais.use { stream ->
+            var totalBytes = 0L
+            var entry: ArchiveEntry? = stream.nextEntry
+            while (entry != null) {
+                val current = entry ?: break
+                val target = safeTarget(outputDir, current.name)
+                if (current.isDirectory) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile?.mkdirs()
+                    FileOutputStream(target).use { fos ->
+                        val buf = ByteArray(BUFFER_SIZE)
+                        var n: Int
+                        val entryName = current.name
+                        while (stream.read(buf).also { n = it } > 0) {
+                            fos.write(buf, 0, n)
+                            totalBytes += n
+                            if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                                throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                            }
+                            emitProgress(listener, totalBytes, archive.length().coerceAtLeast(1L), entryName)
+                        }
+                    }
+                }
+                entry = stream.nextEntry
+            }
+        }
+    }
+
+    private fun extractArj(archive: File, outputDir: File, listener: ProgressListener?) {
+        extractWithArchiveStreamFactory(archive, outputDir, "arj", listener)
+    }
+
+    private fun extractCpio(archive: File, outputDir: File, listener: ProgressListener?) {
+        extractWithArchiveStreamFactory(archive, outputDir, "cpio", listener)
+    }
+
+    private fun extractLz4(archive: File, outputDir: File, listener: ProgressListener?) {
+        // LZ4 frame format
+        extractSingleStreamWithDecoder(archive, outputDir, listener) { input ->
+            FramedLZ4CompressorInputStream(input)
+        }
+    }
+
+    private fun extractZ(archive: File, outputDir: File, listener: ProgressListener?) {
+        // Unix compress (.Z) format
+        extractSingleStreamWithDecoder(archive, outputDir, listener) { input ->
+            InflaterInputStream(input)
+        }
+    }
+
+    private fun extractSingleStreamWithDecoder(
+        archive: File,
+        outputDir: File,
+        listener: ProgressListener?,
+        decoder: (InputStream) -> InputStream
+    ) {
+        val name = archive.name
+        val decompressedName = name.substringBeforeLast(".", "").ifBlank { "${archive.nameWithoutExtension}.out" }
+        val target = File(outputDir, decompressedName)
+        target.parentFile?.mkdirs()
+        val total = archive.length().coerceAtLeast(1L)
+        var processed = 0L
+        BufferedInputStream(FileInputStream(archive)).use { rawIn ->
+            decoder(rawIn).use { input ->
+                FileOutputStream(target).use { fos ->
+                    val buf = ByteArray(BUFFER_SIZE)
+                    var n: Int
+                    while (input.read(buf).also { n = it } > 0) {
+                        fos.write(buf, 0, n)
+                        processed += n
+                        if (processed > MAX_DECOMPRESSED_BYTES) {
+                            throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                        }
+                        emitProgress(listener, processed, total, target.name)
+                    }
+                }
             }
         }
     }
@@ -671,5 +981,17 @@ object CompressionEngine {
         if (listener == null) return
         val pct = ((processed * 100) / total).toInt().coerceIn(0, 99)
         listener.onProgress(pct, current)
+    }
+
+    private fun emitProgressWithSpeed(
+        listener: ProgressListener?, processed: Long, total: Long, current: String, startTime: Long
+    ) {
+        if (listener == null) return
+        val pct = ((processed * 100) / total).toInt().coerceIn(0, 99)
+        val elapsedMs = System.currentTimeMillis() - startTime
+        val elapsedSec = maxOf(elapsedMs / 1000, 1)
+        val speed = processed / elapsedSec
+        val etaSec = if (speed > 0) (total - processed) / speed else 0
+        listener.onProgress(pct, current, speed, etaSec, total, processed)
     }
 }

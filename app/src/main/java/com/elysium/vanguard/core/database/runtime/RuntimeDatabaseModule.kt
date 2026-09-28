@@ -35,6 +35,32 @@ object RuntimeDatabaseModule {
         }
     }
 
+    /**
+     * Phase 145 — the migration that adds the
+     * `album`, `artist`, and `duration_ms` columns
+     * to the `media_index` table. These columns
+     * store rich music metadata (album name, artist
+     * name, and duration in milliseconds) so the
+     * Music Hub can display real track info instead
+     * of "Unknown" placeholders.
+     */
+    private val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE media_index " +
+                    "ADD COLUMN album TEXT DEFAULT NULL"
+            )
+            db.execSQL(
+                "ALTER TABLE media_index " +
+                    "ADD COLUMN artist TEXT DEFAULT NULL"
+            )
+            db.execSQL(
+                "ALTER TABLE media_index " +
+                    "ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideRuntimeDatabase(@ApplicationContext context: Context): RuntimeDatabase {
@@ -47,7 +73,7 @@ object RuntimeDatabaseModule {
             // in production. Every schema bump MUST add a Migration(N, N+1)
             // and register it via addMigrations(...) below — never via
             // fallbackToDestructiveMigration().
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
         return builder.build()
     }
 

@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.filemanager
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.elysium.vanguard.core.saf.SafTreeManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -145,13 +146,13 @@ class FileManagerRepositoryDual @Inject constructor(
             try {
                 val f = File(path)
                 if (f.isDirectory) f.deleteRecursively() else f.delete()
-            } catch (_: Exception) { false }
+            } catch (e: Exception) { Log.w(tag, "delete failed: $path", e); false }
         }
     }
 
     private fun deleteSaf(relative: String): Boolean {
         val doc = safTreeManager.resolveChild(relative) ?: return false
-        return try { doc.delete() } catch (_: Exception) { false }
+        return try { doc.delete() } catch (e: Exception) { Log.w(tag, "deleteSaf failed: $relative", e); false }
     }
 
     /**
@@ -167,14 +168,13 @@ class FileManagerRepositoryDual @Inject constructor(
                 val dest = File(source.parent, newName)
                 if (dest.exists() && dest.absolutePath != source.absolutePath) return false
                 source.renameTo(dest)
-            } catch (_: Exception) { false }
+            } catch (e: Exception) { Log.w(tag, "rename failed: $path -> $newName", e); false }
         }
     }
 
     private fun renameSaf(relative: String, newName: String): Boolean {
         val doc = safTreeManager.resolveChild(relative) ?: return false
-        // DocumentFile.renameTo returns the new URI; we check null for failure.
-        return try { doc.renameTo(newName) != null } catch (_: Exception) { false }
+        return try { doc.renameTo(newName) != null } catch (e: Exception) { Log.w(tag, "renameSaf failed: $relative", e); false }
     }
 
     /**
@@ -192,7 +192,7 @@ class FileManagerRepositoryDual @Inject constructor(
                 if (src.isDirectory) src.copyRecursively(dst, overwrite = true)
                 else src.copyTo(dst, overwrite = true)
                 true
-            } catch (_: Exception) { false }
+            } catch (e: Exception) { Log.w(tag, "copy failed: $sourcePath -> $destPath", e); false }
         }
     }
 
@@ -220,7 +220,7 @@ class FileManagerRepositoryDual @Inject constructor(
                 }
             }
             true
-        } catch (_: Exception) { false }
+        } catch (e: Exception) { Log.w(tag, "copySaf failed: $sourcePath -> $destPath", e); false }
     }
 
     /**
@@ -238,7 +238,7 @@ class FileManagerRepositoryDual @Inject constructor(
                 else if (copy(sourcePath, destPath)) {
                     delete(sourcePath)
                 } else false
-            } catch (_: Exception) { false }
+            } catch (e: Exception) { Log.w(tag, "move failed: $sourcePath -> $destPath", e); false }
         }
     }
 
@@ -255,7 +255,7 @@ class FileManagerRepositoryDual @Inject constructor(
                 }
             } ?: return false
             source.delete()
-        } catch (_: Exception) { false }
+        } catch (e: Exception) { Log.w(tag, "moveSaf failed", e); false }
     }
 
     /**

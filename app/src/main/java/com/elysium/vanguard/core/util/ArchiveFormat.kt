@@ -3,9 +3,9 @@ package com.elysium.vanguard.core.util
 /**
  * PHASE 10.3 — every archive format the app can read or write.
  *
- * Aligned with what ZArchiver supports minus RAR (RAR5 needs a native
- * lib that's not worth shipping for the marginal user who actually
- * cares — we surface a clean error if a .rar is opened).
+ * Aligned with what MiXplorer/Solid Explorer support:
+ * - Creation: ZIP, 7Z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, TAR.ZST, GZIP, BZIP2, XZ, ZST
+ * - Extraction: All above + RAR/RAR5, ARJ, CPIO, LZ4, Z, XAR/PKG
  *
  * `extensions` are lowercased and may include a leading dot. The first
  * extension is the canonical one used when the user picks a format in
@@ -113,6 +113,63 @@ enum class ArchiveFormat(
         supportsPassword = false,
         multiFile = false,
         extensions = listOf("zst", "zstd")
+    ),
+    PKG(
+        displayName = "PKG",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = false,
+        multiFile = true,
+        extensions = listOf("pkg", "xar")
+    ),
+    // Extraction-only formats (via JUnrar, commons-compress, SpryLab)
+    RAR(
+        displayName = "RAR",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = true,
+        multiFile = true,
+        extensions = listOf("rar")
+    ),
+    RAR5(
+        displayName = "RAR5",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = true,
+        multiFile = true,
+        extensions = listOf("rar")
+    ),
+    ARJ(
+        displayName = "ARJ",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = true,
+        multiFile = true,
+        extensions = listOf("arj")
+    ),
+    CPIO(
+        displayName = "CPIO",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = false,
+        multiFile = true,
+        extensions = listOf("cpio")
+    ),
+    LZ4(
+        displayName = "LZ4",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = false,
+        multiFile = false,
+        extensions = listOf("lz4")
+    ),
+    Z(
+        displayName = "Z",
+        canCreate = false,
+        canExtract = true,
+        supportsPassword = false,
+        multiFile = false,
+        extensions = listOf("z")
     );
 
     /** The canonical extension (with leading dot) for "save as" dialogs. */

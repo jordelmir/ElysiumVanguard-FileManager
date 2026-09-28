@@ -68,13 +68,31 @@ class VaultViewModel @Inject constructor(
     }
 
     fun unlock() {
-        // Sanity check: try to derive the master Aead. If it throws (no Keystore, weird state),
-        // surface the error instead of silently failing.
+        // Verify the Keystore-backed AEAD is reachable before
+        // marking the vault as unlocked. We do a test
+        // encrypt→decrypt roundtrip with a tiny payload to
+        // confirm the Keystore is functional. If it throws
+        // (corrupted keystore, hardware security module
+        // failure), we surface the error.
         viewModelScope.launch {
             try {
-                _state.update { it.copy(isUnlocked = true, errorMessage = null) }
+                val testPayload = "vault-unlock-check".toByteArray()
+                val encrypted = crypto.encryptContainer(testPayload)
+                val decrypted = crypto.decryptContainer(encrypted)
+                val roundtripOk = decrypted.contentEquals(testPayload)
+                if (roundtripOk) {
+                    _state.update { it.copy(isUnlocked = true, errorMessage = null) }
+                } else {
+                    _state.update {
+                        it.copy(errorMessage = "Vault unlock failed: crypto roundtrip mismatch")
+                    }
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(errorMessage = "Vault unlock failed: ${e.message}") }
+                _state.update {
+                    it.copy(
+                        errorMessage = "Vault unlock failed: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
             }
         }
     }

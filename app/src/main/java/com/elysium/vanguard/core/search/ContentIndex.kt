@@ -90,19 +90,16 @@ class ContentIndex {
         if (tokens.isEmpty()) return false
 
         val perTokenCounts = HashMap<String, Int>()
-        var firstOffset = -1L
-        var firstToken: String? = null
-        // We compute term frequencies + first occurrence offset.
-        val seenOffsets = HashMap<String, Long>()
-        for ((i, tok) in tokens.withIndex()) {
+        // Track real byte offsets for first occurrence of each token.
+        val firstOffsets = HashMap<String, Long>()
+        var bytePos = 0L
+        for (tok in tokens) {
             perTokenCounts[tok] = (perTokenCounts[tok] ?: 0) + 1
-            if (!seenOffsets.containsKey(tok)) {
-                seenOffsets[tok] = tokens[i].length.toLong() * i  // approximate
+            if (!firstOffsets.containsKey(tok)) {
+                firstOffsets[tok] = bytePos
             }
+            bytePos += tok.toByteArray(Charsets.UTF_8).size.toLong() + 1 // +1 for separator
         }
-        // We didn't track real offsets during tokenization; use 0 as a stub
-        // since we use this only to identify the first occurrence.
-        val firstOffsetStub = 0L
 
         val path = file.absolutePath
         indexedFiles.add(path)
@@ -110,7 +107,7 @@ class ContentIndex {
         fileToDocFreq[path] = perTokenCounts
 
         for ((token, count) in perTokenCounts) {
-            val posting = Posting(path, count, firstOffsetStub)
+            val posting = Posting(path, count, firstOffsets[token] ?: 0L)
             val list = tokenToPostings.getOrPut(token) { mutableListOf() }
             synchronized(list) { list.add(posting) }
         }

@@ -177,17 +177,12 @@ class ProcessLauncherNetworkShareMounter(
     }
 
     /**
-     * Wait for the launched process to exit. Phase 94+
-     * stand-in until a real `waitFor()` lands in Phase 100.
+     * Wait for the launched process to exit.
+     * Uses [LaunchedProcess.waitFor] which blocks
+     * until the process terminates and returns
+     * the exit code.
      */
     private fun waitForExit(launched: com.elysium.vanguard.core.runtime.runner.LaunchedProcess): Int {
-        var attempts = 0
-        while (attempts < 600) { // up to 60s at 100ms
-            if (launched.pid <= 0) return 0
-            Thread.sleep(100)
-            attempts++
-        }
-        launched.stop()
-        return -1
+        return launched.waitFor()
     }
 }

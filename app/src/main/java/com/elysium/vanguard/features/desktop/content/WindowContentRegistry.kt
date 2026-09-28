@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Environment
 import android.os.StatFs
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -135,21 +136,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToInt
 
+private const val TAG = "WindowContentRegistry"
+
 /**
  * PHASE 121-136 — the registry of real window content.
  *
- * Phase 78 shipped a placeholder registry (object) with 4 fake
- * bodies (TerminalBody, FilesBody, etc. were hardcoded text). That
- * was fine for shipping the windowing surface but is no longer
- * enough: the user wants the proprietary Windows desktop to
- * actually work — read folders, open files, run .exe via Wine, etc.
- *
- * The registry is now an Hilt-injected @Singleton that owns a
- * [FileManagerRepositoryDual] and surfaces 18 real bodies:
+ * The registry is an Hilt-injected @Singleton that owns a
+ * [FileManagerRepositoryDual] and surfaces real bodies:
  *  - [MyPcBody] shows the available "drives" (filesystem roots)
  *  - [RealFilesBody] is a real Windows Explorer: path navigation,
  *    breadcrumb, tap to enter, long-press for details, ↑ button
- *  - [TerminalBody] is a client-side shell with 22 built-in commands
+ *  - [RealTerminalBody] is a proot-backed Linux terminal
  *  - [SettingsBody] is a live system-info dashboard
  *  - [NotesBody] is a 2-pane multi-note editor with auto-save
  *  - [ProgramsBody] is a 2-section catalog of Elysium System +
@@ -254,11 +251,8 @@ class WindowContentRegistry @Inject constructor(
         ),
         "terminal" to WindowContent(
             icon = Icons.Filled.Terminal,
-            // PHASE 142 — RealTerminalBody uses
-            // ProotTerminalRunner to spawn a real proot
-            // + Alpine shell. The Phase 122 client-side
-            // shell mock (TerminalBody) is kept for
-            // reference and will be removed in Phase 143.
+            // RealTerminalBody uses ProotTerminalRunner to
+            // spawn a real proot + Alpine shell.
             body = { RealTerminalBody() },
         ),
         "settings" to WindowContent(
@@ -398,9 +392,8 @@ class WindowContentRegistry @Inject constructor(
         val launcher = externalLaunchers[iconKey] ?: return false
         try {
             launcher.invoke()
-        } catch (_: Exception) {
-            // Swallow — the dock click already felt responsive;
-            // the user sees nothing happen if the launch fails.
+        } catch (e: Exception) {
+            Log.w(TAG, "External launch failed for $iconKey", e)
         }
         return true
     }
@@ -477,9 +470,8 @@ class WindowContentRegistry @Inject constructor(
                     context.startActivity(intent)
                     return
                 }
-            } catch (_: Exception) {
-                // Package installed but launch failed; fall through
-                // to the URL.
+            } catch (e: Exception) {
+                Log.w(TAG, "Package launch failed for $packageName, falling through to URL", e)
             }
         }
         try {
@@ -489,8 +481,8 @@ class WindowContentRegistry @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "Open $appName").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
-        } catch (_: Exception) {
-            // No app can handle the URL either; silent no-op.
+        } catch (e: Exception) {
+            Log.w(TAG, "No app can handle the URL fallback for $appName", e)
         }
     }
 
@@ -554,9 +546,8 @@ class WindowContentRegistry @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "Open with").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
-        } catch (_: Exception) {
-            // Swallow — the file explorer surfaces the failure
-            // through its own state (not via exceptions).
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to open file externally: $path", e)
         }
     }
 
@@ -617,15 +608,6 @@ class WindowContentRegistry @Inject constructor(
             "openFilesAt($path) — emitted DesktopAction.OpenFilesAtPath",
         )
     }
-
-    /**
-     * Reserved for future per-window path plumbing. The
-     * `resolve(iconKey, path)` overload is the
-     * canonical path-injection mechanism today; this
-     * accessor stays for symmetry / future use.
-     */
-    @Suppress("unused")
-    fun consumePendingFilesPath(): String? = null
 
     companion object {
         /**
@@ -1554,9 +1536,8 @@ private fun launchInstalledApp(context: Context, packageName: String) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
         }
-    } catch (_: Exception) {
-        // The app may have been uninstalled between
-        // the query and the click. Silent no-op.
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to launch installed app: $packageName", e)
     }
 }
 
@@ -2911,7 +2892,9 @@ private fun BrowserBody() {
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 context.startActivity(Intent.createChooser(intent, "Open $label")
                                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to open URL: $target", e)
+                            }
                         }
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,

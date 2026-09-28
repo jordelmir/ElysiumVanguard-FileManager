@@ -174,4 +174,159 @@ class BundledRootfsExtractorTest {
             entry.sha256.all { it in '0'..'9' || it in 'a'..'f' }
         )
     }
+
+    @Test fun `extraction creates real symlinks, not zero byte files`() {
+        // PHASE 145 — the busybox-style Alpine rootfs ships
+        // every applet as a symlink to /bin/busybox. If the
+        // extractor silently drops them and writes 0-byte
+        // regular files (the Phase 140 behaviour), every
+        // shell / cat / cp / ls invocation fails at execve
+        // with ENOENT and the shell exits with code 1.
+        val distro = BundledDistroRegistry.ALPINE_MINI_AARCH64
+        val source = FileBundledRootfsSource(assetFile)
+        val rootfs = extractor.ensureExtracted(distro, source)
+        val sh = File(rootfs, "bin/sh")
+        val ash = File(rootfs, "bin/ash")
+        val cat = File(rootfs, "bin/cat")
+        val busybox = File(rootfs, "bin/busybox")
+        // Sanity: busybox itself is the real binary.
+        assertTrue("busybox must be a regular file", busybox.isFile)
+        assertTrue(
+            "busybox must be non-empty (Phase 140 left this at 919232)",
+            busybox.length() > 1024,
+        )
+        // The shell entry points must be symlinks — NOT
+        // regular files, NOT zero-byte files. This is the
+        // regression we want to catch.
+        assertTrue("bin/sh must exist (symlink or file)", java.nio.file.Files.exists(sh.toPath()))
+        assertTrue(
+            "bin/sh must be a symlink, not a 0-byte regular file",
+            java.nio.file.Files.isSymbolicLink(sh.toPath()),
+        )
+        assertTrue(
+            "bin/ash must be a symlink",
+            java.nio.file.Files.isSymbolicLink(ash.toPath()),
+        )
+        assertTrue(
+            "bin/cat must be a symlink",
+            java.nio.file.Files.isSymbolicLink(cat.toPath()),
+        )
+        // The symlink target is a relative path inside the
+        // rootfs ("busybox" in the same directory), and
+        // the target itself must exist (the busybox binary
+        // is right there).
+        val shTarget = java.nio.file.Files.readSymbolicLink(sh.toPath()).toString()
+        assertEquals(
+            "bin/sh should be a relative symlink to busybox",
+            "busybox",
+            shTarget,
+        )
+        assertTrue(
+            "the symlink target (busybox) must exist",
+            java.nio.file.Files.exists(sh.resolveSibling(shTarget).toPath()),
+        )
+    }
+
+    @Test fun `re extraction into a clean dir re-creates real symlinks`() {
+        // PHASE 145 — exercises the symlink-creation path
+        // from a fresh state, the way a user gets the bug
+        // fix on a brand-new install OR after wiping the
+        // rootfs dir to recover from a corrupted state.
+        //
+        // Earlier revisions of this test tried to simulate
+        // an in-place "stale 0-byte file" scenario (a
+        // Phase 140 extraction that left broken regular
+        // files at every symlink path), but the extractor's
+        // marker check (`bin/` + `etc/` present → skip) is
+        // intentionally conservative and refuses to re-unpack
+        // unless the directory disappears. Exercising the
+        // stale-cleanup branch requires either an in-process
+        // hook to force re-unpack OR a new
+        // `forceReUnpack(distro, source)` entry point — both
+        // are out of scope for Phase 145 (the bug was the
+        // symlink resolution, not the marker policy).
+        //
+        // What this test DOES verify: when a fresh
+        // extraction runs, every busybox applet is a
+        // real symlink to a relative `busybox` target
+        // inside the unpacked rootfs — not a 0-byte
+        // regular file, not a broken dangling link.
+        val distro = BundledDistroRegistry.ALPINE_MINI_AARCH64
+        val source = FileBundledRootfsSource(assetFile)
+        // First extract: every applet must be a real
+        // symlink to a relative `busybox` target. This
+        // is the regression we want to catch — the Phase
+        // 140 behaviour was a 0-byte regular file at every
+        // symlink path.
+        val first = extractor.ensureExtracted(distro, source)
+        val sh = File(first, "bin/sh")
+        val ash = File(first, "bin/ash")
+        val cat = File(first, "bin/cat")
+        require(sh.exists()) { "first extract must have created bin/sh" }
+        assertTrue(
+            "bin/sh must be a symlink (Phase 140 wrote 0-byte files)",
+            java.nio.file.Files.isSymbolicLink(sh.toPath()),
+        )
+        assertTrue(
+            "bin/ash must be a symlink",
+            java.nio.file.Files.isSymbolicLink(ash.toPath()),
+        )
+        assertTrue(
+            "bin/cat must be a symlink",
+            java.nio.file.Files.isSymbolicLink(cat.toPath()),
+        )
+        // The stored target must be the relative `busybox`
+        // (so the symlink is portable across the rootfs's
+        // on-device location), not the absolute
+        // `/bin/busybox` from the tar (which would be a
+        // dangling link on Android — `/bin/busybox` does
+        // not exist on the host filesystem).
+        assertEquals(
+            "bin/sh symlink target should be the relative 'busybox'",
+            "busybox",
+            java.nio.file.Files.readSymbolicLink(sh.toPath()).toString(),
+        )
+        assertEquals(
+            "bin/ash symlink target should be the relative 'busybox'",
+            "busybox",
+            java.nio.file.Files.readSymbolicLink(ash.toPath()).toString(),
+        )
+        assertEquals(
+            "bin/cat symlink target should be the relative 'busybox'",
+            "busybox",
+            java.nio.file.Files.readSymbolicLink(cat.toPath()).toString(),
+        )
+        // The symlink's resolved target (the actual file
+        // the kernel would follow) must exist inside the
+        // extracted rootfs. This is the property that was
+        // broken before Phase 145's fix: the stored
+        // target was `/bin/busybox` (host absolute), so
+        // the resolution walked off the rootfs entirely
+        // and `sh -l` failed with ENOENT.
+        assertTrue(
+            "the symlink's resolved target (busybox) must exist inside the rootfs",
+            java.nio.file.Files.exists(sh.resolveSibling("busybox").toPath()),
+        )
+        // Wipe the entire rootfs dir to simulate a
+        // user-initiated "reset rootfs" recovery, then
+        // re-extract. The marker check correctly treats
+        // the missing dir as "not yet extracted" and
+        // re-unpacks; the fresh extraction re-creates
+        // the symlinks. The 0-byte-file scenario is
+        // not exercised here for the reason described
+        // above; the in-place recovery path is a
+        // future increment.
+        first.deleteRecursively()
+        val second = extractor.ensureExtracted(distro, source)
+        val sh2 = File(second, "bin/sh")
+        assertTrue(
+            "after wipe + re-extract, bin/sh must be a symlink again",
+            java.nio.file.Files.isSymbolicLink(sh2.toPath()),
+        )
+        assertEquals(
+            "bin/sh symlink target should still be 'busybox' after re-extract",
+            "busybox",
+            java.nio.file.Files.readSymbolicLink(sh2.toPath()).toString(),
+        )
+    }
 }

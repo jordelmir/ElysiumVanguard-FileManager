@@ -790,8 +790,8 @@ fun FileManagerScreen(
                     initialArchive = state.archive,
                     detectedFormat = state.detectedFormat,
                     onDismiss = { viewModel.dismissArchiveSheet() },
-                    onCompress = { files, output, format, password ->
-                        viewModel.runArchiveCompress(files, output, format, password)
+                    onCompress = { files, output, format, password, options ->
+                        viewModel.runArchiveCompress(files, output, format, password, options)
                     },
                     onExtract = { archive, outDir, password ->
                         viewModel.runArchiveExtract(archive, outDir, password)
@@ -1133,7 +1133,9 @@ fun SovereignAccessDeniedScreen() {
                                 Uri.parse("package:" + context.packageName)
                             )
                             context.startActivity(intent)
-                        } catch (e: Exception) { }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Could not open permission settings", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = GlobalColors.primary.copy(alpha = 0.2f)),

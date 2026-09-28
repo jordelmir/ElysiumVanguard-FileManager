@@ -93,6 +93,9 @@ class ContentResolverMediaSource(
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.ALBUM,
+            MediaStore.MediaColumns.ARTIST,
+            MediaStore.MediaColumns.DURATION,
         )
         val sortOrder = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
         context.contentResolver.query(uri, projection, null, null, sortOrder)
@@ -115,6 +118,15 @@ class ContentResolverMediaSource(
                 val mimeColumn = cursor.getColumnIndexOrThrow(
                     MediaStore.MediaColumns.MIME_TYPE,
                 )
+                val albumColumn = cursor.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns.ALBUM,
+                )
+                val artistColumn = cursor.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns.ARTIST,
+                )
+                val durationColumn = cursor.getColumnIndexOrThrow(
+                    MediaStore.MediaColumns.DURATION,
+                )
                 while (cursor.moveToNext()) {
                     val mediaId = cursor.getLong(idColumn)
                     val itemUri = ContentUris.withAppendedId(
@@ -134,6 +146,9 @@ class ContentResolverMediaSource(
                             dateModifiedMs = cursor.getLong(dateColumn) * 1000L,
                             mimeType = cursor.getString(mimeColumn) ?: "",
                             contentHash = contentHash,
+                            album = cursor.getString(albumColumn),
+                            artist = cursor.getString(artistColumn),
+                            durationMs = cursor.getLong(durationColumn),
                         ),
                     )
                 }

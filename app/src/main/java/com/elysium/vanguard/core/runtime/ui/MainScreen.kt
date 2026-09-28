@@ -270,9 +270,7 @@ fun MainScreen(
                             // affordance. LinuxProot sessions
                             // navigate to the terminal screen
                             // pre-loaded with the distro; WindowsVm
-                            // sessions would open a VNC viewer
-                            // (not yet implemented; for now the
-                            // snackbar is the affordance).
+                            // sessions navigate to the VNC viewer.
                             onOpenSession = { session ->
                                 when (session) {
                                     is WorkspaceSession.LinuxProot -> {

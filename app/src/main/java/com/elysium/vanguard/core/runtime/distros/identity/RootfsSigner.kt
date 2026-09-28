@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.distros.identity
 
+import android.util.Log
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.PrivateKey
@@ -60,7 +61,8 @@ class HmacRootfsSigner(
         return try {
             val expected = sign(data)
             constantTimeEquals(expected, signatureB64)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("RootfsSigner", "HMAC verification failed", e)
             false
         }
     }
@@ -93,7 +95,8 @@ class RsaRootfsSigner(
             verifier.initVerify(keyPair.public)
             verifier.update(data)
             verifier.verify(Base64.getDecoder().decode(signatureB64))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("RootfsSigner", "RSA verification failed", e)
             false
         }
     }

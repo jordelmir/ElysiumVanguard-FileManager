@@ -47,7 +47,17 @@ object ProotTerminalRunnerModule {
         private val application: Application,
     ) {
         fun create(distro: BundledDistro): BundledRootfsSource =
-            AndroidAssetRootfsSource(application.assets, distro.assetPath)
+            // PHASE 145 — pass the pinned uncompressed size
+            // because the AAPT2-deflated asset cannot be
+            // opened via [AssetManager.openFd] (it throws
+            // `FileNotFoundException: ... it is probably
+            // compressed`). See [AndroidAssetRootfsSource]
+            // kdoc for the full story.
+            AndroidAssetRootfsSource(
+                assets = application.assets,
+                assetPath = distro.assetPath,
+                knownSizeBytes = distro.sizeBytes,
+            )
     }
 
     @Provides

@@ -210,7 +210,10 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.02.02"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-text")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.foundation:foundation-layout")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
@@ -280,6 +283,23 @@ dependencies {
     // PHASE 3.10: ML Kit image labeling (auto-tag photos).
     implementation("com.google.mlkit:image-labeling:17.0.8")
 
+    // Cloud Storage Clients
+    // Google Drive API v3
+    implementation("com.google.apis:google-api-services-drive:v3-rev20260428-2.0.0")
+    // Microsoft Graph (OneDrive, SharePoint)
+    implementation("com.microsoft.graph:microsoft-graph:6.42.0")
+    // Dropbox API v2
+    implementation("com.dropbox.core:dropbox-core-sdk:7.0.0")
+    // Box API
+    implementation("com.box:box-java-sdk:4.16.1")
+    // NextCloud/ownCloud (WebDAV-based, uses existing WebDAV client)
+    // Mega.nz - no official Maven artifact, use REST API
+    // Yandex Disk (WebDAV)
+    // pCloud (WebDAV)
+    // MediaFire (no official SDK, use REST)
+    // OAuth2 for all cloud providers
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.48.0")
+
     // PHASE 9.6.3.2: Apache Commons Compress — used by the custom rootfs
     // installer to handle .tar.xz / .tar.bz2 / .tar.zst decompress streams
     // before they hit our POSIX-tar extractor. xz is the big one we
@@ -291,11 +311,20 @@ dependencies {
     // LZMA2 / XZ / Zstandard we lean on the transitive deps below — they
     // are tiny pure-Java wrappers (xz) or the official JNI binding (zstd-jni).
     implementation("org.apache.commons:commons-compress:1.26.0")
+    // XAR (macOS PKG) support via SpryLab's pure-Java implementation.
+    implementation("com.sprylab.xar:xar:0.9.11")
     // Pure-Java LZMA2 / XZ codec. Required for .tar.xz round-trip and
     // for the 7Z LZMA2 compression method.
     implementation("org.tukaani:xz:1.10")
     // Zstandard JNI binding. Required for .tar.zst round-trip.
     implementation("com.github.luben:zstd-jni:1.5.6-1")
+    // JUnrar for RAR/RAR5 extraction (pure Java, no native libs needed)
+    implementation("com.github.junrar:junrar:7.5.5")
+    // Apache Commons Compress 1.26+ supports CAB, ARJ, CHM, CPIO, DMG, ISO, etc.
+    // For LZ4/LZ5/Lizard: use lz4-java
+    implementation("org.lz4:lz4-java:1.8.0")
+    // For WIM: wimlib-java (if available) or skip for now
+    // Note: Some formats (ISO, DMG, VHD, etc.) need native libs or are read-only via 7z
     // commons-codec is a runtime dep of commons-compress 1.26's
     // Charsets helper (org/apache/commons/codec/Charsets). The Android
     // build pulls it transitively but the JVM test runtime does not —

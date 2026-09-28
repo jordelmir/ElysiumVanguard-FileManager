@@ -5,6 +5,7 @@ import com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsSource
 import com.elysium.vanguard.core.runtime.distros.bundled.BundledRootfsExtractor
 import com.elysium.vanguard.core.runtime.distros.launcher.NativeProotLauncher
 import com.elysium.vanguard.core.runtime.distros.launcher.ProotLocation
+import com.elysium.vanguard.core.runtime.distros.launcher.ProotNativeLibrary
 import com.elysium.vanguard.core.runtime.terminal.session.TerminalSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +83,25 @@ class ProotTerminalRunner(
                 distro = distro,
                 source = AssetManagerSourceProvider.sourceFor(distro),
             )
-            val launcher = NativeProotLauncher()
+            // PHASE 145 — wire the proot detector + the runner's
+            // library dir into the launcher. Phase 141 / 143 created
+            // `NativeProotLauncher()` with no args, which left
+            // `nativeLibrary = null` → `isAvailable()` returned
+            // false → `buildShellCommand` returned the
+            // `["proot-missing"]` sentinel, which then bubbled up
+            // as the ENOENT we saw on-device. Pass the detector
+            // explicitly so the launcher resolves the real
+            // `libproot.so` path under `nativeLibraryDir`.
+            val launcher = NativeProotLauncher(
+                bundledAbis = setOf("arm64-v8a"),
+                nativeLibrary = ProotNativeLibrary(
+                    bundledAbis = setOf("arm64-v8a"),
+                    nativeLibraryDir = prootLibraryDir,
+                    userProotDir = null,
+                    termuxProotCandidates = ProotNativeLibrary.DEFAULT_TERMUX_PROBES,
+                ),
+                runtimeTmpDir = File(rootfsDir.parentFile, "proot-tmp"),
+            )
             val args = launcher.buildShellCommand(rootfsDir, script = "")
             val baseEnv = launcher.environmentVariables(rootfsDir).toMap()
             // Append the proot-specific env (LD_LIBRARY_PATH,
@@ -146,6 +165,7 @@ class ProotTerminalRunner(
                             _events.tryEmit(Event.Failed(event.message))
                         }
                         is TerminalSession.Event.TitleChanged -> { /* no-op */ }
+                        is TerminalSession.Event.Bel -> { /* Haptic feedback handled by ViewModel. */ }
                     }
                 }
             }

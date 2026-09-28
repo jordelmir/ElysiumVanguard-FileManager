@@ -248,12 +248,14 @@ sealed interface EditorResult {
  */
 sealed interface EditorState {
     /**
-     * Pre-load placeholder for the screen. We don't try to
-     * surface errors as a separate branch — the engine handles
-     * malformed-input cases internally and the screen simply
-     * renders "no file selected" when state is [Empty].
+     * Pre-load placeholder for the screen.
      */
     data object Empty : EditorState
+
+    /**
+     * An error occurred while opening or editing the file.
+     */
+    data class Error(val message: String) : EditorState
 
     data class Ready(
         val title: String,

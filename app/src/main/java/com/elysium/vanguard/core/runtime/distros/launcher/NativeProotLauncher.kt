@@ -63,7 +63,6 @@ open class NativeProotLauncher(
      * of a stale one-shot snapshot. Defaults to null so unit tests that
      * only need a fixed DNS configuration are unaffected.
      */
-    @Suppress("unused")
     private val guestDnsObserver: GuestDnsObserver? = (guestDnsConfigProvider as? GuestDnsObserver)
 ) : DistroLauncher {
 
@@ -79,12 +78,9 @@ open class NativeProotLauncher(
 
     override fun buildShellCommand(rootfsDir: File, script: String): List<String> {
         require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
-        if (!isAvailable(rootfsDir)) {
-            // Callers must resolve availability before launch; this sentinel
-            // is retained only as a defensive non-executable result.
-            return listOf("proot-missing")
-        }
-        val location = nativeLibrary?.location ?: return listOf("proot-missing")
+        check(isAvailable(rootfsDir)) { "proot is not available for rootfs: $rootfsDir" }
+        val location = nativeLibrary?.location
+            ?: throw IllegalStateException("Native proot library is not loaded")
         // Real PRoot command. The executable is a PIE shipped in
         // nativeLibraryDir, not a symbolic command resolved through PATH.
         val args = ArrayList<String>()
@@ -212,8 +208,8 @@ open class NativeProotLauncher(
      */
     fun refreshDnsForRootfs(rootfsDir: File): File? {
         require(rootfsDir.isDirectory) { "rootfsDir is not a directory: $rootfsDir" }
-        // When we have a reactive observer, force a re-read of the system
-        // state so the snapshot we are about to write is truly the latest.
+        // When we have a reactive observer, the caller should call
+        // guestDnsObserver.refresh() from a coroutine before this.
         // For the in-memory provider used in unit tests this is a no-op.
         val config = guestDnsConfigProvider.current()
         return writeResolvConfAtomically(rootfsDir, config)

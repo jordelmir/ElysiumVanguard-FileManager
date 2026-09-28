@@ -88,10 +88,7 @@ class LocalMarketPublisher(
             version = draft.version,
             contentHash = draft.contentHash,
             signatureKeyId = publisherId,
-            signature = com.elysium.vanguard.foundry.core.ontology.primitives.Signature.sign(
-                "placeholder",
-                signingKey,
-            ),
+            signature = com.elysium.vanguard.foundry.core.ontology.primitives.Signature("unsigned"),
             sizeBytes = draft.sizeBytes,
             dependencies = draft.dependencies,
             tags = draft.tags,

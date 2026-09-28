@@ -454,7 +454,7 @@ object ElysiumRuntimeLayerDefaults {
             description = description,
             homepage = homepage,
             contentHash = ContentHash("0".repeat(64)),
-            signature = Signature("placeholder"),
+            signature = Signature("unsigned"),
         )
         return unsigned.copy(
             signature = Signature.sign(

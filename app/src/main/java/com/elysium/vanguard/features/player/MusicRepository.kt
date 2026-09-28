@@ -42,18 +42,17 @@ import javax.inject.Singleton
  * (it still returns `Flow<List<MusicTrack>>`).
  *
  * **Note on `album` / `artist` / `duration`**:
- * the persistent `MediaIndexEntity` does
- * not currently store these fields (they
- * are not part of the canonical "what
- * changed?" check). For Phase 94 the
+ * Phase 145 added these fields to the
+ * persistent `MediaIndexEntity`. The
+ * `ContentResolverMediaSource` now queries
+ * `MediaStore.Audio.Media.ALBUM`,
+ * `MediaStore.Audio.Media.ARTIST`, and
+ * `MediaStore.Audio.Media.DURATION` for
+ * audio items, and the `MediaIndexer`
+ * persists them in the index. The
  * `MusicTrack.album`, `MusicTrack.artist`,
- * and `MusicTrack.duration` are populated
- * from the URI's `MediaStore` lookup (a
- * one-shot query per scan) — this keeps
- * the index lean while still showing the
- * rich metadata in the UI. A future phase
- * can move the metadata into the index
- * for a fully offline experience.
+ * and `MusicTrack.duration` are now
+ * populated from the index.
  */
 @Singleton
 class MusicRepository @Inject constructor(
@@ -115,26 +114,10 @@ data class MusicTrack(
  * bridge between the index schema + the
  * UI's data class.
  *
- * **Phase 94 scope**: only the canonical
- * fields (id, name, path, mimeType,
- * dateModified, isFavorite) are populated
- * from the index. The rich metadata
- * (`album`, `artist`, `duration`) is left
- * `null` / `0L` (the UI shows "Unknown"
- * placeholders). A future phase can
- * populate the rich metadata either by:
- *   1. Adding the columns to the index
- *      (one more `ALTER TABLE` migration
- *      + a scan that reads the metadata).
- *   2. Doing an on-demand `ContentResolver`
- *      lookup from the UI when the track
- *      is opened (the lookup is bounded —
- *      one query per track).
- *
- * The current Phase 94 scope is the
- * **minimal viable wiring**: the index
- * populates the UI list; the rich metadata
- * is a follow-up.
+ * Phase 145 — the rich metadata (`album`,
+ * `artist`, `duration`) is now populated
+ * from the index columns added in the
+ * MIGRATION_2_3 migration.
  */
 private fun MediaIndexEntity.toMusicTrack(): MusicTrack =
     MusicTrack(
@@ -142,9 +125,9 @@ private fun MediaIndexEntity.toMusicTrack(): MusicTrack =
         name = displayName,
         path = uri,
         mimeType = mimeType,
-        album = null,
-        artist = null,
-        duration = 0L,
+        album = album,
+        artist = artist,
+        duration = durationMs,
         dateModified = dateModifiedMs,
         isFavorite = isFavorite,
     )

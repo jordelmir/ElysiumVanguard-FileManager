@@ -14,12 +14,9 @@ import org.json.JSONObject
  * domain layer never sees a [WorkspaceEntity] directly, it
  * sees a [WorkspaceDefinition] and a [WorkspaceLaunchStats].
  *
- * JSON serialization: WorkspaceDefinition is currently serialized
- * with its own hand-rolled toJson() (see WorkspaceDefinition.kt).
- * The deserializer is not yet implemented because the launcher
- * does not need a JSON-to-Definition path; the orchestrator
- * builds the definition in memory and persists it. A
- * DefinitionParser will land in a follow-up slice.
+ * JSON serialization: WorkspaceDefinition is serialized with
+ * its own hand-rolled toJson() and deserialized via the
+ * org.json-based [parseWorkspaceJson] companion method.
  */
 class WorkspaceRepository(
     private val dao: WorkspaceDao,

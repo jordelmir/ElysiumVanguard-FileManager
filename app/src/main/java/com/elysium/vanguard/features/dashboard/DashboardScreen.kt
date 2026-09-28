@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.BatteryManager
 import android.os.Environment
 import android.os.StatFs
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
@@ -720,8 +721,9 @@ private fun getStorageInfo(): StorageInfo {
         val usedGb = "%.1f".format(usedBytes / 1_073_741_824.0)
         val percent = ((usedBytes.toDouble() / totalBytes) * 100).roundToInt()
         StorageInfo(totalGb, usedGb, percent)
-    } catch (_: Exception) {
-        StorageInfo("0", "0", 0)
+    } catch (e: Exception) {
+        Log.w("DashboardScreen", "Failed to get storage info", e)
+        StorageInfo("--", "--", -1)
     }
 }
 
@@ -734,8 +736,9 @@ private fun getRamInfo(context: Context): RamInfo {
         val usedGb = "%.1f".format((memInfo.totalMem - memInfo.availMem) / 1_073_741_824.0)
         val percent = (((memInfo.totalMem - memInfo.availMem).toDouble() / memInfo.totalMem) * 100).roundToInt()
         RamInfo(totalGb, usedGb, percent)
-    } catch (_: Exception) {
-        RamInfo("0", "0", 0)
+    } catch (e: Exception) {
+        Log.w("DashboardScreen", "Failed to get RAM info", e)
+        RamInfo("--", "--", -1)
     }
 }
 
@@ -743,8 +746,9 @@ private fun getBatteryLevel(context: Context): Int {
     return try {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-    } catch (_: Exception) {
-        100
+    } catch (e: Exception) {
+        Log.w("DashboardScreen", "Failed to get battery level", e)
+        -1
     }
 }
 

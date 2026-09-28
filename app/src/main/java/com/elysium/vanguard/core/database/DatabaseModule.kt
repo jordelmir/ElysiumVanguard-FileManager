@@ -8,6 +8,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import com.elysium.vanguard.core.cloud.CloudConnectionDao
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -27,7 +28,8 @@ object DatabaseModule {
                 TitanDatabase.MIGRATION_3_4,
                 TitanDatabase.MIGRATION_4_5,
                 TitanDatabase.MIGRATION_5_6,
-                TitanDatabase.MIGRATION_6_7
+                TitanDatabase.MIGRATION_6_7,
+                TitanDatabase.MIGRATION_7_8
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
@@ -66,5 +68,10 @@ object DatabaseModule {
     @Provides
     fun provideRecentFileDao(database: TitanDatabase): com.elysium.vanguard.core.database.RecentFileDao {
         return database.recentFileDao()
+    }
+
+    @Provides
+    fun provideCloudConnectionDao(database: TitanDatabase): CloudConnectionDao {
+        return database.cloudConnectionDao()
     }
 }

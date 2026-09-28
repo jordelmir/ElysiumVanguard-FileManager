@@ -37,7 +37,8 @@ import java.nio.charset.StandardCharsets
 internal class TerminalParser(
     private val buffer: TerminalBuffer,
     private val onDeviceResponse: (ByteArray) -> Unit = {},
-    private val onTitleChanged: (String) -> Unit = {}
+    private val onTitleChanged: (String) -> Unit = {},
+    private val onBel: () -> Unit = {}
 ) {
     /** Per VT100 §5.4: ground, escape, csi-entry, osc-string, etc. */
     private enum class State { GROUND, ESCAPE, CSI_ENTRY, OSC_STRING, OSC_ESCAPE }
@@ -160,7 +161,7 @@ internal class TerminalParser(
         // C0 controls we honor, plus LF/CR are handled in `handleGround`
         // dispatch via the ground-state range.  Anything else is ignored.
         when (c) {
-            '\u0007' -> { /* BEL — would-be haptic; Phase 9.6.1 no-op. */ }
+            '\u0007' -> onBel()
             '\u0008' -> buffer.backspace()
             '\u0009' -> buffer.horizontalTab()
             '\u000a' -> buffer.lineFeed()

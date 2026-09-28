@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.elysium.vanguard.core.util.ArchiveFormat
+import com.elysium.vanguard.core.util.CompressionEngine
 import com.elysium.vanguard.ui.theme.TitanColors
 import java.io.File
 
@@ -54,7 +55,8 @@ fun ArchiveSheet(
         files: List<File>,
         output: File,
         format: ArchiveFormat,
-        password: String?
+        password: String?,
+        options: CompressionEngine.CompressionOptions
     ) -> Unit,
     onExtract: (
         archive: File,
@@ -98,6 +100,12 @@ fun ArchiveSheet(
             }
         )
     }
+    // Advanced compression options (compress mode only)
+    var compressionLevel by remember { mutableStateOf(CompressionEngine.CompressionLevel.NORMAL) }
+    var dictionarySize by remember { mutableStateOf(CompressionEngine.DictionarySize.MB_16) }
+    var splitSize by remember { mutableStateOf(CompressionEngine.SplitSize.NONE) }
+    var encryptFileNames by remember { mutableStateOf(false) }
+    var solidArchive by remember { mutableStateOf(false) }
 
     // When the user changes the format in Compress mode, refresh the
     // suggested extension on the name field.
@@ -207,6 +215,24 @@ fun ArchiveSheet(
                 )
             }
 
+            // Advanced compression options (compress mode only)
+            if (mode == ArchiveMode.Compress) {
+                AdvancedOptionsPanel(
+                    format = format,
+                    compressionLevel = compressionLevel,
+                    onCompressionLevelChange = { compressionLevel = it },
+                    dictionarySize = dictionarySize,
+                    onDictionarySizeChange = { dictionarySize = it },
+                    splitSize = splitSize,
+                    onSplitSizeChange = { splitSize = it },
+                    encryptFileNames = encryptFileNames,
+                    onEncryptFileNamesChange = { encryptFileNames = it },
+                    solidArchive = solidArchive,
+                    onSolidArchiveChange = { solidArchive = it },
+                    enabled = !isWorking && !isDone
+                )
+            }
+
             // Password
             if (format.supportsPassword) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -307,11 +333,19 @@ fun ArchiveSheet(
                             val outputDir = initialFiles.firstOrNull()?.parentFile
                                 ?: File("/sdcard")
                             val output = File(outputDir, archiveName)
+                            val options = CompressionEngine.CompressionOptions(
+                                level = compressionLevel,
+                                dictionarySize = dictionarySize,
+                                splitSize = splitSize,
+                                encryptFileNames = encryptFileNames,
+                                solidArchive = solidArchive
+                            )
                             onCompress(
                                 initialFiles,
                                 output,
                                 format,
-                                if (usePassword && password.isNotEmpty()) password else null
+                                if (usePassword && password.isNotEmpty()) password else null,
+                                options
                             )
                         } else {
                             val archive = initialArchive ?: return@Button
@@ -423,6 +457,184 @@ private fun FormatChips(
 }
 
 @Composable
+private fun AdvancedOptionsPanel(
+    format: ArchiveFormat,
+    compressionLevel: CompressionEngine.CompressionLevel,
+    onCompressionLevelChange: (CompressionEngine.CompressionLevel) -> Unit,
+    dictionarySize: CompressionEngine.DictionarySize,
+    onDictionarySizeChange: (CompressionEngine.DictionarySize) -> Unit,
+    splitSize: CompressionEngine.SplitSize,
+    onSplitSizeChange: (CompressionEngine.SplitSize) -> Unit,
+    encryptFileNames: Boolean,
+    onEncryptFileNamesChange: (Boolean) -> Unit,
+    solidArchive: Boolean,
+    onSolidArchiveChange: (Boolean) -> Unit,
+    enabled: Boolean
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HorizontalDivider(color = TitanColors.NeonCyan.copy(alpha = 0.2f))
+        Text(
+            "ADVANCED OPTIONS",
+            color = TitanColors.NeonCyan.copy(alpha = 0.6f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp
+        )
+
+        // Compression Level
+        OptionRow(
+            label = "COMPRESSION LEVEL",
+            description = "Higher = smaller but slower",
+            enabled = enabled
+        ) {
+            DropdownMenuButton(
+                options = CompressionEngine.CompressionLevel.entries.toList(),
+                selected = compressionLevel,
+                onSelect = { onCompressionLevelChange(it as CompressionEngine.CompressionLevel) },
+                format = { (it as CompressionEngine.CompressionLevel).displayName },
+                enabled = enabled
+            )
+        }
+
+        // Dictionary Size (for 7Z, LZMA)
+        if (format == ArchiveFormat.SEVEN_Z || format.name.startsWith("TAR_")) {
+            OptionRow(
+                label = "DICTIONARY SIZE",
+                description = "Larger = better compression for similar files",
+                enabled = enabled
+            ) {
+                DropdownMenuButton(
+                    options = CompressionEngine.DictionarySize.entries.toList(),
+                    selected = dictionarySize,
+                    onSelect = { onDictionarySizeChange(it as CompressionEngine.DictionarySize) },
+                    format = { (it as CompressionEngine.DictionarySize).displayName },
+                    enabled = enabled
+                )
+            }
+        }
+
+        // Split Archive
+        if (format.multiFile) {
+            OptionRow(
+                label = "SPLIT SIZE",
+                description = "Create multi-part archives",
+                enabled = enabled
+            ) {
+                DropdownMenuButton(
+                    options = CompressionEngine.SplitSize.entries.toList(),
+                    selected = splitSize,
+                    onSelect = { onSplitSizeChange(it as CompressionEngine.SplitSize) },
+                    format = { (it as CompressionEngine.SplitSize).displayName },
+                    enabled = enabled
+                )
+            }
+        }
+
+        // Encrypt file names (only for formats with AES-256)
+        if (format == ArchiveFormat.SEVEN_Z) {
+            OptionRow(
+                label = "ENCRYPT FILE NAMES",
+                description = "Hide file names in encrypted archive",
+                enabled = enabled
+            ) {
+                Switch(
+                    checked = encryptFileNames,
+                    onCheckedChange = onEncryptFileNamesChange,
+                    enabled = enabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = TitanColors.NeonCyan,
+                        checkedTrackColor = TitanColors.NeonCyan.copy(alpha = 0.4f)
+                    )
+                )
+            }
+        }
+
+        // Solid Archive (for 7Z, TAR)
+        if (format == ArchiveFormat.SEVEN_Z || format.name.startsWith("TAR")) {
+            OptionRow(
+                label = "SOLID ARCHIVE",
+                description = "Treat all files as one data block (better ratio, slower partial extract)",
+                enabled = enabled
+            ) {
+                Switch(
+                    checked = solidArchive,
+                    onCheckedChange = onSolidArchiveChange,
+                    enabled = enabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = TitanColors.NeonCyan,
+                        checkedTrackColor = TitanColors.NeonCyan.copy(alpha = 0.4f)
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OptionRow(
+    label: String,
+    description: String,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val alpha = if (enabled) 1f else 0.5f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = alpha),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                text = description,
+                color = TitanColors.NeonCyan.copy(alpha = 0.5f * alpha),
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+private fun DropdownMenuButton(
+    options: List<Any>,
+    selected: Any,
+    onSelect: (Any) -> Unit,
+    format: (Any) -> String,
+    enabled: Boolean
+) {
+    var expanded by remember { mutableStateOf(false) }
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        DropdownMenuItem(
+            text = { Text(format(selected), color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+            trailingIcon = { Icon(Icons.Default.ExpandMore, contentDescription = null, tint = TitanColors.NeonCyan) },
+            onClick = { expanded = !expanded },
+            enabled = enabled
+        )
+        options.forEach { opt ->
+            DropdownMenuItem(
+                text = { Text(format(opt), color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+                onClick = { onSelect(opt); expanded = false },
+                enabled = enabled
+            )
+        }
+    }
+}
+
+@Composable
 private fun ArchiveProgressPanel(progress: ArchiveProgress) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -491,6 +703,26 @@ private fun ArchiveProgressPanel(progress: ArchiveProgress) {
                 maxLines = 1
             )
         }
+        // Speed and ETA row
+        if (!progress.done && progress.speed > 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Speed: ${formatBytes(progress.speed)}/s",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "ETA: ${formatDuration(progress.etaSeconds)}",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
         if (progress.error != null) {
             Text(
                 text = progress.error,
@@ -502,11 +734,28 @@ private fun ArchiveProgressPanel(progress: ArchiveProgress) {
     }
 }
 
+private fun formatBytes(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B/s"
+    bytes < 1024 * 1024 -> "%.1f KB/s".format(bytes / 1024.0)
+    bytes < 1024 * 1024 * 1024 -> "%.1f MB/s".format(bytes / 1024.0 / 1024)
+    else -> "%.2f GB/s".format(bytes / 1024.0 / 1024 / 1024)
+}
+
+private fun formatDuration(seconds: Long): String = when {
+    seconds < 60 -> "${seconds}s"
+    seconds < 3600 -> "${seconds / 60}m ${seconds % 60}s"
+    else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"
+}
+
 enum class ArchiveMode { Compress, Extract }
 
 data class ArchiveProgress(
     val percentage: Int,
     val currentFile: String,
     val done: Boolean,
-    val error: String? = null
+    val error: String? = null,
+    val speed: Long = 0,
+    val etaSeconds: Long = 0,
+    val totalBytes: Long = 0,
+    val processedBytes: Long = 0
 )

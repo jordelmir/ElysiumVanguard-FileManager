@@ -16,6 +16,8 @@ import androidx.room.Update
 import android.content.Context
 import androidx.room.Room
 import kotlinx.coroutines.flow.Flow
+import com.elysium.vanguard.core.database.CloudConnectionEntity
+import com.elysium.vanguard.core.cloud.CloudConnectionDao
 
 /**
  * TITAN SEARCH ENTITY
@@ -234,9 +236,10 @@ interface SmartFolderDao {
         FileMetadataEntity::class,
         SmartFolderEntity::class,
         CalendarEventEntity::class,
-        RecentFileEntity::class
+        RecentFileEntity::class,
+        CloudConnectionEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class TitanDatabase : RoomDatabase() {
@@ -247,6 +250,7 @@ abstract class TitanDatabase : RoomDatabase() {
     abstract fun smartFolderDao(): SmartFolderDao
     abstract fun calendarEventDao(): CalendarEventDao
     abstract fun recentFileDao(): RecentFileDao
+    abstract fun cloudConnectionDao(): CloudConnectionDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -376,6 +380,28 @@ abstract class TitanDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_recent_files_last_opened_at ON recent_files(last_opened_at)")
+            }
+        }
+
+        /**
+         * PHASE 150 — Adds the cloud_connections table for cloud storage
+         * account persistence. Stores OAuth2 credentials, configuration,
+         * and sync settings for all supported cloud providers.
+         */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS cloud_connections (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        provider TEXT NOT NULL,
+                        credentials TEXT NOT NULL,
+                        config TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        last_used_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_cloud_connections_provider ON cloud_connections(provider)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_cloud_connections_last_used_at ON cloud_connections(last_used_at)")
             }
         }
     }

@@ -144,7 +144,7 @@ object CrdtSyncRouteRegistrar {
      */
     fun parseLog(text: String): CrdtOpLog? {
         if (text.isBlank()) return CrdtOpLog()
-        val companion = ElysiumSyncFile.parse(text, File("dummy")) ?: return CrdtOpLog()
+        val companion = ElysiumSyncFile.parse(text, File("<server-merged>")) ?: return CrdtOpLog()
         return companion.log
     }
 

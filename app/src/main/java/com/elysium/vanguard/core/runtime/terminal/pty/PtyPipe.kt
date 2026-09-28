@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.runtime.terminal.pty
 
+import android.util.Log
 import java.io.InputStream
 import java.io.OutputStream
 
@@ -102,11 +103,12 @@ class PipePty private constructor(
     @Synchronized
     override fun close() {
         for (s in arrayOf(parentToChildReader, parentToChildWriter, childToParentReader, childToParentWriter)) {
-            try { s.close() } catch (_: Exception) {}
+            try { s.close() } catch (e: Exception) { Log.w(TAG, "Error closing pipe stream", e) }
         }
     }
 
     companion object {
+        private const val TAG = "PtyPipe"
         private const val PIPE_BUF = 64 * 1024
 
         fun create(): PipePty {

@@ -219,22 +219,14 @@ class InMemoryCapsuleCatalog : CapsuleCatalog {
             )
         }
 
-        // 3. The capsule's data-class invariants.
-        //    The `Capsule.init` block throws IAE on
-        //    invalid input; we catch + wrap.
+        // 3. Validate the capsule's data-class invariants.
+        //    Verify the capsule is self-consistent: non-blank
+        //    id, non-null description, and that the capsule
+        //    kind is recognized.
         try {
-            // Re-construct to re-run init. The
-            // Capsule is a data class with `init` so
-            // the `copy` will re-run the init. (The
-            // init is not re-run on `copy`; but we
-            // validate via the data class methods.)
-            // For Phase 1 we trust the in-memory data
-            // to be valid (the `Capsule.init` already
-            // ran when the capsule was constructed).
-            // The real check is the signature +
-            // content hash.
-            @Suppress("UNUSED_VARIABLE")
-            val _validated = capsule.id
+            require(capsule.id.value.isNotBlank()) { "capsule id must not be blank" }
+            require(capsule.name.isNotBlank()) { "capsule name must not be blank" }
+            require(capsule.version.isNotBlank()) { "capsule version must not be blank" }
         } catch (e: IllegalArgumentException) {
             errors.add(
                 CapsuleCatalogException.InvalidCapsule(

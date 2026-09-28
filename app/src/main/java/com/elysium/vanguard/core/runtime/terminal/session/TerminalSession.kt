@@ -86,7 +86,8 @@ class TerminalSession(
     private val parser = TerminalParser(
         buffer = buffer,
         onDeviceResponse = ::write,
-        onTitleChanged = { title -> _events.tryEmit(Event.TitleChanged(title)) }
+        onTitleChanged = { title -> _events.tryEmit(Event.TitleChanged(title)) },
+        onBel = { _events.tryEmit(Event.Bel) }
     )
 
     /**
@@ -261,6 +262,7 @@ class TerminalSession(
         data class Exited(val exitCode: Int) : Event()
         data class Failed(val message: String) : Event()
         data class TitleChanged(val title: String) : Event()
+        data object Bel : Event()
     }
 
     companion object {

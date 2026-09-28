@@ -8,6 +8,8 @@ import com.elysium.vanguard.core.runtime.distros.launcher.DistroLauncherRegistry
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolver
 import com.elysium.vanguard.core.runtime.distros.launcher.LauncherResolution
 import com.elysium.vanguard.core.runtime.distros.launcher.ProotNativeLibrary
+import com.elysium.vanguard.core.runtime.distros.ssh.MinaSshClient
+import com.elysium.vanguard.core.runtime.distros.ssh.SshClient
 import com.elysium.vanguard.core.runtime.network.AndroidGuestDnsConfigProvider
 import com.elysium.vanguard.core.runtime.network.AndroidGuestDnsObserver
 import com.elysium.vanguard.core.runtime.network.GuestDnsConfigProvider
@@ -232,9 +234,17 @@ object DistroModule {
         return RootfsSnapshotFactory(baseDir)
     }
 
+    /**
+     * Phase 145 — the production SSH client backed by Apache MINA SSHD.
+     * The client is a process-wide singleton; each [SshClient.connect]
+     * call creates a fresh [org.apache.sshd.client.session.ClientSession].
+     */
+    @Provides
+    @Singleton
+    fun provideSshClient(): SshClient = MinaSshClient()
+
     private fun currentSupportedAbis(): Set<String> {
-        // Phase 9.6.3: device ABI probing is cheap; we report an empty set
-        // until 9.6.3.1 vendors libproot.so per ABI.
+        // Device ABI probing; returns the real supported ABIs from the system.
         val abis = android.os.Build.SUPPORTED_ABIS ?: emptyArray()
         return abis.toSet()
     }

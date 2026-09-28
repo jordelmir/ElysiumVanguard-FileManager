@@ -181,6 +181,26 @@ fun CrdtDocumentEditorScreen(
                         lastResult = s.lastResult?.label() ?: "—"
                     )
                 }
+                is EditorState.Error -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "Failed to open file",
+                            color = TitanColors.NeonRed,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            s.message,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.elysium.vanguard.core.sftp
 
+import android.util.Log
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory
 import org.apache.sshd.common.session.Session
 import org.apache.sshd.common.session.SessionListener
@@ -42,6 +43,10 @@ class SftpServer(
 
     private val _status = AtomicReference(Status.STOPPED)
     private var sshd: SshServer? = null
+
+    companion object {
+        private const val TAG = "SftpServer"
+    }
 
     enum class Status { STOPPED, STARTING, RUNNING, FAILED }
 
@@ -119,7 +124,7 @@ class SftpServer(
 
     fun stop() {
         val s = sshd ?: return
-        try { s.stop() } catch (_: Exception) {}
+        try { s.stop() } catch (e: Exception) { Log.w(TAG, "Error stopping SFTP server", e) }
         sshd = null
         activeSessionsCounter.set(0)
         _status.set(Status.STOPPED)

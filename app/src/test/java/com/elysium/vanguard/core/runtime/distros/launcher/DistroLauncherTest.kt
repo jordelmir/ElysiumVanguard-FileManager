@@ -154,16 +154,19 @@ class NativeProotLauncherTest {
     }
 
     @Test
-    fun `buildShellCommand returns the proot-missing sentinel when not available`() {
-        // Honest expectation: 9.6.3 ships without the JNI binary, so the
-        // launcher reports unavailability and buildShellCommand falls
-        // back to the "proot-missing" sentinel string. 9.6.3.1's tests
-        // will verify the real proot flag shape once the binary exists.
+    fun `buildShellCommand throws when proot is not available`() {
+        // When proot is not available, buildShellCommand should throw
+        // an IllegalStateException rather than returning a sentinel string.
         val launcher = NativeProotLauncher(bundledAbis = setOf("arm64-v8a"))
         val rootfs = Files.createTempDirectory("elysium-proot-test").toFile()
         try {
-            val cmd = launcher.buildShellCommand(rootfs, "ls /")
-            assertEquals(listOf("proot-missing"), cmd)
+            var threw = false
+            try {
+                launcher.buildShellCommand(rootfs, "ls /")
+            } catch (_: IllegalStateException) {
+                threw = true
+            }
+            assertTrue("Expected IllegalStateException when proot is not available", threw)
         } finally {
             rootfs.deleteRecursively()
         }

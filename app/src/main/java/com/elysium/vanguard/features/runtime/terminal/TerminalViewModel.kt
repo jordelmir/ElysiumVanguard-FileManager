@@ -1,6 +1,10 @@
 package com.elysium.vanguard.features.runtime.terminal
 
 import android.app.Application
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -97,9 +101,25 @@ class TerminalViewModel @Inject constructor(
         }
         viewModelScope.launch {
             session.events.collectLatest { event ->
-                if (event is TerminalSession.Event.TitleChanged) _terminalTitle.value = event.title
+                when (event) {
+                    is TerminalSession.Event.TitleChanged -> _terminalTitle.value = event.title
+                    is TerminalSession.Event.Bel -> triggerBelHaptic()
+                    else -> {}
+                }
             }
         }
+    }
+
+    private fun triggerBelHaptic() {
+        val ctx = getApplication<Application>()
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val mgr = ctx.getSystemService(VibratorManager::class.java)
+            mgr.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            ctx.getSystemService(Vibrator::class.java)
+        }
+        vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     private fun acquireSession(): TerminalSession {
@@ -189,12 +209,14 @@ class TerminalViewModel @Inject constructor(
         savedStateHandle.remove<String>(SESSION_ID_ARG)
     }
 
-    /** Replace the current shell with a fresh one (SIGINT + restart). */
+    /** Replace the current shell with a fresh one (close + re-create). */
     fun restart() {
-        session.sendInterrupt()
-        // Phase 9.6.2: full process restart here. For 9.6.1 we leave
-        // the existing process running — the user can type `exit` to
-        // end the session on their own.
+        sessionManager.close(session.id)
+        savedStateHandle.remove<String>(SESSION_ID_ARG)
+        savedStateHandle.remove<Boolean>(INITIAL_COMMAND_SENT_ARG)
+        val newSession = sessionManager.adopt(buildSession())
+        savedStateHandle[SESSION_ID_ARG] = newSession.id
+        TerminalService.promote(getApplication(), newSession.id)
     }
 
     override fun onCleared() {

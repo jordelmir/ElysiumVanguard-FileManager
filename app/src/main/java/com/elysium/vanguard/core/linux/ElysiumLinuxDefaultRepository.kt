@@ -215,7 +215,7 @@ object ElysiumLinuxDefaultRepository {
             files = layer.files,
             scripts = ElysiumPackageScripts.NONE,
             contentHash = layer.contentHash,
-            signature = Signature("placeholder"),
+            signature = Signature("unsigned"),
         )
         return unsigned.copy(
             signature = Signature.sign(
@@ -257,7 +257,7 @@ object ElysiumLinuxDefaultRepository {
             ),
             scripts = ElysiumPackageScripts.NONE,
             contentHash = ContentHash("0".repeat(64)),
-            signature = Signature("placeholder"),
+            signature = Signature("unsigned"),
         )
         return unsigned.copy(
             signature = Signature.sign(

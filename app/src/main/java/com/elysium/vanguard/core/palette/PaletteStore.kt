@@ -2,6 +2,7 @@ package com.elysium.vanguard.core.palette
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 
 /**
  * PHASE 10.8 — Persistent storage for the current palette and the
@@ -96,7 +97,8 @@ class PaletteStore(
         val raw = prefs.getString(KEY_THEME_MODE, null) ?: return com.elysium.vanguard.ui.theme.ThemeMode.Dark
         return try {
             com.elysium.vanguard.ui.theme.ThemeMode.valueOf(raw)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("PaletteStore", "Failed to parse theme mode from prefs", e)
             com.elysium.vanguard.ui.theme.ThemeMode.Dark
         }
     }

@@ -68,51 +68,6 @@ class ProcessLauncherGitCloneRunner(
             env = listOf("GIT_TERMINAL_PROMPT" to "0"),
             cwd = destination.parentFile ?: File("."),
         )
-        // The runner is sync: the launcher's
-        // `LaunchedProcess.stop` is a no-op for
-        // already-completed processes. We
-        // approximate a waitFor by polling
-        // until the PID is gone. Production
-        // refinements (Phase 95+) will use a
-        // real waitFor.
-        var attempts = 0
-        while (attempts < 600) { // up to 60s at 100ms
-            if (!isProcessRunning(launched.pid)) {
-                return readExitCode(launched.pid)
-            }
-            Thread.sleep(100)
-            attempts++
-        }
-        // Timeout: kill the process + return a
-        // sentinel exit code.
-        launched.stop()
-        return -1
-    }
-
-    private fun isProcessRunning(pid: Int): Boolean = try {
-        // `kill -0` returns 0 if the process
-        // exists, non-zero otherwise. The
-        // `Process` API in Android does not
-        // expose `kill -0`; the simplest
-        // portable test is to spawn a
-        // `ps`-like command. For Phase 94 we
-        // use a conservative heuristic: the
-        // process is running if `pid > 0`
-        // (any positive PID we just started
-        // is presumed running until
-        // waitFor returns).
-        pid > 0
-    } catch (e: Exception) {
-        false
-    }
-
-    private fun readExitCode(pid: Int): Int {
-        // The Android `Process` API does not
-        // expose `waitFor()`. The production
-        // refactor (Phase 95+) will use a real
-        // waitFor. For Phase 94, we return 0
-        // (success) — the handler interprets
-        // any non-zero as a failure.
-        return 0
+        return launched.waitFor()
     }
 }

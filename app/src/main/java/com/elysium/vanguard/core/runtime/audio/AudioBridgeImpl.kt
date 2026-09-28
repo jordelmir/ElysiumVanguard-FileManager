@@ -6,6 +6,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,7 +31,7 @@ class AudioBridgeImpl(
      * port; this parameter is ignored until the native PulseAudio
      * protocol lands. See [AudioBridge] for the limitations.
      */
-    @Suppress("unused") private val pulseSocketDir: File = DEFAULT_SOCKET_DIR
+    private val pulseSocketDir: File = DEFAULT_SOCKET_DIR
 ) : AudioBridge, Closeable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -277,7 +278,7 @@ class AudioBridgeImpl(
         } finally {
             try {
                 client.close()
-            } catch (_: IOException) {}
+            } catch (e: IOException) { Log.w(TAG, "Error closing audio client", e) }
         }
     }
 
@@ -295,18 +296,24 @@ class AudioBridgeImpl(
     private fun releaseResources() {
         try {
             serverSocket?.close()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to close server socket: ${e.message}")
+        }
         serverSocket = null
 
         try {
             audioTrack?.stop()
             audioTrack?.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to release audio track: ${e.message}")
+        }
         audioTrack = null
 
         try {
             audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to abandon audio focus: ${e.message}")
+        }
         audioFocusRequest = null
 
         pulsePort = 0
@@ -320,6 +327,7 @@ class AudioBridgeImpl(
     }
 
     companion object {
+        private const val TAG = "AudioBridgeImpl"
         private val DEFAULT_SOCKET_DIR = File("/tmp/pulse")
     }
 }

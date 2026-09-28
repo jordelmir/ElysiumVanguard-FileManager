@@ -63,6 +63,7 @@ internal fun TerminalHost(
                     is TerminalSession.Event.Exited -> onSessionExited(e.exitCode)
                     is TerminalSession.Event.Failed -> onSessionExited(-1)
                     is TerminalSession.Event.TitleChanged -> { /* ViewModel owns title state. */ }
+                    is TerminalSession.Event.Bel -> { /* Haptic feedback handled by ViewModel. */ }
                 }
             }
         }

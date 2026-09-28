@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.tagging
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -52,8 +53,8 @@ class AutoTagViewModel @Inject constructor(
                 try {
                     val labels = withContext(Dispatchers.IO) { tagger.tag(uri) }
                     allLabels.addAll(labels.map { it.label })
-                } catch (_: Exception) {
-                    // Skip un-processable images, continue with the rest.
+                } catch (e: Exception) {
+                    Log.w("AutoTagViewModel", "Failed to tag image: $uri", e)
                 }
                 _state.value = _state.value.copy(
                     remaining = uris.size - index - 1

@@ -112,7 +112,9 @@ class CrdtDocumentEditorViewModel @Inject constructor(
                 eng.state.collect { s -> _state.value = s }
             }
         } catch (t: Throwable) {
-            _state.value = EditorState.Empty
+            _state.value = EditorState.Error(
+                message = t.message ?: t.javaClass.simpleName
+            )
         }
     }
 

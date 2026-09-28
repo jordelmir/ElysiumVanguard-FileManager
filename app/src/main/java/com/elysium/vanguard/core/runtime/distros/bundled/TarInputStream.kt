@@ -24,12 +24,15 @@ import java.io.InputStream
  *   - Directories (typeflag '5').
  *   - Symlinks (typeflag '2') — recorded as a
  *     [TarEntry] of [TarEntryType.SYMLINK] with [TarEntry.linkTarget]
- *     populated; the extractor does not create the
- *     symlink (rootfs extraction is a copy, not a
- *     faithful re-creation of the original filesystem
- *     metadata — symlinks are skipped on purpose so the
- *     unpack works on FAT/exFAT storage that does not
- *     support them).
+ *     populated. PHASE 145: the extractor now actually
+ *     creates the symlink with
+ *     `java.nio.file.Files.createSymbolicLink`. Phase
+ *     140 used to drop the link and write a 0-byte
+ *     regular file, which broke busybox-style rootfs
+ *     (the shell entry was a symlink → 0-byte file →
+ *     execve ENOENT). Symlinks are safe on the target
+ *     storage (the app's internal `filesDir` —
+ *     ext4/F2FS, never FAT/exFAT).
  *   - PAX extended headers (typeflag 'x' / 'g') are
  *     ignored; we never need them for our own tarballs.
  *

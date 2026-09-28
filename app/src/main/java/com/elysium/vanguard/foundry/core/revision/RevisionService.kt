@@ -10,6 +10,7 @@ import com.elysium.vanguard.foundry.core.ontology.primitives.RepresentationLevel
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
 import com.elysium.vanguard.foundry.core.provenance.ProvenanceService
 import com.elysium.vanguard.foundry.core.scene.SceneManifestGenerator
+import java.security.SecureRandom
 
 /**
  * Use case: freeze a `Compilation` into a `VehicleRevision` +
@@ -106,10 +107,10 @@ class RevisionService(
 
     companion object {
         /**
-         * Phase 1 default signing key. In production the key is
-         * the user's Ed25519 / ML-DSA-65 keypair from the
-         * secure enclave. Phase 7 (per skill 12).
+         * Default signing key generated per-process. In production,
+         * the key should be the user's Ed25519 / ML-DSA-65 keypair
+         * from the Android Keystore secure enclave.
          */
-        val DEFAULT_SIGNING_KEY: ByteArray = "foundry-phase-1-signing-key".toByteArray()
+        val DEFAULT_SIGNING_KEY: ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
     }
 }

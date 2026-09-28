@@ -249,9 +249,13 @@ internal class TerminalRenderer(
         TerminalAttributes.Color.BrightWhite -> 0xFFFFFFFF.toInt()
     }
 
-    /** Public for the recycler/scrollbar UI; unused in 9.6.1. */
-    @Suppress("unused")
-    fun scrollbarColor(): Int = 0x4D000000.toInt()
+    /** Scrollbar color derived from the terminal's foreground color. */
+    fun scrollbarColor(): Int {
+        val r = (themeForeground shr 16) and 0xFF
+        val g = (themeForeground shr 8) and 0xFF
+        val b = themeForeground and 0xFF
+        return (0x4D shl 24) or (r shl 16) or (g shl 8) or b
+    }
 
     companion object {
         /** Cosmetic: cursor blink period (ms). 9.6.1 doesn't actually

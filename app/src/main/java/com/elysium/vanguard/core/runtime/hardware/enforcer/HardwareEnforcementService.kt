@@ -103,9 +103,8 @@ class HardwareEnforcementService(
      * [targetId] under the same [sessionId] skips the
      * confirmation step.
      *
-     * The remember-grant set is held by the policy; the
-     * service is stateless. A future phase moves the
-     * remember-set onto a `ConfirmationMemory` so it
+     * The remember-grant set is held in-memory; a future
+     * phase moves it to a `ConfirmationMemory` that
      * survives across service instances.
      */
     fun rememberConsent(
@@ -113,12 +112,27 @@ class HardwareEnforcementService(
         hardwareClass: HardwareClass,
         targetId: HardwareTargetId
     ): Boolean {
-        // The current `rememberConfirmations` flag is on
-        // the policy; this helper is the seam a future
-        // phase fills in. For now, it's a no-op that
-        // returns true when the policy allows remembering.
-        return false
+        val key = "$sessionId:${hardwareClass.name}:${targetId::class.simpleName}:${(targetId as? HardwareTargetId.Specific)?.id ?: "*"}"
+        rememberedConsents.add(key)
+        return true
     }
+
+    /**
+     * Check whether a consent has been remembered for
+     * the given session + hardware class + target.
+     */
+    fun hasRememberedConsent(
+        sessionId: String,
+        hardwareClass: HardwareClass,
+        targetId: HardwareTargetId
+    ): Boolean {
+        val key = "$sessionId:${hardwareClass.name}:${targetId::class.simpleName}:${(targetId as? HardwareTargetId.Specific)?.id ?: "*"}"
+        return key in rememberedConsents
+    }
+
+    /** In-memory set of remembered consent keys. */
+    private val rememberedConsents: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 }
 
 /**

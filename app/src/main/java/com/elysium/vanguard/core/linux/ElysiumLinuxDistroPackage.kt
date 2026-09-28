@@ -264,7 +264,7 @@ object ElysiumLinuxDistroPackage {
             files = FILES,
             scripts = ElysiumPackageScripts.NONE,
             contentHash = CONTENT_HASH,
-            signature = Signature("placeholder"),
+            signature = Signature("unsigned"),
         )
         return unsigned.copy(
             signature = Signature.sign(

@@ -1408,7 +1408,8 @@ private fun captureScreenToMediaStore(
             resolver.update(uri, values, null, null)
         }
         uri
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        android.util.Log.e("LinuxDesktopScreen", "MediaStore insert failed: ${e.message}")
         try {
             resolver.delete(uri, null, null)
         } catch (_: Exception) {

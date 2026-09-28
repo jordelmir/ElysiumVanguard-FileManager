@@ -118,6 +118,12 @@ data class MediaIndexEntity(
     val lastSeenAtMs: Long,
     @ColumnInfo(name = "is_favorite")
     val isFavorite: Boolean = false,
+    @ColumnInfo(name = "album")
+    val album: String? = null,
+    @ColumnInfo(name = "artist")
+    val artist: String? = null,
+    @ColumnInfo(name = "duration_ms")
+    val durationMs: Long = 0L,
 ) {
     init {
         require(uri.isNotBlank()) {

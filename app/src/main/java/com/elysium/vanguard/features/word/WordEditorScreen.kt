@@ -689,26 +689,6 @@ private fun WordDocumentBody(
     }
 }
 
-// PHASE 116 — the previous `WordBlock.id()` produced a key derived
-// from `runs.hashCode()`. That hash changes on **every keystroke**,
-// which caused Compose to destroy + recreate the `TextField` for
-// the block on every character, killing the focus + the soft
-// keyboard. The LazyColumn now uses the **block index** as the
-// key (see the `itemsIndexed(doc.blocks, key = { index, _ -> index })`
-// call above) — stable for the lifetime of a block. The legacy
-// `id()` helper is kept here for reference only and is no longer
-// referenced. Delete on the next pass.
-@Suppress("unused")
-private fun WordBlock.id(): String = when (this) {
-    is WordParagraph -> "p-${runs.hashCode()}-${format.hashCode()}"
-    is WordHeading -> "h$level-${runs.hashCode()}"
-    is WordListItem -> "l${kind.name}-${depth}-${runs.hashCode()}"
-    is WordPageBreak -> "pb"
-    is WordHorizontalRule -> "hr"
-    is WordBlockQuote -> "bq-${runs.hashCode()}"
-    is WordCodeBlock -> "cb-${code.hashCode()}"
-}
-
 @Composable
 private fun BlockRow(
     block: WordBlock,

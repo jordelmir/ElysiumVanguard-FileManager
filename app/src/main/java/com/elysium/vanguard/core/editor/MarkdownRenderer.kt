@@ -153,8 +153,21 @@ class MarkdownRenderer(
         lines: List<String>,
         from: Int,
         to: Int,
-        @Suppress("UNUSED_PARAMETER") lang: String
+        lang: String
     ) {
+        if (lang.isNotBlank()) {
+            val langStart = target.length
+            target.append(lang)
+            target.addStyle(
+                SpanStyle(
+                    color = Color(0xFF6272A4),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = baseFontSize * 0.85f
+                ),
+                langStart, target.length
+            )
+            target.append('\n')
+        }
         val start = target.length
         val joined = lines.subList(from + 1, to).joinToString("\n")
         target.append(joined)

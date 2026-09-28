@@ -40,27 +40,40 @@ class ModelDownloadManager @Inject constructor(
         emit(DownloadState.Downloading(0f))
 
         try {
-            // SIMULATION OF DOWNLOAD PROTOCOL
-            // In a real scenario, this would fetch from a secure server.
-            // For this Sovereign Build, we simulate the extraction/download process
-            // to demonstrate the UI capability and system integration.
-            
-            val totalSize = 100 * 1024 * 1024L // Simulate 100MB download for demo
-            val buffer = ByteArray(1024 * 1024) // 1MB buffer
-            var downloaded = 0L
+            // SIMULATION: writes a minimal model stub file
+            // to demonstrate the download UI flow. The real
+            // model is fetched from a secure server in
+            // production; this stub is identifiable by the
+            // ELYS header and metadata block.
+            val header = "ELYS".toByteArray(Charsets.UTF_8)
+            val version = byteArrayOf(1, 0, 0, 0)
+            val metaJson = """{"model":"gemma-2b-it-gpu-int4","simulated":true}""".toByteArray(Charsets.UTF_8)
+            val metaLen = byteArrayOf(
+                ((metaJson.size shr 0) and 0xFF).toByte(),
+                ((metaJson.size shr 8) and 0xFF).toByte(),
+                ((metaJson.size shr 16) and 0xFF).toByte(),
+                ((metaJson.size shr 24) and 0xFF).toByte(),
+            )
 
             FileOutputStream(file).use { output ->
-                for (i in 1..100) {
-                    // Simulate network latency and chunk processing
-                    delay(50) 
-                    
-                    // Write dummy data (or zeroes) to simulate file creation
-                    // In a real app we'd write data from InputStream
-                    output.write(buffer)
-                    downloaded += buffer.size
-                    
-                    val progress = i / 100f
-                    emit(DownloadState.Downloading(progress))
+                // Phase 1: header (simulated network delay)
+                delay(200)
+                output.write(header)
+                output.write(version)
+                output.write(metaLen)
+                output.write(metaJson)
+                emit(DownloadState.Downloading(0.1f))
+
+                // Phase 2: model weights (simulated chunk transfer)
+                val chunkSize = 64 * 1024 // 64KB chunks
+                val chunk = ByteArray(chunkSize)
+                // Fill with a deterministic pattern instead of zeros
+                for (i in chunk.indices) chunk[i] = (i % 256).toByte()
+                val totalChunks = 16 // ~1MB total
+                for (i in 1..totalChunks) {
+                    delay(100)
+                    output.write(chunk)
+                    emit(DownloadState.Downloading(0.1f + 0.9f * i / totalChunks))
                 }
             }
 

@@ -253,6 +253,9 @@ data class DiscoveredMedia(
     val dateModifiedMs: Long,
     val mimeType: String = "",
     val contentHash: String? = null,
+    val album: String? = null,
+    val artist: String? = null,
+    val durationMs: Long = 0L,
 ) {
     init {
         require(uri.isNotBlank()) {
@@ -339,6 +342,9 @@ class DefaultMediaIndexer(
                         contentHash = item.contentHash,
                         discoveredAtMs = nowMs,
                         lastSeenAtMs = nowMs,
+                        album = item.album,
+                        artist = item.artist,
+                        durationMs = item.durationMs,
                     )
                     dao.upsert(entity)
                     added.add(entity)
@@ -355,6 +361,9 @@ class DefaultMediaIndexer(
                         dateModifiedMs = item.dateModifiedMs,
                         contentHash = item.contentHash,
                         lastSeenAtMs = nowMs,
+                        album = item.album,
+                        artist = item.artist,
+                        durationMs = item.durationMs,
                     )
                     dao.upsert(updatedEntity)
                     updated.add(updatedEntity)

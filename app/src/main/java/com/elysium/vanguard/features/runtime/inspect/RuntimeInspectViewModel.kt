@@ -50,28 +50,19 @@ class RuntimeInspectViewModel @Inject constructor(
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                // PHASE 96 — defensive try/catch around the
-                // initial load. The previous version surfaced
-                // uncaught exceptions to the default
-                // `viewModelScope` handler which closed the
-                // screen ("al tocar inspect se cierra"). The
-                // introspector reads `var/lib/dpkg/status`
-                // and walks the rootfs — both can throw on
-                // partial installs / missing files. We catch
-                // every exception, set the state to a safe
-                // empty value, and let the user see the
-                // "—" + "loading…" UI rather than a black
-                // screen.
                 try {
                     loadAll()
                 } catch (e: Exception) {
                     installation.value = null
                     snapshot.value = null
                     snapshots.value = emptyList()
+                    _errorMessage.value = "Failed to load: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
         }
@@ -85,15 +76,14 @@ class RuntimeInspectViewModel @Inject constructor(
         if (distroId.isEmpty()) return
         viewModelScope.launch {
             _isBusy.value = true
+            _errorMessage.value = null
             try {
                 withContext(Dispatchers.IO) {
                     manager.captureSnapshot(distroId)
                     refreshSnapshots()
                 }
-            } catch (_: Exception) {
-                // PHASE 96 — don't crash the screen on a
-                // snapshot failure. The UI shows the
-                // progress spinner + dismisses on done.
+            } catch (e: Exception) {
+                _errorMessage.value = "Snapshot failed: ${e.message ?: e.javaClass.simpleName}"
             } finally {
                 _isBusy.value = false
             }
@@ -102,12 +92,12 @@ class RuntimeInspectViewModel @Inject constructor(
 
     fun removeSnapshot(snapshotId: String) {
         viewModelScope.launch {
+            _errorMessage.value = null
             withContext(Dispatchers.IO) {
                 try {
                     manager.removeSnapshot(snapshotId)
-                } catch (_: Exception) {
-                    // PHASE 96 — defensive: a failed remove
-                    // shouldn't crash the screen.
+                } catch (e: Exception) {
+                    _errorMessage.value = "Remove failed: ${e.message ?: e.javaClass.simpleName}"
                 }
                 refreshSnapshots()
             }
@@ -122,20 +112,15 @@ class RuntimeInspectViewModel @Inject constructor(
                 manager.introspect(distroId) { snap ->
                     snapshot.value = snap
                 }
-            } catch (_: Exception) {
-                // PHASE 96 — the introspector can throw on
-                // a partial install (missing os-release,
-                // permission errors on rootfs walk, etc).
-                // Set the snapshot to a safe empty value
-                // and continue; the user still sees the
-                // installation header + a "no snapshot"
-                // placeholder.
+            } catch (e: Exception) {
                 snapshot.value = null
+                _errorMessage.value = "Introspection failed: ${e.message ?: e.javaClass.simpleName}"
             }
             try {
                 refreshSnapshots()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 snapshots.value = emptyList()
+                _errorMessage.value = "Snapshot list failed: ${e.message ?: e.javaClass.simpleName}"
             }
         } else {
             snapshot.value = null

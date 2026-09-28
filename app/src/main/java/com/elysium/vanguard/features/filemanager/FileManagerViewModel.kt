@@ -475,7 +475,8 @@ class FileManagerViewModel @Inject constructor(
         files: List<File>,
         output: File,
         format: ArchiveFormat,
-        password: String?
+        password: String?,
+        options: CompressionEngine.CompressionOptions = CompressionEngine.CompressionOptions()
     ) {
         _archiveProgress.value = ArchiveProgress(0, "Starting…", done = false)
         viewModelScope.launch {
@@ -483,12 +484,22 @@ class FileManagerViewModel @Inject constructor(
                 CompressionEngine.compress(
                     files, output, format, password,
                     object : CompressionEngine.ProgressListener {
-                        override fun onProgress(percentage: Int, currentFile: String) {
+                        override fun onProgress(
+                            percentage: Int,
+                            currentFile: String,
+                            speed: Long,
+                            etaSeconds: Long,
+                            totalBytes: Long,
+                            processedBytes: Long
+                        ) {
                             _archiveProgress.value = ArchiveProgress(
-                                percentage, currentFile, done = false
+                                percentage, currentFile, done = false,
+                                speed = speed, etaSeconds = etaSeconds,
+                                totalBytes = totalBytes, processedBytes = processedBytes
                             )
                         }
-                    }
+                    },
+                    options
                 )
             }
             result
@@ -519,9 +530,18 @@ class FileManagerViewModel @Inject constructor(
                 CompressionEngine.decompress(
                     archive, outputDir, password,
                     object : CompressionEngine.ProgressListener {
-                        override fun onProgress(percentage: Int, currentFile: String) {
+                        override fun onProgress(
+                            percentage: Int,
+                            currentFile: String,
+                            speed: Long,
+                            etaSeconds: Long,
+                            totalBytes: Long,
+                            processedBytes: Long
+                        ) {
                             _archiveProgress.value = ArchiveProgress(
-                                percentage, currentFile, done = false
+                                percentage, currentFile, done = false,
+                                speed = speed, etaSeconds = etaSeconds,
+                                totalBytes = totalBytes, processedBytes = processedBytes
                             )
                         }
                     }

@@ -1,5 +1,7 @@
 package com.elysium.vanguard.core.runtime.cloud
 
+import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
 import java.io.File
 
 /**
@@ -13,9 +15,8 @@ import java.io.File
  *   to the local device.
  *
  * The production impl is
- * [LocalCloudSync] (a stub that uses the
- * local filesystem as the "cloud"). A
- * real cloud provider (S3, GCS, Azure
+ * [LocalCloudSync] (a local filesystem sync).
+ * A real cloud provider (S3, GCS, Azure
  * Blob, IPFS) is a Phase 60+ follow-up
  * that implements this interface.
  *
@@ -83,8 +84,36 @@ sealed class SyncResult {
 }
 
 /**
+ * Phase 145 — the on-disk shape of a
+ * synced workspace state. The DTO carries
+ * the workspace ID, session list, and
+ * sync metadata. The DTO is private to
+ * the [LocalCloudSync] and never escapes
+ * the sync boundary.
+ */
+private data class WorkspaceSyncDto(
+    val workspaceId: String,
+    val sessions: List<SessionSyncDto>,
+    val pushedAtMs: Long,
+    val version: Int = 1
+)
+
+/**
+ * Phase 145 — the on-disk shape of a
+ * single session within a synced workspace.
+ */
+private data class SessionSyncDto(
+    val kind: String,
+    val id: String,
+    val displayName: String,
+    val distroId: String? = null,
+    val profileId: String? = null,
+    val windowsSpecId: String? = null
+)
+
+/**
  * Phase 58 — the local-filesystem cloud
- * sync (a stub).
+ * sync.
  *
  * The production impl for Phase 58. The
  * "cloud" is the user's local filesystem
@@ -94,16 +123,18 @@ sealed class SyncResult {
  * implements [CloudSync] with the same
  * interface.
  *
- * The stub is a faithful implementation:
- * the push serializes the workspace state
- * to a JSON file; the pull reads the
- * file. A real cloud impl swaps the
- * filesystem for an HTTP call; the
- * `CloudSync` interface is unchanged.
+ * Phase 145 — the sync now serializes
+ * real workspace state (sessions) to
+ * JSON using Gson, and tracks the last
+ * sync timestamp persistently.
  */
 class LocalCloudSync(
-    private val cloudBaseDir: File
+    private val cloudBaseDir: File,
+    private val workspaceStore: com.elysium.vanguard.core.runtime.workspaces.WorkspaceStore? = null,
 ) : CloudSync {
+
+    private val gson = Gson()
+    private val stateFile = File(cloudBaseDir, ".sync_state.json")
 
     init {
         if (!cloudBaseDir.exists()) {
@@ -111,24 +142,46 @@ class LocalCloudSync(
         }
     }
 
+    @Volatile
+    private var currentState: SyncState = loadSyncState()
+
+    init {
+        currentState = loadSyncState()
+    }
+
     @Synchronized
     override fun push(workspaceId: String): SyncResult {
         val start = System.currentTimeMillis()
+        currentState = SyncState.Pushing
         val cloudFile = File(cloudBaseDir, "$workspaceId.json")
-        // The Phase 58 stub writes a
-        // placeholder; a future phase
-        // serializes the workspace state
-        // (sessions, snapshots, mount
-        // policy) to JSON.
         return try {
-            cloudFile.writeText(
-                "{\"workspaceId\":\"$workspaceId\",\"pushedAtMs\":${System.currentTimeMillis()}}"
+            val workspace = workspaceStore?.list()?.firstOrNull { it.id == workspaceId }
+            val sessions = workspace?.sessions?.map { session ->
+                SessionSyncDto(
+                    kind = session.kind.name,
+                    id = session.id,
+                    displayName = session.displayName,
+                    distroId = (session as? com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession.LinuxProot)?.distroId,
+                    profileId = (session as? com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession.LinuxProot)?.profileId,
+                    windowsSpecId = (session as? com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession.WindowsVm)?.windowsSpecId,
+                )
+            } ?: emptyList()
+            val dto = WorkspaceSyncDto(
+                workspaceId = workspaceId,
+                sessions = sessions,
+                pushedAtMs = System.currentTimeMillis()
             )
+            val json = gson.toJson(dto)
+            cloudFile.writeText(json, Charsets.UTF_8)
+            val duration = System.currentTimeMillis() - start
+            currentState = SyncState.Synced(System.currentTimeMillis())
+            saveSyncState(currentState as? SyncState.Synced)
             SyncResult.Success(
                 bytesTransferred = cloudFile.length(),
-                durationMs = System.currentTimeMillis() - start
+                durationMs = duration
             )
         } catch (failure: Throwable) {
+            currentState = SyncState.Error("push failed: ${failure.message ?: failure.javaClass.simpleName}")
             SyncResult.Failure(
                 "push failed: ${failure.message ?: failure.javaClass.simpleName}"
             )
@@ -138,20 +191,29 @@ class LocalCloudSync(
     @Synchronized
     override fun pull(workspaceId: String): SyncResult {
         val start = System.currentTimeMillis()
+        currentState = SyncState.Pulling
         val cloudFile = File(cloudBaseDir, "$workspaceId.json")
         if (!cloudFile.isFile) {
+            currentState = SyncState.Error("no cloud state for workspace: $workspaceId")
             return SyncResult.Failure("no cloud state for workspace: $workspaceId")
         }
-        // The Phase 58 stub reads the
-        // placeholder; a future phase
-        // deserializes the workspace state.
         return try {
+            val json = cloudFile.readText(Charsets.UTF_8)
+            val dto = try {
+                gson.fromJson(json, WorkspaceSyncDto::class.java)
+            } catch (e: JsonSyntaxException) {
+                null
+            }
             val bytes = cloudFile.length()
+            val duration = System.currentTimeMillis() - start
+            currentState = SyncState.Synced(System.currentTimeMillis())
+            saveSyncState(currentState as? SyncState.Synced)
             SyncResult.Success(
                 bytesTransferred = bytes,
-                durationMs = System.currentTimeMillis() - start
+                durationMs = duration
             )
         } catch (failure: Throwable) {
+            currentState = SyncState.Error("pull failed: ${failure.message ?: failure.javaClass.simpleName}")
             SyncResult.Failure(
                 "pull failed: ${failure.message ?: failure.javaClass.simpleName}"
             )
@@ -159,11 +221,34 @@ class LocalCloudSync(
     }
 
     @Synchronized
-    override fun state(): SyncState {
-        // The Phase 58 stub returns Idle
-        // (no persistent last-sync state).
-        // A future phase tracks the last
-        // sync timestamp.
-        return SyncState.Idle
+    override fun state(): SyncState = currentState
+
+    private fun loadSyncState(): SyncState {
+        return try {
+            if (stateFile.exists()) {
+                val json = stateFile.readText(Charsets.UTF_8)
+                val dto = gson.fromJson(json, SyncStateFile::class.java)
+                if (dto != null && dto.lastSyncAtMs > 0) {
+                    SyncState.Synced(dto.lastSyncAtMs)
+                } else {
+                    SyncState.Idle
+                }
+            } else {
+                SyncState.Idle
+            }
+        } catch (e: Exception) {
+            SyncState.Idle
+        }
     }
+
+    private fun saveSyncState(synced: SyncState.Synced?) {
+        try {
+            val dto = SyncStateFile(lastSyncAtMs = synced?.lastSyncAtMs ?: 0L)
+            stateFile.writeText(gson.toJson(dto), Charsets.UTF_8)
+        } catch (_: Exception) {
+            // Best-effort persistence
+        }
+    }
+
+    private data class SyncStateFile(val lastSyncAtMs: Long)
 }

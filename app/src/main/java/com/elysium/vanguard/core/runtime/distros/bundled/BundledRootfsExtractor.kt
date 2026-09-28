@@ -184,6 +184,92 @@ class BundledRootfsExtractor(
                         )
                     }
                 }
+                // PHASE 145 — symlinks MUST be created, not
+                // skipped. Phase 140 wrote 0-byte regular
+                // files for every 'arch', 'ash', 'cat', 'cp',
+                // … entry in the busybox-style rootfs, which
+                // meant `/bin/sh -l` exec returned ENOENT
+                // (`size = 0` for a symlink in our TarEntry)
+                // and the shell exited with code 1. The
+                // target storage is the app's internal
+                // `filesDir` — ext4/F2FS, NOT FAT/exFAT —
+                // so symlinks are always supported here.
+                // External SD card was never in the picture.
+                if (entry.type == TarEntryType.SYMLINK) {
+                    val rawTarget = entry.linkTarget
+                    if (rawTarget.isNullOrEmpty()) {
+                        throw BundledRootfsError.ExtractionFailed(
+                            "Symlink ${entry.name} has no target"
+                        )
+                    }
+                    // PHASE 145 — the tar's symlink targets are
+                    // POSIX-style: an absolute target (`/bin/busybox`)
+                    // is anchored to the root of the directory tree
+                    // being unpacked, NOT to the host filesystem's
+                    // root. Phase 141's first cut passed the raw
+                    // target to `Files.createSymbolicLink`, which
+                    // interpreted `/bin/busybox` as a host absolute
+                    // path. On Android `/bin/busybox` does not exist
+                    // (the OS uses Toybox at `/system/bin/toybox`)
+                    // so every symlink in the busybox-style rootfs
+                    // (`bin/sh`, `bin/ash`, `bin/cat`, `bin/ls`, …)
+                    // was a broken dangling link. `sh -l` then
+                    // exited with code 1 the moment it tried to
+                    // exec a non-resolvable path. The fix is the
+                    // standard tar semantic:
+                    //   1. Strip the leading `/` from `rawTarget` so
+                    //      the result is interpreted against the
+                    //      extraction root (`into`).
+                    //   2. Resolve the result against `into` to
+                    //      produce the absolute path inside the
+                    //      unpacked rootfs.
+                    //   3. Compute the path relative to the
+                    //      symlink's parent directory. Storing a
+                    //      relative target makes the symlink
+                    //      portable — it does not depend on where
+                    //      on the host filesystem the rootfs ends
+                    //      up (`/data/user/0/.../files/distros/
+                    //      bundled/alpine-mini/` today, could move
+                    //      tomorrow).
+                    val stripped = if (rawTarget.startsWith("/")) {
+                        rawTarget.substring(1)
+                    } else {
+                        rawTarget
+                    }
+                    val resolvedInsideRootfs = File(into, stripped)
+                    val parentDir = outFile.parentFile
+                        ?: throw BundledRootfsError.ExtractionFailed(
+                            "Symlink ${entry.name} has no parent directory"
+                        )
+                    val relativeTarget = parentDir.toPath()
+                        .relativize(resolvedInsideRootfs.toPath())
+                        .toString()
+                    if (outFile.exists() || outFile.isDirectory) {
+                        // If something already lives at this
+                        // path (e.g. a stale 0-byte file from
+                        // a pre-Phase-145 extraction, or a
+                        // pre-existing symlink pointing at a
+                        // different target), wipe it so the
+                        // symlink(2) call below does not fail
+                        // with EEXIST.
+                        if (!outFile.delete()) {
+                            throw BundledRootfsError.ExtractionFailed(
+                                "Cannot clear stale path at ${entry.name}"
+                            )
+                        }
+                    }
+                    try {
+                        java.nio.file.Files.createSymbolicLink(
+                            outFile.toPath(),
+                            java.nio.file.Paths.get(relativeTarget),
+                        )
+                    } catch (e: java.io.IOException) {
+                        throw BundledRootfsError.ExtractionFailed(
+                            "Cannot create symlink ${entry.name} -> $relativeTarget: ${e.message}"
+                        )
+                    }
+                    continue
+                }
                 outFile.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {

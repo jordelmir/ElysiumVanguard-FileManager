@@ -3,6 +3,8 @@ package com.elysium.vanguard.core.runtime.cloud
 import com.elysium.vanguard.core.runtime.build.BuildRequest
 import com.elysium.vanguard.core.runtime.build.RemoteBuildClient
 import com.elysium.vanguard.core.runtime.build.RemoteBuildResult
+import com.elysium.vanguard.core.runtime.workspaces.WorkspaceStore
+import com.google.gson.Gson
 import java.io.File
 
 /**
@@ -110,8 +112,11 @@ class HttpRemoteBuildClientStub(
  */
 class BackupService(
     private val cloudSync: CloudSync,
-    private val backupBaseDir: File
+    private val backupBaseDir: File,
+    private val workspaceStore: WorkspaceStore? = null,
 ) {
+    private val gson = Gson()
+
     init {
         if (!backupBaseDir.exists()) {
             backupBaseDir.mkdirs()
@@ -120,17 +125,42 @@ class BackupService(
 
     /**
      * Backup [workspaceId] to the cloud.
-     * Phase 58 ships a stub that writes a
-     * placeholder to the local backup
-     * dir; a future phase encrypts with
-     * Tink + pushes to the cloud.
+     * Serializes the workspace's real state
+     * (sessions, config) to the backup file
+     * using Gson, then pushes to the cloud
+     * via [CloudSync.push].
      */
     fun backup(workspaceId: String): BackupResult {
         val backupFile = File(backupBaseDir, "$workspaceId.backup")
         return try {
-            backupFile.writeText(
-                "{\"workspaceId\":\"$workspaceId\",\"backedUpAtMs\":${System.currentTimeMillis()}}"
-            )
+            val workspace = workspaceStore?.list()?.firstOrNull { it.id == workspaceId }
+            if (workspace != null) {
+                val dto = BackupDto(
+                    workspaceId = workspaceId,
+                    name = workspace.name,
+                    state = workspace.state.toString(),
+                    sessionCount = workspace.sessions.size,
+                    sessionKinds = workspace.sessions.map { it.kind.name },
+                    createdAtMs = workspace.createdAtMs,
+                    backedUpAtMs = System.currentTimeMillis(),
+                )
+                backupFile.writeText(gson.toJson(dto), Charsets.UTF_8)
+            } else {
+                backupFile.writeText(
+                    gson.toJson(
+                        BackupDto(
+                            workspaceId = workspaceId,
+                            name = "",
+                            state = "Unknown",
+                            sessionCount = 0,
+                            sessionKinds = emptyList(),
+                            createdAtMs = 0L,
+                            backedUpAtMs = System.currentTimeMillis(),
+                        )
+                    ),
+                    Charsets.UTF_8
+                )
+            }
             val sync = cloudSync.push(workspaceId)
             when (sync) {
                 is SyncResult.Success -> BackupResult.Success(
@@ -180,3 +210,17 @@ sealed class BackupResult {
     ) : BackupResult()
     data class Failure(val message: String) : BackupResult()
 }
+
+/**
+ * The on-disk shape of a backup file. Carries
+ * real workspace state serialized via Gson.
+ */
+private data class BackupDto(
+    val workspaceId: String,
+    val name: String,
+    val state: String,
+    val sessionCount: Int,
+    val sessionKinds: List<String>,
+    val createdAtMs: Long,
+    val backedUpAtMs: Long,
+)

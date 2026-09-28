@@ -92,7 +92,14 @@ class CompressionService : Service() {
 
         currentJob = serviceScope.launch {
             val progressListener = object : CompressionEngine.ProgressListener {
-                override fun onProgress(percentage: Int, currentFile: String) {
+                override fun onProgress(
+                    percentage: Int,
+                    currentFile: String,
+                    speed: Long,
+                    etaSeconds: Long,
+                    totalBytes: Long,
+                    processedBytes: Long
+                ) {
                     if (!isActive) throw CancellationException("User cancelled")
                     updateNotification(currentFile, percentage)
                     broadcastProgress(percentage, currentFile)
@@ -100,7 +107,7 @@ class CompressionService : Service() {
             }
             val result = when (action) {
                 ACTION_COMPRESS -> CompressionEngine.compress(
-                    rawFiles, outputRaw, format, password, progressListener
+                    rawFiles, outputRaw, format, password, progressListener, CompressionEngine.CompressionOptions()
                 )
                 ACTION_DECOMPRESS -> {
                     // For decompress we expect EXACTLY one input file (the archive).

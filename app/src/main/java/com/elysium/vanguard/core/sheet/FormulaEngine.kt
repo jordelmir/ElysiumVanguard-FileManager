@@ -107,8 +107,16 @@ private fun formatNumber(v: Double, format: NumberFormat): String = when (format
         "$sign${format.symbol}${String.format(java.util.Locale.US, "%.${format.decimals}f", abs)}"
     }
     is NumberFormat.PERCENT -> String.format(java.util.Locale.US, "%.${format.decimals}f%%", v * 100)
-    NumberFormat.DATE -> "1970-01-01" // cell needs a real date; placeholder
-    NumberFormat.TIME -> "00:00:00"
+    NumberFormat.DATE -> {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        sdf.format(java.util.Date(v.toLong()))
+    }
+    NumberFormat.TIME -> {
+        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        sdf.format(java.util.Date(v.toLong()))
+    }
     is NumberFormat.SCIENTIFIC -> String.format(java.util.Locale.US, "%.${format.decimals}e", v)
     is NumberFormat.FRACTION -> {
         // crude: render the integer part + a fraction with the requested denominator
