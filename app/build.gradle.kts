@@ -166,7 +166,9 @@ android {
                 "/META-INF/NOTICE.md",
                 "/META-INF/LICENSE.md",
                 "/META-INF/ASL2.0",
-                "/META-INF/spring.tooling"
+                "/META-INF/spring.tooling",
+                "/META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+                "/META-INF/versions/9/module-info.class"
             )
         }
     }
@@ -196,6 +198,13 @@ tasks.configureEach {
 }
 
 dependencies {
+    // Exclude commons-logging globally (conflicts with jcl-over-slf4j from SSHD)
+    modules {
+        module("commons-logging:commons-logging") {
+            replacedBy("org.slf4j:jcl-over-slf4j", "Use SLF4J's JCL bridge instead of commons-logging")
+        }
+    }
+
     // Core Android
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
@@ -266,15 +275,18 @@ dependencies {
     // PHASE 2.4: Apache MINA SSHD for SFTP server (real SSH/SFTP from any client).
     // We only need the core + sftp modules. Exclude osgi (duplicate classes with core)
     // and spring (pulls in spring-jcl which clashes with jcl-over-slf4j).
+    // Also exclude commons-logging (conflicts with jcl-over-slf4j)
     implementation("org.apache.sshd:apache-sshd:2.10.0") {
         exclude(group = "org.apache.sshd", module = "sshd-osgi")
         exclude(group = "org.apache.sshd", module = "sshd-spring-sftp")
         exclude(group = "org.springframework", module = "spring-jcl")
+        exclude(group = "commons-logging", module = "commons-logging")
     }
     implementation("org.apache.sshd:sshd-sftp:2.10.0") {
         exclude(group = "org.apache.sshd", module = "sshd-osgi")
         exclude(group = "org.apache.sshd", module = "sshd-spring-sftp")
         exclude(group = "org.springframework", module = "spring-jcl")
+        exclude(group = "commons-logging", module = "commons-logging")
     }
 
     // PHASE 3.11: ML Kit on-device OCR (text recognition in images).
