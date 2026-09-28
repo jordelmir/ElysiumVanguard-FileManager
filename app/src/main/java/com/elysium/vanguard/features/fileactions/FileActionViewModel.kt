@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.fileactions
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.elysium.vanguard.core.encryption.EncryptedVault
 import com.elysium.vanguard.core.fileactions.FileAction
 import com.elysium.vanguard.core.fileactions.FileActionContext
 import com.elysium.vanguard.core.fileactions.FileActionContext.LinuxDistroTarget
@@ -26,6 +27,9 @@ import com.elysium.vanguard.core.fileactions.handlers.MsiInstallResult
 import com.elysium.vanguard.core.fileactions.handlers.MalwareScanHandler
 import com.elysium.vanguard.core.security.malware.MalwareScanResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -269,6 +273,47 @@ class FileActionViewModel @Inject constructor(
                     }
                     is MalwareScanResult.ScanError -> FileActionOutcome.Failure(
                         message = "Scan error: ${result.reason}",
+                    )
+                }
+            }
+            is FileAction.EncryptFile -> {
+                // PHASE 112 — encrypt a file with
+                // password (AES-256-GCM + PBKDF2).
+                // The UI prompts for the password
+                // before dispatching the action.
+                try {
+                    val vault = EncryptedVault.Companion
+                    val sourceFile = File(action.sourcePath)
+                    val outputFile = File(action.outputPath ?: "${action.sourcePath}.elysv")
+                    val encrypted = vault.encrypt(action.password.toCharArray(), sourceFile.readBytes())
+                    outputFile.writeBytes(encrypted)
+                    FileActionOutcome.Success(
+                        message = "Encrypted ${sourceFile.name} → ${outputFile.name}"
+                    )
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "Encryption failed: ${e.message}"
+                    )
+                }
+            }
+            is FileAction.DecryptFile -> {
+                // PHASE 112 — decrypt a .elysv
+                // vault file. The UI prompts for
+                // the password before dispatching.
+                try {
+                    val vault = EncryptedVault.Companion
+                    val vaultFile = File(action.vaultPath)
+                    val outputDir = File(action.outputDir ?: vaultFile.parentFile?.absolutePath ?: "/")
+                    val encrypted = vaultFile.readBytes()
+                    val decrypted = vault.decrypt(action.password.toCharArray(), encrypted)
+                    val outputFile = File(outputDir, "${vaultFile.nameWithoutExtension}")
+                    outputFile.writeBytes(decrypted)
+                    FileActionOutcome.Success(
+                        message = "Decrypted ${vaultFile.name} → ${outputFile.name}"
+                    )
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "Decryption failed: ${e.message}"
                     )
                 }
             }

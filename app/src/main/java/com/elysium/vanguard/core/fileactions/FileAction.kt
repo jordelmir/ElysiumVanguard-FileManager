@@ -48,6 +48,38 @@ sealed class FileAction {
     abstract val targetRuntime: RuntimeKind?
 
     /**
+     * Encrypt a file with a password using
+     * AES-256-GCM (PBKDF2-HMAC-SHA256, 100k iterations).
+     * Output is a `.elysv` encrypted vault file.
+     */
+    data class EncryptFile(
+        override val id: String,
+        val sourcePath: String,
+        val password: String,
+        val outputPath: String? = null,
+    ) : FileAction() {
+        override val label: String = "Encrypt with password"
+        override val description: String = "Encrypt file with AES-256-GCM (PBKDF2 100k) → .elysv"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
+     * Decrypt an encrypted vault file (`.elysv`)
+     * using the password. Outputs the decrypted content
+     * to the specified directory.
+     */
+    data class DecryptFile(
+        override val id: String,
+        val vaultPath: String,
+        val password: String,
+        val outputDir: String? = null,
+    ) : FileAction() {
+        override val label: String = "Decrypt vault"
+        override val description: String = "Decrypt .elysv vault with password (AES-256-GCM)"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
      * Install a Debian package (`.deb`) inside
      * a Linux distro using `apt` / `dpkg`.
      */

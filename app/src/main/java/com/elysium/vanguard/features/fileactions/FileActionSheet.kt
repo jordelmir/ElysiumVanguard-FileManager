@@ -24,8 +24,10 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InstallDesktop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -223,4 +225,7 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
     // tint (matches the "review before
     // opening" UX hint).
     is FileAction.ScanForMalware -> Icons.Filled.Security to Color(0xFFFFA726)
+    // PHASE 112 — encryption/decryption actions
+    is FileAction.EncryptFile -> Icons.Filled.Shield to Color(0xFF64B5F6)
+    is FileAction.DecryptFile -> Icons.Filled.Visibility to Color(0xFF81C784)
 }

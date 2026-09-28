@@ -64,6 +64,7 @@ object FileActionResolver {
         // specifically; we match the suffix.
         val isPkgTarZst = name.lowercase().endsWith(".pkg.tar.zst")
         val isAppImage = ext == "appimage"
+        val isElysV = ext == "elysv"
 
         // Git clone: the file is a `.git` file
         // (or has a URL inside; that lives in
@@ -111,6 +112,19 @@ object FileActionResolver {
                 FileAction.InspectUsbOtgDevice(
                     id = "usbotg-inspect-${name}",
                     blockDevice = file.absolutePath, // placeholder; handler reads body
+                ),
+                scanForMalwareAction(file),
+            )
+        }
+
+        // .elysv encrypted vault: offer decrypt action
+        if (isElysV) {
+            return listOf(
+                FileAction.DecryptFile(
+                    id = "decrypt-elysv-${name}",
+                    vaultPath = file.absolutePath,
+                    password = "", // will be prompted by UI
+                    outputDir = file.parentFile?.absolutePath,
                 ),
                 scanForMalwareAction(file),
             )
@@ -218,6 +232,18 @@ object FileActionResolver {
                 )
             }
         }
+
+        // Universal "Encrypt with password" action
+        // (available for any file). Creates a .elysv
+        // encrypted vault using AES-256-GCM + PBKDF2.
+        actions.add(
+            FileAction.EncryptFile(
+                id = "encrypt-${name}",
+                sourcePath = file.absolutePath,
+                password = "", // will be prompted by UI
+                outputPath = "${file.absolutePath}.elysv",
+            )
+        )
 
         // PHASE 110 — append a malware scan
         // action to every list of extension-
