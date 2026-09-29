@@ -208,6 +208,34 @@ class WorkspaceManager(
     }
 
     /**
+     * Permanently delete a workspace from the
+     * in-memory index AND the persistent store.
+     *
+     * Unlike [closeWorkspace] (a state change), this
+     * removes the workspace entirely — used by
+     * settings/cleanup flows and by instrumented
+     * tests that need a deterministic empty state.
+     *
+     * Publishes a [RuntimeEvent.WorkspaceStateChangedEvent]
+     * with `toState = "(deleted)"` so subscribers
+     * (e.g. WorkspacesViewModel) refresh their lists.
+     */
+    fun deleteWorkspace(id: String): Result<Unit> {
+        val workspace = byId.remove(id)
+            ?: return Result.failure(WorkspaceError.NotFound(id))
+        store.delete(id)
+        eventBus.publish(
+            RuntimeEvent.WorkspaceStateChangedEvent(
+                atMs = clock(),
+                workspaceId = id,
+                fromState = workspace.state.toString(),
+                toState = "(deleted)"
+            )
+        )
+        return Result.success(Unit)
+    }
+
+    /**
      * Add a session to a workspace. Refuses to add a
      * session whose id already exists in the workspace
      * or whose id exists in a *different* workspace

@@ -1,6 +1,7 @@
 package com.elysium.vanguard.features.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsDisplayed
@@ -11,9 +12,12 @@ import com.elysium.vanguard.features.desktop.model.DockItemKind
 import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
 import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,11 +37,23 @@ import org.junit.runner.RunWith
  * `androidx.compose.ui:ui-test-junit4` dep
  * (already configured in `app/build.gradle.kts`).
  */
+@HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
 class DesktopShellInstrumentedTest {
 
-    @get:Rule
+    // DesktopShellScreen resolves its window content
+    // registry through an application EntryPoint, so
+    // the Hilt test component must be created first.
+    @get:Rule(order = 0)
+    val hiltRule = HiltAndroidRule(this)
+
+    @get:Rule(order = 1)
     val composeTestRule = createComposeRule()
+
+    @Before
+    fun inject() {
+        hiltRule.inject()
+    }
 
     @Test
     fun `desktop_shell_renders_with_default_session_state`() {
@@ -48,11 +64,16 @@ class DesktopShellInstrumentedTest {
         composeTestRule.setContent {
             DesktopShellScreen(viewModel = viewModel)
         }
-        // The header should be visible.
-        composeTestRule.onNodeWithText("Elysium Vanguard Desktop").assertIsDisplayed()
-        // The window list should show the open windows.
-        composeTestRule.onNodeWithText("- Terminal (NORMAL, z=1)").assertIsDisplayed()
-        composeTestRule.onNodeWithText("- Files (MINIMIZED, z=2)").assertIsDisplayed()
+        composeTestRule.waitForIdle()
+        // The dock's live status badge (unique text).
+        composeTestRule.onNodeWithText("elysium · v1.0").assertIsDisplayed()
+        // The NORMAL window renders its WindowFrame title
+        // (dock icons are contentDescription-only, so this
+        // Text is unique to the window frame).
+        composeTestRule.onNodeWithText("Terminal").assertIsDisplayed()
+        // The MINIMIZED window's frame is filtered out of
+        // the render list, but its dock entry stays.
+        composeTestRule.onNodeWithContentDescription("Files").assertIsDisplayed()
     }
 
     @Test

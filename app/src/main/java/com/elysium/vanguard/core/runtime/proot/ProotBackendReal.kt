@@ -3,7 +3,9 @@ package com.elysium.vanguard.core.runtime.proot
 import com.elysium.vanguard.core.runtime.runner.DistroSessionBackend
 import com.elysium.vanguard.core.runtime.runner.LaunchedProcess
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
+import com.elysium.vanguard.core.runtime.snapshots.MountPlan
 import com.elysium.vanguard.core.runtime.workspace_orchestrator.BindMount
+import com.elysium.vanguard.core.runtime.workspaces.WorkspaceError
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceManager
 import com.elysium.vanguard.core.runtime.workspaces.WorkspaceSession
 import java.io.File
@@ -143,6 +145,37 @@ class ProotBackendReal(
         // Step 5: merge env. Orchestrator's env wins.
         val launcherEnv = pick.launcher.environmentVariables(rootfsDir)
         val mergedEnv = mergeEnvironment(launcherEnv, environment)
+
+        // Step 6.4 (Phase 72): capture a baseline
+        // snapshot of the live rootfs BEFORE the
+        // session starts, so [restoreSnapshot] at the
+        // end of the session has a rollback target.
+        // Skipped (not failed) when the workspace is
+        // unknown to the manager or no snapshot engine
+        // is configured — restore then reports the
+        // missing capability honestly. A real capture
+        // failure (I/O, invalid rootfs) fails the
+        // launch: without a baseline the session could
+        // never be rolled back.
+        if (workspaceManager.getWorkspace(workspaceId) != null) {
+            val baseline = workspaceManager.snapshotWorkspace(
+                workspaceId = workspaceId,
+                sourceRootfsPath = rootfsDir.absolutePath,
+                mountPlan = MountPlan.EMPTY,
+                label = "baseline:${session.id}",
+            )
+            if (baseline.isFailure) {
+                val err = baseline.exceptionOrNull()
+                if (err !is WorkspaceError.SnapshotEngineNotConfigured) {
+                    return Result.failure(
+                        IllegalStateException(
+                            "ProotBackendReal: baseline snapshot failed: " +
+                                (err?.message ?: "unknown")
+                        )
+                    )
+                }
+            }
+        }
 
         // Step 6.5 (Phase 72): start the write capture
         // BEFORE the spawn, watching every host path the

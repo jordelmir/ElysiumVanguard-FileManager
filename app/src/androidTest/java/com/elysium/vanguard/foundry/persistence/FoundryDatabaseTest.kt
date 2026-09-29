@@ -86,7 +86,7 @@ class FoundryDatabaseTest {
         // Round-trip: entity -> domain -> entity should preserve fields.
         val domain = fetched.toDomain()
         assertEquals(entity.name, domain.name)
-        assertEquals(entity.ownerId, domain.ownerId.toString())
+        assertEquals(entity.ownerId, domain.ownerId.value.toString())
         assertEquals(entity.version, domain.version)
     }
 

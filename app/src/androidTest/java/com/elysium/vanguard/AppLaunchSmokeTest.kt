@@ -24,7 +24,7 @@ class AppLaunchSmokeTest {
     fun applicationContext_isNotNull() {
         val context = ApplicationProvider.getApplicationContext<android.app.Application>()
         assertNotNull(context)
-        assertEquals("com.elysium.vanguard.debug", context.packageName)
+        assertEquals(BuildConfig.APPLICATION_ID, context.packageName)
     }
 
     @Test

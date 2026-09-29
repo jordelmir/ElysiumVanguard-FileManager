@@ -61,6 +61,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Instrumented-test host (androidTest only): unexported,
+             never launched by users. Mounts screens that call
+             hiltViewModel() (e.g. MainScreen) without driving the
+             full NavHost through splash → dashboard. -->
+        <activity
+            android:name=".MainScreenTestHost"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <provider android:name="androidx.core.content.FileProvider" android:authorities="com.elysium.vanguard.fileprovider" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>

@@ -34,6 +34,7 @@ import com.elysium.vanguard.core.runtime.proot.ProotBackendReal
 import com.elysium.vanguard.core.runtime.runner.DistroSessionBackend
 import com.elysium.vanguard.core.runtime.runner.LaunchedProcess
 import com.elysium.vanguard.core.runtime.runner.ProcessLauncher
+import com.elysium.vanguard.core.runtime.snapshots.FilesystemSnapshotEngine
 import com.elysium.vanguard.core.runtime.workspace_def.ApiVersion
 import com.elysium.vanguard.core.runtime.workspace_def.EnvSpec
 import com.elysium.vanguard.core.runtime.workspace_def.LauncherSpec
@@ -106,6 +107,7 @@ class CriticalE2EInstrumentedTest {
 
     private lateinit var storeDir: File
     private lateinit var rootfsDir: File
+    private lateinit var snapshotDir: File
     private lateinit var workspaceManager: WorkspaceManager
     private lateinit var processLauncher: RecordingProcessLauncher
     private lateinit var prootBackend: ProotBackend
@@ -128,9 +130,21 @@ class CriticalE2EInstrumentedTest {
 
         catalog = InMemoryCapsuleCatalog()
         val eventBus: RuntimeEventBus = SynchronizedEventBus()
+        snapshotDir = File(context.filesDir, "e2e-snapshots").also {
+            it.deleteRecursively()
+            it.mkdirs()
+        }
         workspaceManager = WorkspaceManager(
             store = FileWorkspaceStore(storeDir),
             eventBus = eventBus,
+            // Phase 72 — wire the real snapshot engine so
+            // ProotBackendReal's baseline snapshot (launch)
+            // + restoreSnapshot (step 8) run the actual
+            // copy/rollback path on device.
+            snapshotEngine = FilesystemSnapshotEngine(
+                baseDir = snapshotDir,
+                forceFullCopy = true,
+            ),
         )
         processLauncher = RecordingProcessLauncher()
         val backend = FakeDistroSessionBackend(
@@ -162,6 +176,7 @@ class CriticalE2EInstrumentedTest {
     fun tearDown() {
         storeDir.deleteRecursively()
         rootfsDir.deleteRecursively()
+        snapshotDir.deleteRecursively()
     }
 
     // ============================================================
@@ -188,22 +203,15 @@ class CriticalE2EInstrumentedTest {
         result as CriticalE2EOrchestrator.Result.Success
         assertEquals(0, result.exitCode)
 
-        // The real backend was invoked: the test
-        // recorder saw exactly one launch + one stop
-        // + one restore. (Restore fails because there
-        // are no snapshots in the test workspace —
-        // we expect a failure at step 8 OR the test
-        // fails. But the workspace manager has no
-        // snapshot engine, so the restore returns
-        // `SnapshotEngineNotConfigured` — the
-        // proot backend translates that into a
-        // `Result.failure`, so the test as written
-        // will fail at step 8. For Phase 71 the
-        // instrumented test asserts the LAUNCH
-        // path (the most critical Android-side
-        // piece). The restore assertion will be
-        // added in Phase 72 once the snapshot
-        // engine is wired into the test workspace.)
+        // Phase 72 — the full happy path now runs,
+        // including step 8: ProotBackendReal captures a
+        // baseline snapshot at launch and restoreSnapshot
+        // rolls the live rootfs back to it after stop.
+        // The audit log records the restore event.
+        assertTrue(
+            "expected a restore audit event, got: ${auditLog.all()}",
+            auditLog.all().any { it.eventType == "restore" },
+        )
         assertEquals(1, processLauncher.startCount)
         val argv = processLauncher.lastCommand
         // The argv contains the orchestrator's mount.
@@ -377,7 +385,7 @@ private class FakeDistroLauncher(
     )
 
     override fun buildShellCommand(rootfsDir: File, script: String): List<String> =
-        baseCommand.map { if (it == "PLACEHOLDER") script else it }
+        baseCommand.map { it.replace("PLACEHOLDER", script) }
     override fun buildProbeCommand(rootfsDir: File, args: List<String>): List<String> =
         baseCommand + args
     override fun environmentVariables(rootfsDir: File): List<Pair<String, String>> = env
