@@ -349,6 +349,11 @@ object CompressionEngine {
                 "Split archives are only supported for ZIP in this version"
             )
         }
+        // zip4j's SplitOutputStream refuses anything below 64 KB with a
+        // library-level error; fail early with a message the UI can show.
+        if (splitBytes != null && splitBytes < 64 * 1024L) {
+            throw IllegalArgumentException("Split size must be at least 64 KB")
+        }
         // Pre-flight: collect every file we'll add to the archive.
         val work = collectForCompression(files)
         val totalBytes = work.sumOf { it.first.length() }.coerceAtLeast(1L)
@@ -672,10 +677,14 @@ object CompressionEngine {
             }.apply { isDaemon = true }
             poller.start()
             try {
+                // zip4j's 3rd parameter is `splitArchive`, NOT `encrypt` —
+                // encryption travels via params.isEncryptFiles + the
+                // ZipFile password set above. Passing `password != null`
+                // here silently produced unsplit archives for folders.
                 if (singleFolder) {
-                    zip4j.createSplitZipFileFromFolder(files[0], params, password != null, splitBytes)
+                    zip4j.createSplitZipFileFromFolder(files[0], params, true, splitBytes)
                 } else {
-                    zip4j.createSplitZipFile(files, params, password != null, splitBytes)
+                    zip4j.createSplitZipFile(files, params, true, splitBytes)
                 }
             } finally {
                 poller.interrupt()

@@ -523,6 +523,175 @@ class CompressionEngineTest {
         assertArrayEquals(big.readBytes(), recovered.readBytes())
     }
 
+    @Test
+    fun zip_splitWithPassword_roundTrip() {
+        // The nastiest combination: multi-part AND encrypted. Exercises
+        // createSplitZip's encrypt=true flag plus anchor resolution on
+        // the extract side, in one shot.
+        val big = File(workDir, "splitpw_src.bin")
+            .apply { writeBytes(ByteArray(1_500_000).also { Random(11).nextBytes(it) }) }
+        val out = File(workDir, "out_split_pw.zip")
+        val opts = CompressionEngine.CompressionOptions(
+            splitSize = CompressionEngine.SplitSize.MB_1
+        )
+
+        val r = CompressionEngine.compress(listOf(big), out, ArchiveFormat.ZIP, "s3cret", null, opts)
+        assertTrue("split+password compress failed: ${r.exceptionOrNull()}", r.isSuccess)
+        val z01 = File(workDir, "out_split_pw.z01")
+        assertTrue(
+            "expected a .z01 part; siblings: ${workDir.list()?.joinToString()}",
+            z01.exists()
+        )
+
+        val extractDir = tempFolder.newFolder("extract_split_pw")
+        val d = CompressionEngine.decompress(z01, extractDir, "s3cret")
+        assertTrue("split+password extract failed: ${d.exceptionOrNull()}", d.isSuccess)
+        assertArrayEquals(big.readBytes(), File(extractDir, big.name).readBytes())
+
+        // And the wrong password must still fail on the split chain.
+        val bad = CompressionEngine.decompress(
+            z01, tempFolder.newFolder("extract_split_pw_bad"), "nope"
+        )
+        assertTrue("wrong password on split archive must fail", bad.isFailure)
+    }
+
+    @Test
+    fun zip_storeLevel_roundTrip() {
+        // STORE (no compression) on the plain path — deflater level 0.
+        val files = writeSampleFiles("store")
+        val out = File(workDir, "store.zip")
+        val opts = CompressionEngine.CompressionOptions(
+            level = CompressionEngine.CompressionLevel.STORE
+        )
+        assertRoundTrip(files, out, ArchiveFormat.ZIP, null, opts)
+    }
+
+    @Test
+    fun zip_storeLevelWithPassword_roundTrip() {
+        // STORE + AES on the zip4j streaming path — the entrySize
+        // bookkeeping (required for STORE, must be per-file) is easy
+        // to get wrong; a zero size would silently write empty entries.
+        val files = writeSampleFiles("storepw")
+        val out = File(workDir, "storepw.zip")
+        val opts = CompressionEngine.CompressionOptions(
+            level = CompressionEngine.CompressionLevel.STORE
+        )
+        assertRoundTrip(files, out, ArchiveFormat.ZIP, "store-secret", opts)
+    }
+
+    @Test
+    fun zip_splitSingleFolder_roundTrip() {
+        // The other half of createSplitZip: a single FOLDER selection
+        // goes through createSplitZipFileFromFolder (structure kept),
+        // not the flat-files API the other split tests exercise.
+        val folder = File(workDir, "split_folder")
+        assertTrue(folder.mkdirs())
+        val nested = File(folder, "sub")
+        assertTrue(nested.mkdirs())
+        File(nested, "deep.txt").writeText("nested in split folder")
+        File(folder, "top.txt").writeText("top of split folder")
+        val payload = ByteArray(1_500_000).also { Random(13).nextBytes(it) }
+        File(folder, "blob.bin").writeBytes(payload)
+
+        val out = File(workDir, "out_folder_split.zip")
+        val opts = CompressionEngine.CompressionOptions(
+            splitSize = CompressionEngine.SplitSize.MB_1
+        )
+        val r = CompressionEngine.compress(listOf(folder), out, ArchiveFormat.ZIP, null, null, opts)
+        assertTrue("folder split compress failed: ${r.exceptionOrNull()}", r.isSuccess)
+        assertTrue(
+            "expected .z01 part; siblings: ${workDir.list()?.joinToString()}",
+            File(workDir, "out_folder_split.z01").exists()
+        )
+
+        val extractDir = tempFolder.newFolder("extract_folder_split")
+        val d = CompressionEngine.decompress(out, extractDir, null)
+        assertTrue("folder split extract failed: ${d.exceptionOrNull()}", d.isSuccess)
+
+        val deep = File(File(File(extractDir, "split_folder"), "sub"), "deep.txt")
+        assertTrue("nested file lost", deep.exists())
+        assertEquals("nested in split folder", deep.readText())
+        assertEquals(
+            "top of split folder",
+            File(File(extractDir, "split_folder"), "top.txt").readText()
+        )
+        assertArrayEquals(
+            payload,
+            File(File(extractDir, "split_folder"), "blob.bin").readBytes()
+        )
+
+        // Same folder, now encrypted — the full matrix:
+        // folder + split + password.
+        val outPw = File(workDir, "out_folder_split_pw.zip")
+        val rPw = CompressionEngine.compress(
+            listOf(folder), outPw, ArchiveFormat.ZIP, "fold3r", null, opts
+        )
+        assertTrue("folder+split+pw compress failed: ${rPw.exceptionOrNull()}", rPw.isSuccess)
+        assertTrue(
+            "expected .z01 part for encrypted folder split; " +
+                "siblings: ${workDir.list()?.joinToString()}",
+            File(workDir, "out_folder_split_pw.z01").exists()
+        )
+        val extractPw = tempFolder.newFolder("extract_folder_split_pw")
+        val dPw = CompressionEngine.decompress(outPw, extractPw, "fold3r")
+        assertTrue("folder+split+pw extract failed: ${dPw.exceptionOrNull()}", dPw.isSuccess)
+        assertEquals(
+            "nested in split folder",
+            File(File(File(extractPw, "split_folder"), "sub"), "deep.txt").readText()
+        )
+    }
+
+    @Test
+    fun zip_plainReadableByJdkZipFile() {
+        // Interop: java.util.zip is an INDEPENDENT implementation
+        // (no shared code with commons-compress or zip4j). If it can
+        // read what we write, other tools can too.
+        val files = writeSampleFiles("interop")
+        val out = File(workDir, "interop.zip")
+        val r = CompressionEngine.compress(files, out, ArchiveFormat.ZIP)
+        assertTrue("compress failed: ${r.exceptionOrNull()}", r.isSuccess)
+
+        java.util.zip.ZipFile(out).use { jdkZip ->
+            for (src in files) {
+                val entry = jdkZip.getEntry(src.name)
+                    ?: throw AssertionError("JDK cannot see entry ${src.name}")
+                val recovered = jdkZip.getInputStream(entry).use { ins ->
+                    ins.readBytes()
+                }
+                assertArrayEquals(
+                    "JDK-read bytes differ for ${src.name}",
+                    src.readBytes(), recovered
+                )
+            }
+        }
+    }
+
+    @Test
+    fun zip_splitSizeValidation_failsFast() {
+        // Below zip4j's 64 KB floor → clear error, not a library trace.
+        val files = writeSampleFiles("splitmin")
+        val small = CompressionEngine.compress(
+            files, File(workDir, "splitmin.zip"), ArchiveFormat.ZIP, null, null,
+            CompressionEngine.CompressionOptions(
+                splitSize = CompressionEngine.SplitSize.CUSTOM,
+                customSplitSize = 1_024L
+            )
+        )
+        assertTrue("tiny split must fail fast", small.isFailure)
+        assertTrue(
+            "message should mention the 64 KB floor, got: ${small.exceptionOrNull()?.message}",
+            small.exceptionOrNull()?.message?.contains("64 KB") == true
+        )
+
+        // Split on a non-ZIP format → loud refusal, never a silent
+        // single-file archive.
+        val tarSplit = CompressionEngine.compress(
+            files, File(workDir, "split.tar"), ArchiveFormat.TAR, null, null,
+            CompressionEngine.CompressionOptions(splitSize = CompressionEngine.SplitSize.MB_1)
+        )
+        assertTrue("tar split must fail", tarSplit.isFailure)
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Format detection
     // ─────────────────────────────────────────────────────────────────
