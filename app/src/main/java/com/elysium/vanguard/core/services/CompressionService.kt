@@ -98,7 +98,8 @@ class CompressionService : Service() {
                     speed: Long,
                     etaSeconds: Long,
                     totalBytes: Long,
-                    processedBytes: Long
+                    processedBytes: Long,
+                    elapsedSeconds: Long
                 ) {
                     if (!isActive) throw CancellationException("User cancelled")
                     updateNotification(currentFile, percentage)

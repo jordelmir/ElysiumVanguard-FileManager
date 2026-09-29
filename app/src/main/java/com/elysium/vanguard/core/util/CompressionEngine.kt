@@ -6,6 +6,14 @@ import com.github.junrar.rarfile.FileHeader
 import com.sprylab.xar.FileXarSource
 import com.sprylab.xar.XarEntry
 import com.sprylab.xar.XarSource
+import net.lingala.zip4j.ZipFile as Zip4jFile
+import net.lingala.zip4j.exception.ZipException as Zip4jException
+import net.lingala.zip4j.io.outputstream.ZipOutputStream as Zip4jOutputStream
+import net.lingala.zip4j.model.ZipParameters as Zip4jParameters
+import net.lingala.zip4j.model.enums.AesKeyStrength as Zip4jAesKeyStrength
+import net.lingala.zip4j.model.enums.CompressionLevel as Zip4jCompressionLevel
+import net.lingala.zip4j.model.enums.CompressionMethod as Zip4jCompressionMethod
+import net.lingala.zip4j.model.enums.EncryptionMethod as Zip4jEncryption
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.ArchiveException
 import org.apache.commons.compress.archivers.ArchiveInputStream
@@ -21,7 +29,6 @@ import org.apache.commons.compress.archivers.sevenz.SevenZOutputFile
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
-import org.apache.commons.compress.archivers.tar.TarConstants
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
@@ -46,6 +53,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Files
+import java.util.zip.CRC32
 import java.util.zip.Deflater
 import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
@@ -54,7 +62,8 @@ import java.util.zip.InflaterInputStream
  * PHASE 10.3 — ZArchiver-grade compression engine.
  *
  * Reads and writes every format Apache Commons Compress 1.26 supports,
- * with optional password protection on ZIP (ZipCrypto) and 7Z (AES-256).
+ * plus password-protected ZIP create/extract (AES-256 and ZipCrypto)
+ * and split (multi-part) ZIP archives via zip4j.
  *
  * Two public surfaces:
  *   1. The high-level [compress] / [decompress] entry points used by the
@@ -64,9 +73,13 @@ import java.util.zip.InflaterInputStream
  *      out what kind of archive a file is even when the user gave it
  *      the wrong extension (e.g. `report.zip` that's actually a 7Z).
  *
- * All operations report progress through [ProgressListener]. Every entry
- * the engine touches is dispatched as its own progress event so the UI
- * can show a moving "current file" label.
+ * All operations report progress through [ProgressListener], including
+ * live speed / ETA / elapsed time. Extraction is lossless by design:
+ * entry timestamps are restored, directory mtimes are applied after
+ * all writes, and every byte stream is CRC-verified against the
+ * archive's stored checksum before the operation is reported as a
+ * success — a corrupted archive fails loudly instead of extracting
+ * silently-wrong data.
  */
 object CompressionEngine {
 
@@ -77,7 +90,8 @@ object CompressionEngine {
             speed: Long = 0,           // bytes/second
             etaSeconds: Long = 0,      // estimated time remaining in seconds
             totalBytes: Long = 0,      // total bytes to process
-            processedBytes: Long = 0   // bytes processed so far
+            processedBytes: Long = 0,  // bytes processed so far
+            elapsedSeconds: Long = 0   // wall-clock time since the operation started
         )
     }
 
@@ -89,6 +103,13 @@ object CompressionEngine {
     const val MAX_ENTRY_BYTES: Long = 1L * 1024 * 1024 * 1024          // 1 GB per entry
 
     private const val BUFFER_SIZE = 64 * 1024
+
+    /** Shown when the user tries to extract an encrypted archive with no password. */
+    private const val MSG_PASSWORD_REQUIRED =
+        "This archive is password-protected. Turn on the password field and try again."
+
+    /** Shown when the supplied password doesn't decrypt the archive. */
+    private const val MSG_WRONG_PASSWORD = "Incorrect password for this archive."
 
     // ─────────────────────────────────────────────────────────────────
     // Advanced Compression Options
@@ -139,12 +160,15 @@ object CompressionEngine {
     }
 
     /**
-     * Encryption method for password-protected archives
+     * Encryption method for password-protected archives. When a password
+     * is supplied for ZIP without an explicit method, AES-256 (WinZip
+     * AES) is used — the same strong encryption 7-Zip and ZArchiver
+     * produce. Pick [ZIP_CRYPTO] explicitly for legacy-tool compatibility.
      */
     enum class EncryptionMethod(val displayName: String, val supportedFormats: List<ArchiveFormat>) {
         ZIP_CRYPTO("ZipCrypto (legacy, compatible)", listOf(ArchiveFormat.ZIP)),
         AES_256("AES-256 (strong)", listOf(ArchiveFormat.SEVEN_Z)),
-        AES_256_ZIP("AES-256 (ZIP, requires Zip4j)", listOf(ArchiveFormat.ZIP));
+        AES_256_ZIP("AES-256 (ZIP)", listOf(ArchiveFormat.ZIP));
     }
 
     /**
@@ -186,6 +210,12 @@ object CompressionEngine {
                     // PK\x03\x04 — ZIP / OOXML / EPUB / JAR / ODS / ODT / ODP
                     head[0] == 0x50.toByte() && head[1] == 0x4B.toByte() &&
                         head[2] == 0x03.toByte() && head[3] == 0x04.toByte() ->
+                        ArchiveFormat.ZIP
+                    // PK\x07\x08 — spanned/split ZIP marker (the first
+                    // part of a multi-volume ZIP; the last part still
+                    // starts with PK\x03\x04 or the EOCD).
+                    head[0] == 0x50.toByte() && head[1] == 0x4B.toByte() &&
+                        head[2] == 0x07.toByte() && head[3] == 0x08.toByte() ->
                         ArchiveFormat.ZIP
                     // 7z\xBC\xAF\x27\x1C
                     head[0] == 0x37.toByte() && head[1] == 0x7A.toByte() &&
@@ -302,11 +332,28 @@ object CompressionEngine {
         if (password != null && !format.supportsPassword) {
             throw IllegalArgumentException("$format does not support password protection")
         }
+        // Split archives: honor the option instead of silently ignoring
+        // it. Only ZIP supports multi-part output in this version; other
+        // formats fail loudly so the user is never handed a single file
+        // when they asked for parts.
+        val splitBytes = when {
+            options.splitSize == SplitSize.NONE -> null
+            options.splitSize == SplitSize.CUSTOM ->
+                options.customSplitSize ?: throw IllegalArgumentException(
+                    "Custom split size was not set"
+                )
+            else -> options.splitSize.sizeBytes
+        }
+        if (splitBytes != null && format != ArchiveFormat.ZIP) {
+            throw UnsupportedOperationException(
+                "Split archives are only supported for ZIP in this version"
+            )
+        }
         // Pre-flight: collect every file we'll add to the archive.
         val work = collectForCompression(files)
         val totalBytes = work.sumOf { it.first.length() }.coerceAtLeast(1L)
         var processedBytes = 0L
-        val startTime = System.currentTimeMillis()
+        val reporter = ProgressReporter(listener)
 
         // Make sure the parent directory exists. /sdcard is writable
         // for us with the new Phase 10.2 perms, but the parent might
@@ -314,60 +361,13 @@ object CompressionEngine {
         outputFile.parentFile?.mkdirs()
 
         when (format) {
-            ArchiveFormat.ZIP -> {
-                val compressionLevel = options.level.deflaterLevel
-                if (password != null) {
-                    // Password-protected ZIP — we use the JDK's built-in
-                    // ZipOutputStream which supports the legacy ZipCrypto
-                    // password. This is weak against a determined attacker
-                    // (the password is recoverable by tools like fcrackzip
-                    // in seconds) but it's the cross-compatible default
-                    // every archiver produces and reads.
-                    java.util.zip.ZipOutputStream(
-                        BufferedOutputStream(FileOutputStream(outputFile))
-                    ).use { zos ->
-                        zos.setLevel(compressionLevel)
-                        for ((file, relPath) in work) {
-                            emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
-                            val entry = java.util.zip.ZipEntry(
-                                if (file.isDirectory) "$relPath/" else relPath
-                            )
-                            zos.putNextEntry(entry)
-                            if (file.isFile) {
-                                file.inputStream().use { fis ->
-                                    transferWithProgress(fis, zos) { len ->
-                                        processedBytes += len
-                                        emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
-                                    }
-                                }
-                            }
-                            zos.closeEntry()
-                        }
-                    }
-                } else {
-                    // Unencrypted ZIP — use commons-compress for better
-                    // ZIP64 / unicode-filename support.
-                    ZipArchiveOutputStream(outputFile).use { zos ->
-                        zos.setLevel(compressionLevel)
-                        for ((file, relPath) in work) {
-                            emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
-                            val entry = ZipArchiveEntry(file, relPath)
-                            if (file.isDirectory) {
-                                zos.putArchiveEntry(entry)
-                                zos.closeArchiveEntry()
-                            } else {
-                                zos.putArchiveEntry(entry)
-                                file.inputStream().use { fis ->
-                                    transferWithProgress(fis, zos) { len ->
-                                        processedBytes += len
-                                        emitProgressWithSpeed(listener, processedBytes, totalBytes, relPath, startTime)
-                                    }
-                                }
-                                zos.closeArchiveEntry()
-                            }
-                        }
-                    }
-                }
+            ArchiveFormat.ZIP -> when {
+                splitBytes != null ->
+                    createSplitZip(files, outputFile, password, options, reporter, totalBytes, splitBytes)
+                password != null ->
+                    createZipEncrypted(work, outputFile, password, options, reporter, totalBytes)
+                else ->
+                    createZipPlain(work, outputFile, options, reporter, totalBytes)
             }
             ArchiveFormat.SEVEN_Z -> {
                 // 7Z creation with password is NOT supported by
@@ -384,7 +384,7 @@ object CompressionEngine {
                 }
                 SevenZOutputFile(outputFile).use { szof ->
                     for ((file, relPath) in work) {
-                        emitProgress(listener, processedBytes, totalBytes, relPath)
+                        reporter.report(processedBytes, totalBytes, relPath)
                         if (file.isDirectory) {
                             val entry = szof.createArchiveEntry(file, "$relPath/")
                             szof.putArchiveEntry(entry)
@@ -398,7 +398,7 @@ object CompressionEngine {
                                 while (fis.read(buf).also { n = it } > 0) {
                                     szof.write(buf, 0, n)
                                     processedBytes += n
-                                    emitProgress(listener, processedBytes, totalBytes, relPath)
+                                    reporter.report(processedBytes, totalBytes, relPath)
                                 }
                             }
                             szof.closeArchiveEntry()
@@ -407,34 +407,34 @@ object CompressionEngine {
                 }
             }
             ArchiveFormat.TAR -> writeTar(files, outputFile, null) { p, f ->
-                emitProgress(listener, p, totalBytes, f)
+                reporter.report(p, totalBytes, f)
             }
             ArchiveFormat.TAR_GZ -> writeTar(files, outputFile, ::GzipCompressorOutputStream) { p, f ->
-                emitProgress(listener, p, totalBytes, f)
+                reporter.report(p, totalBytes, f)
             }
             ArchiveFormat.TAR_BZ2 -> writeTar(files, outputFile, ::BZip2CompressorOutputStream) { p, f ->
-                emitProgress(listener, p, totalBytes, f)
+                reporter.report(p, totalBytes, f)
             }
             ArchiveFormat.TAR_XZ -> writeTar(files, outputFile, ::XZCompressorOutputStream) { p, f ->
-                emitProgress(listener, p, totalBytes, f)
+                reporter.report(p, totalBytes, f)
             }
             ArchiveFormat.TAR_ZST -> writeTar(files, outputFile, ::ZstdCompressorOutputStream) { p, f ->
-                emitProgress(listener, p, totalBytes, f)
+                reporter.report(p, totalBytes, f)
             }
             ArchiveFormat.GZIP ->
-                singleStream(files.single(), outputFile, ::GzipCompressorOutputStream, listener)
+                singleStream(files.single(), outputFile, ::GzipCompressorOutputStream, reporter)
             ArchiveFormat.BZIP2 ->
-                singleStream(files.single(), outputFile, ::BZip2CompressorOutputStream, listener)
+                singleStream(files.single(), outputFile, ::BZip2CompressorOutputStream, reporter)
             ArchiveFormat.XZ ->
-                singleStream(files.single(), outputFile, ::XZCompressorOutputStream, listener)
+                singleStream(files.single(), outputFile, ::XZCompressorOutputStream, reporter)
             ArchiveFormat.ZSTANDARD ->
-                singleStream(files.single(), outputFile, ::ZstdCompressorOutputStream, listener)
+                singleStream(files.single(), outputFile, ::ZstdCompressorOutputStream, reporter)
             ArchiveFormat.PKG ->
                 throw UnsupportedOperationException("PKG/XAR format is read-only (macOS package format)")
             else ->
                 throw UnsupportedOperationException("$format is extraction-only and cannot be created")
         }
-        listener?.onProgress(100, "Done")
+        reporter.finish("Done")
         outputFile
     }
 
@@ -471,27 +471,28 @@ object CompressionEngine {
             )
         }
 
+        val reporter = ProgressReporter(listener)
         when (format) {
-            ArchiveFormat.ZIP -> extractZip(archive, outputDir, password, listener)
-            ArchiveFormat.SEVEN_Z -> extract7z(archive, outputDir, password, listener)
-            ArchiveFormat.TAR -> extractTar(archive, outputDir, null, listener)
-            ArchiveFormat.TAR_GZ -> extractTar(archive, outputDir, ::GzipCompressorInputStream, listener)
-            ArchiveFormat.TAR_BZ2 -> extractTar(archive, outputDir, ::BZip2CompressorInputStream, listener)
-            ArchiveFormat.TAR_XZ -> extractTar(archive, outputDir, ::XZCompressorInputStream, listener)
-            ArchiveFormat.TAR_ZST -> extractTar(archive, outputDir, ::ZstdCompressorInputStream, listener)
-            ArchiveFormat.PKG -> extractXar(archive, outputDir, listener)
-            ArchiveFormat.RAR, ArchiveFormat.RAR5 -> extractRar(archive, outputDir, password, listener)
-            ArchiveFormat.ARJ -> extractArj(archive, outputDir, listener)
-            ArchiveFormat.CPIO -> extractCpio(archive, outputDir, listener)
-            ArchiveFormat.LZ4 -> extractLz4(archive, outputDir, listener)
-            ArchiveFormat.Z -> extractZ(archive, outputDir, listener)
+            ArchiveFormat.ZIP -> extractZip(archive, outputDir, password, reporter)
+            ArchiveFormat.SEVEN_Z -> extract7z(archive, outputDir, password, reporter)
+            ArchiveFormat.TAR -> extractTar(archive, outputDir, null, reporter)
+            ArchiveFormat.TAR_GZ -> extractTar(archive, outputDir, ::GzipCompressorInputStream, reporter)
+            ArchiveFormat.TAR_BZ2 -> extractTar(archive, outputDir, ::BZip2CompressorInputStream, reporter)
+            ArchiveFormat.TAR_XZ -> extractTar(archive, outputDir, ::XZCompressorInputStream, reporter)
+            ArchiveFormat.TAR_ZST -> extractTar(archive, outputDir, ::ZstdCompressorInputStream, reporter)
+            ArchiveFormat.PKG -> extractXar(archive, outputDir, reporter)
+            ArchiveFormat.RAR, ArchiveFormat.RAR5 -> extractRar(archive, outputDir, password, reporter)
+            ArchiveFormat.ARJ -> extractArj(archive, outputDir, reporter)
+            ArchiveFormat.CPIO -> extractCpio(archive, outputDir, reporter)
+            ArchiveFormat.LZ4 -> extractLz4(archive, outputDir, reporter)
+            ArchiveFormat.Z -> extractZ(archive, outputDir, reporter)
             // The "single-file" stream formats are a corner case: we
             // still decompress them — just into a single file next to
             // the archive with the compression extension stripped.
             ArchiveFormat.GZIP, ArchiveFormat.BZIP2, ArchiveFormat.XZ, ArchiveFormat.ZSTANDARD ->
-                extractSingleStream(archive, outputDir, format, listener)
+                extractSingleStream(archive, outputDir, format, reporter)
         }
-        listener?.onProgress(100, "Done")
+        reporter.finish("Done")
         outputDir
     }
 
@@ -499,57 +500,493 @@ object CompressionEngine {
     // ZIP
     // ─────────────────────────────────────────────────────────────────
 
-    private fun extractZip(
-        archive: File, outputDir: File, password: String?, listener: ProgressListener?
+    /**
+     * Unencrypted ZIP creation — commons-compress for full ZIP64 /
+     * unicode-filename support. Entry mtimes come from
+     * [java.io.File.lastModified] via the `ZipArchiveEntry(file, name)`
+     * constructor, so timestamps survive the round-trip.
+     */
+    private fun createZipPlain(
+        work: List<Pair<File, String>>,
+        outputFile: File,
+        options: CompressionOptions,
+        reporter: ProgressReporter,
+        totalBytes: Long
     ) {
-        // PHASE 10.3 NOTE: commons-compress 1.26's ZipArchiveInputStream
-        // doesn't support password extraction — the second String arg
-        // is the charset name, not a password. The API landed in 1.27.
-        // We surface a clean error so the user can re-extract without
-        // a password (most ZipCrypto-protected ZIPs are decrypted on
-        // write but extracted via OS tools or 7-Zip; for the strong
-        // case we'd need to add `net.lingala.zip4j:zip4j`).
-        if (password != null) {
+        var processedBytes = 0L
+        ZipArchiveOutputStream(outputFile).use { zos ->
+            zos.setLevel(options.level.deflaterLevel)
+            for ((file, relPath) in work) {
+                reporter.report(processedBytes, totalBytes, relPath)
+                // Directory entries MUST carry a trailing slash — that's
+                // what marks them as directories inside the archive, and
+                // it's what every other tool (ZArchiver, 7-Zip, ...) does.
+                val entryName = if (file.isDirectory && !relPath.endsWith("/")) "$relPath/" else relPath
+                val entry = ZipArchiveEntry(file, entryName)
+                if (file.isDirectory) {
+                    zos.putArchiveEntry(entry)
+                    zos.closeArchiveEntry()
+                } else {
+                    zos.putArchiveEntry(entry)
+                    file.inputStream().use { fis ->
+                        transferWithProgress(fis, zos) { len ->
+                            processedBytes += len
+                            reporter.report(processedBytes, totalBytes, relPath)
+                        }
+                    }
+                    zos.closeArchiveEntry()
+                }
+            }
+        }
+    }
+
+    /**
+     * Password-protected ZIP creation via zip4j. Defaults to AES-256
+     * (WinZip AES — what 7-Zip / ZArchiver / WinRAR produce and read);
+     * [EncryptionMethod.ZIP_CRYPTO] opts into legacy ZipCrypto. Entry
+     * mtimes are written explicitly from [java.io.File.lastModified] so
+     * an encrypted archive loses no more metadata than a plain one.
+     */
+    private fun createZipEncrypted(
+        work: List<Pair<File, String>>,
+        outputFile: File,
+        password: String,
+        options: CompressionOptions,
+        reporter: ProgressReporter,
+        totalBytes: Long
+    ) {
+        val useZipCrypto = options.encryptionMethod == EncryptionMethod.ZIP_CRYPTO
+        val base = Zip4jParameters().apply {
+            compressionMethod = if (options.level == CompressionLevel.STORE) {
+                Zip4jCompressionMethod.STORE
+            } else {
+                Zip4jCompressionMethod.DEFLATE
+            }
+            compressionLevel = mapToZip4jLevel(options.level)
+            isEncryptFiles = true
+            encryptionMethod = if (useZipCrypto) Zip4jEncryption.ZIP_STANDARD else Zip4jEncryption.AES
+            aesKeyStrength = Zip4jAesKeyStrength.KEY_STRENGTH_256
+            // STORE entries must publish their size up front (zip4j
+            // refuses streaming STORE without it); directories are
+            // forced to entrySize 0 by zip4j itself.
+            if (options.level == CompressionLevel.STORE) {
+                entrySize = 0
+            }
+        }
+        var processedBytes = 0L
+        Zip4jOutputStream(
+            BufferedOutputStream(FileOutputStream(outputFile)),
+            password.toCharArray()
+        ).use { zos ->
+            for ((file, relPath) in work) {
+                reporter.report(processedBytes, totalBytes, relPath)
+                val params = Zip4jParameters(base).apply {
+                    fileNameInZip = if (file.isDirectory) "$relPath/" else relPath
+                    lastModifiedFileTime = file.lastModified()
+                    if (!file.isDirectory && options.level == CompressionLevel.STORE) {
+                        entrySize = file.length()
+                    }
+                }
+                zos.putNextEntry(params)
+                if (file.isFile) {
+                    file.inputStream().use { fis ->
+                        transferWithProgress(fis, zos) { len ->
+                            processedBytes += len
+                            reporter.report(processedBytes, totalBytes, relPath)
+                        }
+                    }
+                }
+                zos.closeEntry()
+            }
+        }
+    }
+
+    /**
+     * Split (multi-part) ZIP creation via zip4j — produces the classic
+     * `.z01`/`.z02`/…/`.zip` chain. zip4j only offers whole-selection
+     * split APIs, so either a single folder (structure preserved) or a
+     * flat file selection is accepted; anything else fails loudly
+     * instead of silently producing a single unsplit archive.
+     */
+    private fun createSplitZip(
+        files: List<File>,
+        outputFile: File,
+        password: String?,
+        options: CompressionOptions,
+        reporter: ProgressReporter,
+        totalBytes: Long,
+        splitBytes: Long
+    ) {
+        val singleFolder = files.size == 1 && files[0].isDirectory
+        val allFlatFiles = files.isNotEmpty() && files.all { it.isFile }
+        if (!singleFolder && !allFlatFiles) {
             throw UnsupportedOperationException(
-                "ZIP password extraction needs commons-compress 1.27+ (or " +
-                    "the zip4j library). Update the engine or extract with " +
-                    "7-Zip / unar."
+                "Split archives support a single folder or a flat selection of files " +
+                    "(no nested multi-select). Unsplit ZIP works for anything else."
             )
         }
-        val zis = ZipArchiveInputStream(BufferedInputStream(FileInputStream(archive)))
+        // zip4j refuses to create over an existing file, and stale
+        // .z01 parts from a previous run would poison the new chain.
+        deleteSplitParts(outputFile)
+
+        val params = Zip4jParameters().apply {
+            compressionMethod = if (options.level == CompressionLevel.STORE) {
+                Zip4jCompressionMethod.STORE
+            } else {
+                Zip4jCompressionMethod.DEFLATE
+            }
+            compressionLevel = mapToZip4jLevel(options.level)
+            if (password != null) {
+                isEncryptFiles = true
+                encryptionMethod = if (options.encryptionMethod == EncryptionMethod.ZIP_CRYPTO) {
+                    Zip4jEncryption.ZIP_STANDARD
+                } else {
+                    Zip4jEncryption.AES
+                }
+                aesKeyStrength = Zip4jAesKeyStrength.KEY_STRENGTH_256
+            }
+        }
+        val zip4j = Zip4jFile(outputFile)
+        try {
+            if (password != null) zip4j.setPassword(password.toCharArray())
+            reporter.report(0, totalBytes, "Preparing split archive…")
+            // zip4j's split APIs block; poll its progress monitor from a
+            // side thread so the UI still gets live percent/ETA.
+            val monitor = zip4j.progressMonitor
+            val poller = Thread {
+                try {
+                    while (true) {
+                        val monitorTotal = monitor.totalWork
+                        if (monitorTotal > 0) {
+                            reporter.report(
+                                monitor.workCompleted,
+                                monitorTotal,
+                                monitor.fileName ?: "split archive"
+                            )
+                        }
+                        Thread.sleep(150)
+                    }
+                } catch (_: InterruptedException) {
+                    // stopped below — normal shutdown
+                }
+            }.apply { isDaemon = true }
+            poller.start()
+            try {
+                if (singleFolder) {
+                    zip4j.createSplitZipFileFromFolder(files[0], params, password != null, splitBytes)
+                } else {
+                    zip4j.createSplitZipFile(files, params, password != null, splitBytes)
+                }
+            } finally {
+                poller.interrupt()
+                poller.join(500)
+            }
+        } catch (e: Zip4jException) {
+            throw toFriendly(e, password)
+        } finally {
+            zip4j.close()
+        }
+    }
+
+    private fun deleteSplitParts(outputFile: File) {
+        val base = if (outputFile.name.endsWith(".zip")) {
+            outputFile.nameWithoutExtension
+        } else {
+            outputFile.name
+        }
+        val pattern = Regex("^${Regex.escape(base)}\\.z\\d+$")
+        outputFile.parentFile?.listFiles()?.forEach { f ->
+            if (f.isFile && pattern.matches(f.name)) f.delete()
+        }
+        outputFile.delete()
+    }
+
+    private fun mapToZip4jLevel(level: CompressionLevel): Zip4jCompressionLevel = when (level) {
+        CompressionLevel.STORE -> Zip4jCompressionLevel.NO_COMPRESSION
+        CompressionLevel.FASTEST -> Zip4jCompressionLevel.FASTEST
+        CompressionLevel.FAST -> Zip4jCompressionLevel.FAST
+        CompressionLevel.NORMAL -> Zip4jCompressionLevel.NORMAL
+        CompressionLevel.MAXIMUM -> Zip4jCompressionLevel.MAXIMUM
+        CompressionLevel.ULTRA -> Zip4jCompressionLevel.ULTRA
+    }
+
+    /**
+     * Extract a ZIP. Dispatch order:
+     *   1. Password given, or archive is split/multi-part → zip4j
+     *      (only reader that decrypts AES/ZipCrypto and spans parts).
+     *   2. Random-access commons-compress [ZipFile] — central directory
+     *      gives exact uncompressed totals for the progress bar and
+     *      authoritative CRCs for integrity verification.
+     *   3. Streaming fallback for zips with no readable central
+     *      directory (rare, writer-broken archives).
+     */
+    private fun extractZip(
+        archive: File, outputDir: File, password: String?, reporter: ProgressReporter
+    ) {
+        // Multi-part: zip4j only reads the part holding the EOCD (the
+        // final `.zip`), and the `.z01`/`.001` parts have no central
+        // directory of their own. Resolve to the anchor before probing.
+        val anchor = resolveSplitAnchor(archive)
+        if (password != null) {
+            extractZipWithZip4j(anchor, outputDir, password, reporter)
+            return
+        }
+        val multiPart = anchor.name.matches(Regex(".*\\.(z\\d{2,3}|\\d{3})$")) ||
+            isSplitZipArchive(anchor)
+        if (multiPart) {
+            extractZipWithZip4j(anchor, outputDir, null, reporter)
+            return
+        }
+        if (extractZipRandomAccess(archive, outputDir, reporter)) return
+        extractZipStreaming(archive, outputDir, reporter)
+    }
+
+    /**
+     * If [archive] is an earlier split part (`.z01`, `.001`, ...),
+     * return the sibling `.zip` that carries the central directory;
+     * otherwise return it unchanged. Used because zip4j and
+     * commons-compress both need the anchor file to enumerate entries.
+     */
+    private fun resolveSplitAnchor(archive: File): File {
+        val n = archive.name
+        if (!n.matches(Regex(".*\\.(z\\d{2,3}|\\d{3})$"))) return archive
+        val base = n.substringBeforeLast('.')
+        val parent = archive.parentFile ?: return archive
+        return File(parent, "$base.zip").takeIf { it.exists() } ?: archive
+    }
+
+    /** Cheap probe: does this zip's end-of-central-directory span multiple disks? */
+    private fun isSplitZipArchive(archive: File): Boolean = try {
+        Zip4jFile(archive).use { it.isSplitArchive }
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Central-directory extraction. Verifies every entry's CRC32 against
+     * the stored checksum, restores file and (after all writes) directory
+     * mtimes, enforces the ZIP-bomb caps, and reports progress against
+     * the true uncompressed total. Returns false without touching the
+     * output when the central directory can't be read at all.
+     */
+    private fun extractZipRandomAccess(
+        archive: File, outputDir: File, reporter: ProgressReporter
+    ): Boolean {
+        val zip = try {
+            ZipFile(archive)
+        } catch (_: Exception) {
+            return false
+        }
+        zip.use { zf ->
+            val entries = java.util.Collections.list(zf.entries)
+            var totalOut = 0L
+            for (e in entries) {
+                if (!e.isDirectory) totalOut += e.size.coerceAtLeast(0L)
+            }
+            totalOut = totalOut.coerceAtLeast(1L)
+            if (totalOut > MAX_DECOMPRESSED_BYTES) {
+                throw SecurityException("Archive declares $totalOut bytes (over $MAX_DECOMPRESSED_BYTES)")
+            }
+            var processed = 0L
+            val dirTimes = mutableListOf<Pair<File, Long>>()
+            for (e in entries) {
+                if (e.size > MAX_ENTRY_BYTES) {
+                    throw SecurityException("Entry ${e.name} claims ${e.size} bytes (over $MAX_ENTRY_BYTES)")
+                }
+                if (e.generalPurposeBit?.usesEncryption() == true) {
+                    throw IllegalArgumentException(MSG_PASSWORD_REQUIRED)
+                }
+                val target = safeTarget(outputDir, e.name)
+                if (e.isDirectory) {
+                    target.mkdirs()
+                    if (e.time > 0) dirTimes += target to e.time
+                } else {
+                    target.parentFile?.mkdirs()
+                    val crc = CRC32()
+                    zf.getInputStream(e).use { ins ->
+                        FileOutputStream(target).use { fos ->
+                            val buf = ByteArray(BUFFER_SIZE)
+                            var n: Int
+                            while (ins.read(buf).also { n = it } > 0) {
+                                fos.write(buf, 0, n)
+                                crc.update(buf, 0, n)
+                                processed += n
+                                if (processed > MAX_DECOMPRESSED_BYTES) {
+                                    throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                                }
+                                reporter.report(processed, totalOut, e.name)
+                            }
+                        }
+                    }
+                    if (e.time > 0) target.setLastModified(e.time)
+                    if (crc.value != e.crc) {
+                        throw IOException("CRC check failed for '${e.name}' — the archive is corrupted")
+                    }
+                }
+            }
+            restoreDirTimes(dirTimes)
+        }
+        return true
+    }
+
+    /**
+     * Password / split extraction via zip4j. Same guarantees as the
+     * random-access path: CRC32 verification (AES entries instead get
+     * zip4j's built-in authentication-code check), restored mtimes,
+     * bomb caps, and progress against the true uncompressed total.
+     */
+    private fun extractZipWithZip4j(
+        archive: File, outputDir: File, password: String?, reporter: ProgressReporter
+    ) {
+        val zip4j = if (password != null) {
+            Zip4jFile(archive, password.toCharArray())
+        } else {
+            Zip4jFile(archive)
+        }
+        try {
+            val headers = try {
+                zip4j.fileHeaders
+            } catch (e: Zip4jException) {
+                throw toFriendly(e, password)
+            }
+            var totalOut = 0L
+            for (h in headers) totalOut += h.uncompressedSize.coerceAtLeast(0L)
+            totalOut = totalOut.coerceAtLeast(1L)
+            if (totalOut > MAX_DECOMPRESSED_BYTES) {
+                throw SecurityException("Archive declares $totalOut bytes (over $MAX_DECOMPRESSED_BYTES)")
+            }
+            var processed = 0L
+            val dirTimes = mutableListOf<Pair<File, Long>>()
+            for (header in headers) {
+                val name = header.fileName
+                if (header.uncompressedSize > MAX_ENTRY_BYTES) {
+                    throw SecurityException("Entry $name claims ${header.uncompressedSize} bytes (over $MAX_ENTRY_BYTES)")
+                }
+                val target = safeTarget(outputDir, name)
+                if (header.isDirectory) {
+                    target.mkdirs()
+                    if (header.lastModifiedTimeEpoch > 0) dirTimes += target to header.lastModifiedTimeEpoch
+                } else {
+                    target.parentFile?.mkdirs()
+                    val crc = CRC32()
+                    try {
+                        zip4j.getInputStream(header).use { ins ->
+                            FileOutputStream(target).use { fos ->
+                                val buf = ByteArray(BUFFER_SIZE)
+                                var n: Int
+                                while (ins.read(buf).also { n = it } > 0) {
+                                    fos.write(buf, 0, n)
+                                    crc.update(buf, 0, n)
+                                    processed += n
+                                    if (processed > MAX_DECOMPRESSED_BYTES) {
+                                        throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                                    }
+                                    reporter.report(processed, totalOut, name)
+                                }
+                            }
+                        }
+                    } catch (e: Zip4jException) {
+                        throw toFriendly(e, password)
+                    }
+                    // AES v2 stores no CRC in the headers (zip4j verified
+                    // the authentication code while streaming instead);
+                    // everything else must match the stored checksum.
+                    if (header.encryptionMethod != Zip4jEncryption.AES && crc.value != header.crc) {
+                        throw IOException("CRC check failed for '$name' — the archive is corrupted")
+                    }
+                    if (header.lastModifiedTimeEpoch > 0) {
+                        target.setLastModified(header.lastModifiedTimeEpoch)
+                    }
+                }
+            }
+            restoreDirTimes(dirTimes)
+        } finally {
+            zip4j.close()
+        }
+    }
+
+    /**
+     * Streaming extraction for zips without a usable central directory.
+     * Progress is measured against compressed bytes consumed (the only
+     * denominator known up front), timestamps and directory mtimes are
+     * still restored, encrypted entries are rejected with a friendly
+     * password message, and CRC is verified whenever the local header
+     * carries a real value.
+     */
+    private fun extractZipStreaming(
+        archive: File, outputDir: File, reporter: ProgressReporter
+    ) {
+        val archiveLen = archive.length().coerceAtLeast(1L)
+        val counting = CountingInputStream(BufferedInputStream(FileInputStream(archive)))
+        val zis = ZipArchiveInputStream(counting)
         zis.use { stream ->
-            var totalBytes = 0L
-            var written = 0L
+            var totalWritten = 0L
+            val dirTimes = mutableListOf<Pair<File, Long>>()
             var entry: ZipArchiveEntry? = stream.nextZipEntry
             while (entry != null) {
-                val current = entry ?: break
-                // ZIP bomb defense: reject clearly broken sizes.
-                val size = current.size
-                if (size > MAX_ENTRY_BYTES) {
-                    throw SecurityException("Entry ${current.name} claims $size bytes (over $MAX_ENTRY_BYTES)")
+                val current = entry
+                if (current.size > MAX_ENTRY_BYTES) {
+                    throw SecurityException("Entry ${current.name} claims ${current.size} bytes (over $MAX_ENTRY_BYTES)")
+                }
+                if (current.generalPurposeBit?.usesEncryption() == true) {
+                    throw IllegalArgumentException(MSG_PASSWORD_REQUIRED)
                 }
                 val target = safeTarget(outputDir, current.name)
                 if (current.isDirectory) {
                     target.mkdirs()
+                    if (current.time > 0) dirTimes += target to current.time
                 } else {
                     target.parentFile?.mkdirs()
+                    val crc = CRC32()
                     FileOutputStream(target).use { fos ->
                         val buf = ByteArray(BUFFER_SIZE)
                         var n: Int
-                        val entryName = current.name
                         while (stream.read(buf).also { n = it } > 0) {
                             fos.write(buf, 0, n)
-                            written += n
-                            totalBytes += n
-                            if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                            crc.update(buf, 0, n)
+                            totalWritten += n
+                            if (totalWritten > MAX_DECOMPRESSED_BYTES) {
                                 throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
                             }
-                            emitProgress(listener, written, archive.length().coerceAtLeast(1L), entryName)
+                            reporter.report(counting.count, archiveLen, current.name)
                         }
+                    }
+                    if (current.time > 0) target.setLastModified(current.time)
+                    if (current.crc != 0L && crc.value != current.crc) {
+                        throw IOException("CRC check failed for '${current.name}' — the archive is corrupted")
                     }
                 }
                 entry = stream.nextZipEntry
             }
+            restoreDirTimes(dirTimes)
+        }
+    }
+
+    /** Map a zip4j failure onto a message the user can act on. */
+    private fun toFriendly(e: Exception, password: String?): IOException {
+        val msg = e.message ?: ""
+        val type = (e as? Zip4jException)?.type
+        val mentionsPassword = msg.contains("password", ignoreCase = true) ||
+            msg.contains("encrypt", ignoreCase = true)
+        return when {
+            password == null && (type == Zip4jException.Type.WRONG_PASSWORD || mentionsPassword) ->
+                IOException(MSG_PASSWORD_REQUIRED, e)
+            type == Zip4jException.Type.WRONG_PASSWORD || (password != null && mentionsPassword) ->
+                IOException(MSG_WRONG_PASSWORD, e)
+            type == Zip4jException.Type.CHECKSUM_MISMATCH ->
+                IOException("Archive corrupted (checksum mismatch)", e)
+            else -> IOException(msg.ifEmpty { "Failed to read ZIP archive" }, e)
+        }
+    }
+
+    /**
+     * Apply directory mtimes after every file is on disk — writing a
+     * child updates the parent's mtime, so this must run last. Reverse
+     * order keeps deeper directories before their parents.
+     */
+    private fun restoreDirTimes(dirTimes: List<Pair<File, Long>>) {
+        for ((dir, time) in dirTimes.asReversed()) {
+            if (time > 0) dir.setLastModified(time)
         }
     }
 
@@ -558,20 +995,33 @@ object CompressionEngine {
     // ─────────────────────────────────────────────────────────────────
 
     private fun extract7z(
-        archive: File, outputDir: File, password: String?, listener: ProgressListener?
+        archive: File, outputDir: File, password: String?, reporter: ProgressReporter
     ) {
         val builder = SevenZFile.Builder().setFile(archive)
         if (password != null) builder.setPassword(password.toCharArray())
         builder.get().use { szf ->
+            // 7z headers carry uncompressed sizes — use the declared sum
+            // so the percentage reflects real progress, not compressed
+            // bytes on disk.
+            val declaredTotal = szf.entries.sumOf { it.size.coerceAtLeast(0L) }
+            val totalOut = if (declaredTotal > 0) declaredTotal else archive.length().coerceAtLeast(1L)
+            if (totalOut > MAX_DECOMPRESSED_BYTES) {
+                throw SecurityException("Archive declares $totalOut bytes (over $MAX_DECOMPRESSED_BYTES)")
+            }
+            val dirTimes = mutableListOf<Pair<File, Long>>()
+            var processed = 0L
             var entry = szf.nextEntry
-            var totalBytes = 0L
             while (entry != null) {
-                val current = entry ?: break
+                val current = entry
+                if (current.size > MAX_ENTRY_BYTES) {
+                    throw SecurityException("Entry ${current.name} claims ${current.size} bytes (over $MAX_ENTRY_BYTES)")
+                }
+                val target = safeTarget(outputDir, current.name)
                 if (current.isDirectory) {
-                    val dir = safeTarget(outputDir, current.name)
-                    dir.mkdirs()
+                    target.mkdirs()
+                    val mtime = current.lastModifiedDate?.time ?: 0L
+                    if (mtime > 0) dirTimes += target to mtime
                 } else {
-                    val target = safeTarget(outputDir, current.name)
                     target.parentFile?.mkdirs()
                     FileOutputStream(target).use { fos ->
                         val buf = ByteArray(BUFFER_SIZE)
@@ -579,16 +1029,19 @@ object CompressionEngine {
                         val entryName = current.name
                         while (szf.read(buf).also { n = it } > 0) {
                             fos.write(buf, 0, n)
-                            totalBytes += n
-                            if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                            processed += n
+                            if (processed > MAX_DECOMPRESSED_BYTES) {
                                 throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
                             }
-                            emitProgress(listener, totalBytes, archive.length().coerceAtLeast(1L), entryName)
+                            reporter.report(processed, totalOut, entryName)
                         }
                     }
+                    val mtime = current.lastModifiedDate?.time ?: 0L
+                    if (mtime > 0) target.setLastModified(mtime)
                 }
                 entry = szf.nextEntry
             }
+            restoreDirTimes(dirTimes)
         }
     }
 
@@ -597,14 +1050,14 @@ object CompressionEngine {
     // ─────────────────────────────────────────────────────────────────
 
     private fun extractXar(
-        archive: File, outputDir: File, listener: ProgressListener?
+        archive: File, outputDir: File, reporter: ProgressReporter
     ) {
         val source = FileXarSource(archive)
         try {
             var totalBytes = 0L
             val entries = source.entries
             for (entry in entries) {
-                extractXarEntry(entry, outputDir, listener, archive) { bytes ->
+                extractXarEntry(entry, outputDir, reporter, archive) { bytes ->
                     totalBytes += bytes
                     if (totalBytes > MAX_DECOMPRESSED_BYTES) {
                         throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
@@ -619,7 +1072,7 @@ object CompressionEngine {
     private fun extractXarEntry(
         entry: XarEntry,
         outputDir: File,
-        listener: ProgressListener?,
+        reporter: ProgressReporter,
         archive: File,
         onProgress: (Long) -> Unit
     ) {
@@ -633,11 +1086,11 @@ object CompressionEngine {
             // We report the full entry size as a single progress update.
             val size = entry.size
             onProgress(size)
-            emitProgress(listener, size, archive.length().coerceAtLeast(1L), entry.name)
+            reporter.report(size, archive.length().coerceAtLeast(1L), entry.name)
         }
         // Recursively extract children
         for (child in entry.children) {
-            extractXarEntry(child, outputDir, listener, archive, onProgress)
+            extractXarEntry(child, outputDir, reporter, archive, onProgress)
         }
     }
 
@@ -646,7 +1099,7 @@ object CompressionEngine {
     // ─────────────────────────────────────────────────────────────────
 
     private fun extractRar(
-        archive: File, outputDir: File, password: String?, listener: ProgressListener?
+        archive: File, outputDir: File, password: String?, reporter: ProgressReporter
     ) {
         Archive(archive).use { rarArchive ->
             if (password != null) {
@@ -655,11 +1108,14 @@ object CompressionEngine {
             val fileHeaders = rarArchive.getFileHeaders()
             var totalBytes = 0L
             val totalSize = fileHeaders.sumOf { it.fullUnpackSize }
+            val dirTimes = mutableListOf<Pair<File, Long>>()
             for (fileHeader in fileHeaders) {
                 val current = fileHeader
                 val target = safeTarget(outputDir, current.fileNameString)
                 if (current.isDirectory) {
                     target.mkdirs()
+                    val mtime = current.getMTime()?.time ?: 0L
+                    if (mtime > 0) dirTimes += target to mtime
                 } else {
                     target.parentFile?.mkdirs()
                     FileOutputStream(target).use { fos ->
@@ -668,10 +1124,13 @@ object CompressionEngine {
                         if (totalBytes > MAX_DECOMPRESSED_BYTES) {
                             throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
                         }
-                        emitProgress(listener, totalBytes, totalSize.coerceAtLeast(1L), current.fileNameString)
+                        reporter.report(totalBytes, totalSize.coerceAtLeast(1L), current.fileNameString)
                     }
+                    val mtime = current.getMTime()?.time ?: 0L
+                    if (mtime > 0) target.setLastModified(mtime)
                 }
             }
+            restoreDirTimes(dirTimes)
         }
     }
 
@@ -683,19 +1142,24 @@ object CompressionEngine {
         archive: File,
         outputDir: File,
         formatName: String,
-        listener: ProgressListener?
+        reporter: ProgressReporter
     ) {
+        val archiveLen = archive.length().coerceAtLeast(1L)
+        val counting = CountingInputStream(BufferedInputStream(FileInputStream(archive)))
         val ais = ArchiveStreamFactory().createArchiveInputStream(
-            formatName, BufferedInputStream(FileInputStream(archive))
+            formatName, counting
         ) as ArchiveInputStream<*>
         ais.use { stream ->
             var totalBytes = 0L
+            val dirTimes = mutableListOf<Pair<File, Long>>()
             var entry: ArchiveEntry? = stream.nextEntry
             while (entry != null) {
-                val current = entry ?: break
+                val current = entry
                 val target = safeTarget(outputDir, current.name)
                 if (current.isDirectory) {
                     target.mkdirs()
+                    val mtime = current.lastModifiedDate?.time ?: 0L
+                    if (mtime > 0) dirTimes += target to mtime
                 } else {
                     target.parentFile?.mkdirs()
                     FileOutputStream(target).use { fos ->
@@ -708,33 +1172,34 @@ object CompressionEngine {
                             if (totalBytes > MAX_DECOMPRESSED_BYTES) {
                                 throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
                             }
-                            emitProgress(listener, totalBytes, archive.length().coerceAtLeast(1L), entryName)
+                            reporter.report(counting.count, archiveLen, entryName)
                         }
                     }
+                    val mtime = current.lastModifiedDate?.time ?: 0L
+                    if (mtime > 0) target.setLastModified(mtime)
                 }
                 entry = stream.nextEntry
             }
+            restoreDirTimes(dirTimes)
         }
     }
 
-    private fun extractArj(archive: File, outputDir: File, listener: ProgressListener?) {
-        extractWithArchiveStreamFactory(archive, outputDir, "arj", listener)
+    private fun extractArj(archive: File, outputDir: File, reporter: ProgressReporter) {
+        extractWithArchiveStreamFactory(archive, outputDir, "arj", reporter)
     }
 
-    private fun extractCpio(archive: File, outputDir: File, listener: ProgressListener?) {
-        extractWithArchiveStreamFactory(archive, outputDir, "cpio", listener)
+    private fun extractCpio(archive: File, outputDir: File, reporter: ProgressReporter) {
+        extractWithArchiveStreamFactory(archive, outputDir, "cpio", reporter)
     }
 
-    private fun extractLz4(archive: File, outputDir: File, listener: ProgressListener?) {
-        // LZ4 frame format
-        extractSingleStreamWithDecoder(archive, outputDir, listener) { input ->
+    private fun extractLz4(archive: File, outputDir: File, reporter: ProgressReporter) {
+        extractSingleStreamWithDecoder(archive, outputDir, reporter) { input ->
             FramedLZ4CompressorInputStream(input)
         }
     }
 
-    private fun extractZ(archive: File, outputDir: File, listener: ProgressListener?) {
-        // Unix compress (.Z) format
-        extractSingleStreamWithDecoder(archive, outputDir, listener) { input ->
+    private fun extractZ(archive: File, outputDir: File, reporter: ProgressReporter) {
+        extractSingleStreamWithDecoder(archive, outputDir, reporter) { input ->
             InflaterInputStream(input)
         }
     }
@@ -742,7 +1207,7 @@ object CompressionEngine {
     private fun extractSingleStreamWithDecoder(
         archive: File,
         outputDir: File,
-        listener: ProgressListener?,
+        reporter: ProgressReporter,
         decoder: (InputStream) -> InputStream
     ) {
         val name = archive.name
@@ -750,9 +1215,10 @@ object CompressionEngine {
         val target = File(outputDir, decompressedName)
         target.parentFile?.mkdirs()
         val total = archive.length().coerceAtLeast(1L)
+        val counting = CountingInputStream(BufferedInputStream(FileInputStream(archive)))
         var processed = 0L
-        BufferedInputStream(FileInputStream(archive)).use { rawIn ->
-            decoder(rawIn).use { input ->
+        try {
+            decoder(counting).use { input ->
                 FileOutputStream(target).use { fos ->
                     val buf = ByteArray(BUFFER_SIZE)
                     var n: Int
@@ -762,10 +1228,12 @@ object CompressionEngine {
                         if (processed > MAX_DECOMPRESSED_BYTES) {
                             throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
                         }
-                        emitProgress(listener, processed, total, target.name)
+                        reporter.report(counting.count, total, target.name)
                     }
                 }
             }
+        } finally {
+            counting.close()
         }
     }
 
@@ -780,13 +1248,16 @@ object CompressionEngine {
         emit: (bytes: Long, current: String) -> Unit
     ) {
         val work = collectForCompression(files)
-        val totalBytes = work.sumOf { it.first.length() }.coerceAtLeast(1L)
         var processed = 0L
 
         val rawOut = BufferedOutputStream(FileOutputStream(outputFile))
         val wrapped: OutputStream = compressor?.invoke(rawOut) ?: rawOut
         TarArchiveOutputStream(wrapped).use { taos ->
-            taos.setLongFileMode(TarConstants.LF_NORMAL.toInt())  // 512-byte filenames max
+            // POSIX (PAX) long-name + big-number support: the old
+            // LF_NORMAL setting made any path over 100 characters throw,
+            // which silently made deep directory trees unarchivable.
+            taos.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+            taos.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
             for ((file, relPath) in work) {
                 emit(processed, relPath)
                 val entry: TarArchiveEntry = if (file.isDirectory) {
@@ -813,36 +1284,51 @@ object CompressionEngine {
         archive: File,
         outputDir: File,
         decompressor: ((InputStream) -> InputStream)?,
-        listener: ProgressListener?
+        reporter: ProgressReporter
     ) {
-        val rawIn = BufferedInputStream(FileInputStream(archive))
-        val wrapped: InputStream = decompressor?.invoke(rawIn) ?: rawIn
-        TarArchiveInputStream(wrapped).use { tais ->
-            var entry: TarArchiveEntry? = tais.nextTarEntry
-            var totalBytes = 0L
-            while (entry != null) {
-                val current = entry ?: break
-                val target = safeTarget(outputDir, current.name)
-                if (current.isDirectory) {
-                    target.mkdirs()
-                } else {
-                    target.parentFile?.mkdirs()
-                    FileOutputStream(target).use { fos ->
-                        val buf = ByteArray(BUFFER_SIZE)
-                        var n: Int
-                        val entryName = current.name
-                        while (tais.read(buf).also { n = it } > 0) {
-                            fos.write(buf, 0, n)
-                            totalBytes += n
-                            if (totalBytes > MAX_DECOMPRESSED_BYTES) {
-                                throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+        // Progress is measured against compressed bytes consumed: the
+        // only denominator known up front for .tar.gz/.xz/... — writing
+        // uncompressed bytes against the compressed archive size used to
+        // peg the bar at 99% almost immediately.
+        val archiveLen = archive.length().coerceAtLeast(1L)
+        val counting = CountingInputStream(BufferedInputStream(FileInputStream(archive)))
+        val wrapped: InputStream = decompressor?.invoke(counting) ?: counting
+        try {
+            TarArchiveInputStream(wrapped).use { tais ->
+                val dirTimes = mutableListOf<Pair<File, Long>>()
+                var entry: TarArchiveEntry? = tais.nextTarEntry
+                var totalBytes = 0L
+                while (entry != null) {
+                    val current = entry
+                    val target = safeTarget(outputDir, current.name)
+                    if (current.isDirectory) {
+                        target.mkdirs()
+                        val mtime = current.modTime?.time ?: 0L
+                        if (mtime > 0) dirTimes += target to mtime
+                    } else {
+                        target.parentFile?.mkdirs()
+                        FileOutputStream(target).use { fos ->
+                            val buf = ByteArray(BUFFER_SIZE)
+                            var n: Int
+                            val entryName = current.name
+                            while (tais.read(buf).also { n = it } > 0) {
+                                fos.write(buf, 0, n)
+                                totalBytes += n
+                                if (totalBytes > MAX_DECOMPRESSED_BYTES) {
+                                    throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                                }
+                                reporter.report(counting.count, archiveLen, entryName)
                             }
-                            emitProgress(listener, totalBytes, archive.length().coerceAtLeast(1L), entryName)
                         }
+                        val mtime = current.modTime?.time ?: 0L
+                        if (mtime > 0) target.setLastModified(mtime)
                     }
+                    entry = tais.nextTarEntry
                 }
-                entry = tais.nextTarEntry
+                restoreDirTimes(dirTimes)
             }
+        } finally {
+            counting.close()
         }
     }
 
@@ -854,7 +1340,7 @@ object CompressionEngine {
         source: File,
         outputFile: File,
         compressor: (OutputStream) -> OutputStream,
-        listener: ProgressListener?
+        reporter: ProgressReporter
     ) {
         if (source.isDirectory) throw IllegalArgumentException(
             "Single-stream formats only support a single file, not a directory"
@@ -866,7 +1352,7 @@ object CompressionEngine {
                 source.inputStream().use { fis ->
                     transferWithProgress(fis, cos) { len ->
                         processed += len
-                        emitProgress(listener, processed, total, source.name)
+                        reporter.report(processed, total, source.name)
                     }
                 }
             }
@@ -874,7 +1360,7 @@ object CompressionEngine {
     }
 
     private fun extractSingleStream(
-        archive: File, outputDir: File, format: ArchiveFormat, listener: ProgressListener?
+        archive: File, outputDir: File, format: ArchiveFormat, reporter: ProgressReporter
     ) {
         val name = archive.name
         val decompressedName = when (format) {
@@ -886,25 +1372,34 @@ object CompressionEngine {
         }.ifBlank { "${archive.nameWithoutExtension}.out" }
         val target = File(outputDir, decompressedName)
         target.parentFile?.mkdirs()
+        // Progress denominator is compressed bytes consumed — writing
+        // decompressed bytes against archive.length() overshoots to 99%
+        // on any compressible input.
         val total = archive.length().coerceAtLeast(1L)
-        var processed = 0L
-        BufferedInputStream(FileInputStream(archive)).use { rawIn ->
+        val counting = CountingInputStream(BufferedInputStream(FileInputStream(archive)))
+        try {
             when (format) {
-                ArchiveFormat.GZIP -> GzipCompressorInputStream(rawIn).use { decode(it, target, archive, listener) { processed = it.first; emitProgress(listener, it.first, total, target.name) } }
-                ArchiveFormat.BZIP2 -> BZip2CompressorInputStream(rawIn).use { decode(it, target, archive, listener) { processed = it.first; emitProgress(listener, it.first, total, target.name) } }
-                ArchiveFormat.XZ -> XZCompressorInputStream(rawIn).use { decode(it, target, archive, listener) { processed = it.first; emitProgress(listener, it.first, total, target.name) } }
-                ArchiveFormat.ZSTANDARD -> ZstdCompressorInputStream(rawIn).use { decode(it, target, archive, listener) { processed = it.first; emitProgress(listener, it.first, total, target.name) } }
+                ArchiveFormat.GZIP -> GzipCompressorInputStream(counting)
+                    .use { decode(it, target, reporter, counting, total) }
+                ArchiveFormat.BZIP2 -> BZip2CompressorInputStream(counting)
+                    .use { decode(it, target, reporter, counting, total) }
+                ArchiveFormat.XZ -> XZCompressorInputStream(counting)
+                    .use { decode(it, target, reporter, counting, total) }
+                ArchiveFormat.ZSTANDARD -> ZstdCompressorInputStream(counting)
+                    .use { decode(it, target, reporter, counting, total) }
                 else -> throw IllegalArgumentException("Not a single-stream format: $format")
             }
+        } finally {
+            counting.close()
         }
     }
 
     private fun decode(
         input: InputStream,
         target: File,
-        archive: File,
-        listener: ProgressListener?,
-        perChunk: (Pair<Long, Long>) -> Unit  // (currentBytes, totalBytes)
+        reporter: ProgressReporter,
+        counting: CountingInputStream,
+        total: Long
     ) {
         FileOutputStream(target).use { fos ->
             val buf = ByteArray(BUFFER_SIZE)
@@ -913,7 +1408,10 @@ object CompressionEngine {
             while (input.read(buf).also { n = it } > 0) {
                 fos.write(buf, 0, n)
                 processed += n
-                perChunk(processed to archive.length().coerceAtLeast(1L))
+                if (processed > MAX_DECOMPRESSED_BYTES) {
+                    throw SecurityException("Archive exceeds $MAX_DECOMPRESSED_BYTES when extracted")
+                }
+                reporter.report(counting.count, total, target.name)
             }
         }
     }
@@ -975,23 +1473,68 @@ object CompressionEngine {
         }
     }
 
-    private fun emitProgress(
-        listener: ProgressListener?, processed: Long, total: Long, current: String
-    ) {
-        if (listener == null) return
-        val pct = ((processed * 100) / total).toInt().coerceIn(0, 99)
-        listener.onProgress(pct, current)
+    /**
+     * Coalesces raw (processed, total) tuples into [ProgressListener]
+     * callbacks carrying percentage, speed, ETA and elapsed wall-clock
+     * time. Every compress/extract path funnels here so the UI sees a
+     * consistent stream regardless of format. Percentage is clamped to
+     * 0..99 while work is in flight — the 100% frame is only emitted by
+     * [finish] once the operation actually completed.
+     */
+    internal class ProgressReporter(private val listener: ProgressListener?) {
+        private val startMs = System.currentTimeMillis()
+        private var lastProcessed = 0L
+        private var lastTotal = 1L
+        private var lastName = ""
+
+        fun report(processed: Long, total: Long, current: String) {
+            if (listener == null) return
+            val safeTotal = total.coerceAtLeast(1L)
+            lastProcessed = processed
+            lastTotal = safeTotal
+            lastName = current
+            val now = System.currentTimeMillis()
+            val elapsedMs = now - startMs
+            val elapsedSec = elapsedMs / 1000
+            val pct = ((processed * 100) / safeTotal).toInt().coerceIn(0, 99)
+            val speed = if (elapsedSec > 0) processed / elapsedSec else 0L
+            val etaSec = if (speed > 0) (safeTotal - processed) / speed else 0L
+            listener.onProgress(pct, current, speed, etaSec, safeTotal, processed, elapsedSec)
+        }
+
+        fun finish(current: String) {
+            if (listener == null) return
+            val now = System.currentTimeMillis()
+            val elapsedSec = (now - startMs) / 1000
+            val speed = if (elapsedSec > 0) lastProcessed / elapsedSec else 0L
+            listener.onProgress(100, current, speed, 0L, lastTotal, lastProcessed, elapsedSec)
+        }
     }
 
-    private fun emitProgressWithSpeed(
-        listener: ProgressListener?, processed: Long, total: Long, current: String, startTime: Long
-    ) {
-        if (listener == null) return
-        val pct = ((processed * 100) / total).toInt().coerceIn(0, 99)
-        val elapsedMs = System.currentTimeMillis() - startTime
-        val elapsedSec = maxOf(elapsedMs / 1000, 1)
-        val speed = processed / elapsedSec
-        val etaSec = if (speed > 0) (total - processed) / speed else 0
-        listener.onProgress(pct, current, speed, etaSec, total, processed)
+    /**
+     * Counts bytes pulled from the underlying stream. Used on the
+     * COMPRESSED side so progress percentages are measured against
+     * `archive.length()` instead of raw decompressed output, which
+     * overshoots to 99% on any compressible input. Deliberately does
+     * not extend FilterInputStream — `in` is a keyword in Kotlin.
+     */
+    internal class CountingInputStream(source: InputStream) : InputStream() {
+        private val source: InputStream = source
+        var count: Long = 0L
+            private set
+
+        override fun read(): Int {
+            val b = source.read()
+            if (b >= 0) count++
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = source.read(b, off, len)
+            if (n > 0) count += n
+            return n
+        }
+
+        override fun close() = source.close()
     }
 }

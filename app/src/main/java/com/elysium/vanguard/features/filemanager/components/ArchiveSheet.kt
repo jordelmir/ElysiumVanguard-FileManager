@@ -294,8 +294,9 @@ fun ArchiveSheet(
                     )
                     if (format == ArchiveFormat.ZIP) {
                         Text(
-                            "ZIP uses legacy ZipCrypto — compatible with every archiver " +
-                                "but weak against a determined attacker.",
+                            "ZIP passwords use AES-256 (WinZip AES) — the same " +
+                                "strong encryption 7-Zip and WinRAR use. Entry " +
+                                "names remain visible in the archive listing.",
                             color = TitanColors.NeonYellow.copy(alpha = 0.7f),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
@@ -703,24 +704,32 @@ private fun ArchiveProgressPanel(progress: ArchiveProgress) {
                 maxLines = 1
             )
         }
-        // Speed and ETA row
-        if (!progress.done && progress.speed > 0) {
+        // Elapsed / speed / ETA row
+        if (!progress.done) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Speed: ${formatBytes(progress.speed)}/s",
+                    text = "Elapsed: ${formatDuration(progress.elapsedSeconds)}",
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
-                Text(
-                    text = "ETA: ${formatDuration(progress.etaSeconds)}",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+                if (progress.speed > 0) {
+                    Text(
+                        text = "Speed: ${formatBytes(progress.speed)}/s",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "ETA: ${formatDuration(progress.etaSeconds)}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
         }
         if (progress.error != null) {
@@ -757,5 +766,6 @@ data class ArchiveProgress(
     val speed: Long = 0,
     val etaSeconds: Long = 0,
     val totalBytes: Long = 0,
-    val processedBytes: Long = 0
+    val processedBytes: Long = 0,
+    val elapsedSeconds: Long = 0
 )

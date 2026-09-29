@@ -23,9 +23,9 @@ enum class ArchiveFormat(
         displayName = "ZIP",
         canCreate = true,
         canExtract = true,
-        // ZipCrypto only — strong enough for the casual case, weak
-        // against a determined attacker. We document the limitation
-        // in the compress sheet so the user isn't surprised.
+        // AES-256 by default via zip4j (WinZip AES), legacy ZipCrypto
+        // available when explicitly selected. Both are readable by
+        // 7-Zip, WinRAR, and every modern archiver.
         supportsPassword = true,
         multiFile = true,
         extensions = listOf("zip")

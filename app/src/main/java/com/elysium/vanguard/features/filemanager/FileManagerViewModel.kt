@@ -490,12 +490,14 @@ class FileManagerViewModel @Inject constructor(
                             speed: Long,
                             etaSeconds: Long,
                             totalBytes: Long,
-                            processedBytes: Long
+                            processedBytes: Long,
+                            elapsedSeconds: Long
                         ) {
                             _archiveProgress.value = ArchiveProgress(
                                 percentage, currentFile, done = false,
                                 speed = speed, etaSeconds = etaSeconds,
-                                totalBytes = totalBytes, processedBytes = processedBytes
+                                totalBytes = totalBytes, processedBytes = processedBytes,
+                                elapsedSeconds = elapsedSeconds
                             )
                         }
                     },
@@ -536,12 +538,14 @@ class FileManagerViewModel @Inject constructor(
                             speed: Long,
                             etaSeconds: Long,
                             totalBytes: Long,
-                            processedBytes: Long
+                            processedBytes: Long,
+                            elapsedSeconds: Long
                         ) {
                             _archiveProgress.value = ArchiveProgress(
                                 percentage, currentFile, done = false,
                                 speed = speed, etaSeconds = etaSeconds,
-                                totalBytes = totalBytes, processedBytes = processedBytes
+                                totalBytes = totalBytes, processedBytes = processedBytes,
+                                elapsedSeconds = elapsedSeconds
                             )
                         }
                     }

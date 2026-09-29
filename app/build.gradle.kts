@@ -332,6 +332,12 @@ dependencies {
     implementation("com.github.luben:zstd-jni:1.5.6-1")
     // JUnrar for RAR/RAR5 extraction (pure Java, no native libs needed)
     implementation("com.github.junrar:junrar:7.5.5")
+    // zip4j — AES-256 / ZipCrypto password-protected ZIP create + extract,
+    // Zip64, split (multi-part) archives, and CRC-verified extraction.
+    // commons-compress 1.26 can neither write nor read encrypted ZIPs,
+    // so this is the piece that makes "compress with password, extract
+    // with password" actually work end-to-end.
+    implementation("net.lingala.zip4j:zip4j:2.11.5")
     // Apache Commons Compress 1.26+ supports CAB, ARJ, CHM, CPIO, DMG, ISO, etc.
     // For LZ4/LZ5/Lizard: use lz4-java
     implementation("org.lz4:lz4-java:1.8.0")

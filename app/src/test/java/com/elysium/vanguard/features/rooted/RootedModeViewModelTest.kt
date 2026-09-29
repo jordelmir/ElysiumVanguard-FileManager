@@ -41,6 +41,27 @@ class RootedModeViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private fun newVm(probe: FakeProbe, prefs: InMemoryRootedModePrefs): RootedModeViewModel {
+        val vm = RootedModeViewModel(probe, prefs)
+        // init's refreshStatus hops to Dispatchers.IO and resumes on
+        // Main. If the test method returned (and tearDown reset Main)
+        // before that resume, the coroutine machinery throws
+        // "Module with the Main dispatcher had failed to initialize"
+        // — a FATAL uncaught exception that kotlinx-coroutines-test's
+        // ExceptionCollector attributes to the next runTest in the
+        // suite, failing an unrelated class. Waiting here keeps the
+        // whole lifecycle inside the setMain window.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (vm.state.value.status == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(1)
+        }
+        assertTrue(
+            "refreshStatus never completed — async probe did not land",
+            vm.state.value.status != null
+        )
+        return vm
+    }
+
     @Test
     fun `init loads persisted prefs into the state`() {
         val probe = FakeProbe(fullyRooted())
@@ -49,7 +70,7 @@ class RootedModeViewModelTest {
             setNamespaceSpec(NamespaceSpec.FULL_SANDBOX.copy(user = true))
             setCgroupSpec(CgroupSpec.BACKGROUND)
         }
-        val vm = RootedModeViewModel(probe, prefs)
+        val vm = newVm(probe, prefs)
 
         val state = vm.state.value
         assertTrue(state.rootedModeEnabled)
@@ -61,7 +82,7 @@ class RootedModeViewModelTest {
     fun `onRootedModeToggle persists and updates state`() {
         val probe = FakeProbe(fullyRooted())
         val prefs = InMemoryRootedModePrefs()
-        val vm = RootedModeViewModel(probe, prefs)
+        val vm = newVm(probe, prefs)
 
         vm.onRootedModeToggle(true)
         assertTrue(prefs.isRootedModeEnabled())
@@ -76,7 +97,7 @@ class RootedModeViewModelTest {
     fun `onUserNamespaceToggle persists the new spec`() {
         val probe = FakeProbe(fullyRooted())
         val prefs = InMemoryRootedModePrefs()
-        val vm = RootedModeViewModel(probe, prefs)
+        val vm = newVm(probe, prefs)
 
         vm.onUserNamespaceToggle(true)
         assertTrue(prefs.namespaceSpec().user)
@@ -90,7 +111,7 @@ class RootedModeViewModelTest {
     fun `onCgroupSpecChange persists the new spec`() {
         val probe = FakeProbe(fullyRooted())
         val prefs = InMemoryRootedModePrefs()
-        val vm = RootedModeViewModel(probe, prefs)
+        val vm = newVm(probe, prefs)
 
         val custom = CgroupSpec(cpuWeight = 250, pidsMax = 128)
         vm.onCgroupSpecChange(custom)
@@ -107,25 +128,21 @@ class RootedModeViewModelTest {
     fun `refreshStatus triggers a probe call and updates the state`() {
         val probe = FakeProbe(fullyRooted())
         val prefs = InMemoryRootedModePrefs()
-        val vm = RootedModeViewModel(probe, prefs)
+        val vm = newVm(probe, prefs)
         // The init {} block:
         //   1. Synchronously loads persisted prefs.
         //   2. Asynchronously calls probe() via
         //      viewModelScope.launch { withContext(IO) { ... } }.
         //
-        // We can verify (1) deterministically (the
-        // prefs are loaded into state before the
-        // constructor returns). We can't verify
-        // (2) deterministically without controlling
-        // the IO dispatcher. So we just verify the
-        // synchronous behavior.
+        // newVm() waits for (2) to land, so both the sync state and
+        // the probe side-effect are deterministic here.
         val state = vm.state.value
         assertFalse("rooted mode defaults to false", state.rootedModeEnabled)
         assertEquals(NamespaceSpec.FULL_SANDBOX, state.namespaceSpec)
         assertEquals(CgroupSpec.NONE, state.cgroupSpec)
-        // The FakeProbe MAY have been called by the
-        // init's coroutine; we don't assert on the
-        // count because it's timing-dependent.
+        // newVm() waits for init's async refreshStatus, so the probe
+        // has definitely been called by now.
+        assertTrue("probe should have been called", probe.callCount >= 1)
     }
 }
 
