@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -153,6 +154,11 @@ fun FileManagerScreen(
     val actionViewModel: FileActionViewModel = hiltViewModel()
     val actionState by actionViewModel.state.collectAsState()
     var fileForActions: TitanFile? by remember { mutableStateOf(null) }
+    // Password-gated file actions (encrypt / decrypt / EncFS) are
+    // resolved with an empty password; this holds the action while
+    // the prompt dialog collects the real one.
+    var pendingPasswordAction by remember { mutableStateOf<FileAction?>(null) }
+    var actionPasswordInput by remember { mutableStateOf("") }
     // Auto-dismiss the sheet when the user taps an action (the VM
     // closes itself, but we also clear the local file pointer).
     LaunchedEffect(actionState.lastOutcome) {
@@ -822,7 +828,12 @@ fun FileManagerScreen(
                         fileName = fileForActionsValue.name,
                         actions = actionState.actions,
                         onActionClick = { action ->
-                            actionViewModel.execute(action)
+                            if (actionRequiresPassword(action)) {
+                                actionPasswordInput = ""
+                                pendingPasswordAction = action
+                            } else {
+                                actionViewModel.execute(action)
+                            }
                         },
                         onDismiss = {
                             fileForActions = null
@@ -831,8 +842,101 @@ fun FileManagerScreen(
                     )
                 }
             }
+
+            // Password prompt for password-gated actions (encrypt /
+            // decrypt / EncFS open + create). The resolver emits those
+            // with an empty password, so the action only dispatches
+            // once the user has actually typed one.
+            pendingPasswordAction?.let { pendingAction ->
+                ActionPasswordDialog(
+                    actionLabel = pendingAction.label,
+                    password = actionPasswordInput,
+                    onPasswordChange = { actionPasswordInput = it },
+                    onConfirm = {
+                        if (actionPasswordInput.isNotEmpty()) {
+                            actionViewModel.execute(withActionPassword(pendingAction, actionPasswordInput))
+                            pendingPasswordAction = null
+                            actionPasswordInput = ""
+                        }
+                    },
+                    onDismiss = {
+                        pendingPasswordAction = null
+                        actionPasswordInput = ""
+                    },
+                )
+            }
         }
     }
+}
+
+/**
+ * True for file actions that must not run with an empty password
+ * (the resolver ships them with `password = ""` as a placeholder).
+ */
+private fun actionRequiresPassword(action: FileAction): Boolean = when (action) {
+    is FileAction.EncryptFile -> action.password.isEmpty()
+    is FileAction.DecryptFile -> action.password.isEmpty()
+    is FileAction.MountEncFsVolume -> action.password.isEmpty()
+    is FileAction.CreateEncFsVolume -> action.password.isEmpty()
+    else -> false
+}
+
+/** Returns [action] with [password] filled in (no-op for other actions). */
+private fun withActionPassword(action: FileAction, password: String): FileAction = when (action) {
+    is FileAction.EncryptFile -> action.copy(password = password)
+    is FileAction.DecryptFile -> action.copy(password = password)
+    is FileAction.MountEncFsVolume -> action.copy(password = password)
+    is FileAction.CreateEncFsVolume -> action.copy(password = password)
+    else -> action
+}
+
+/**
+ * Modal that collects the password for a password-gated file action
+ * before it is dispatched to [FileActionViewModel].
+ */
+@Composable
+private fun ActionPasswordDialog(
+    actionLabel: String,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = actionLabel) },
+        text = {
+            Column {
+                Text(
+                    text = "Enter the password for this operation",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                TextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    placeholder = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = password.isNotEmpty(),
+            ) {
+                Text("Continue")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 @Composable
 fun StorageMetricsBar(stats: StorageStats) {

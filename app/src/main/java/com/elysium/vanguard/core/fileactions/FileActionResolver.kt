@@ -43,11 +43,14 @@ object FileActionResolver {
 
     /**
      * The list of [FileAction]s available for
-     * [file] in [context]. The list is empty if
-     * the file's extension is not recognized
-     * (apart from the universal
-     * [FileAction.ScanForMalware], which is
-     * appended to every non-empty list).
+     * [file] in [context]. Descriptor files
+     * (`.git` / `.smb` / `.usbotg` / `.elysv`)
+     * return their dedicated action; every other
+     * file gets the four universal actions
+     * (encrypt / chmod / chown / symlink) after
+     * any extension-matched actions, and
+     * [FileAction.ScanForMalware] is appended to
+     * every non-empty list.
      *
      * The order of the returned list is the
      * order in which the actions should be
@@ -275,6 +278,45 @@ object FileActionResolver {
                 linkPath = "${file.parentFile?.absolutePath}/${file.name}.link",
             )
         )
+
+        // Universal "Create EncFS volume" action
+        // (available for any directory). Creates a new EncFS volume.
+        if (file.isDirectory) {
+            actions.add(
+                FileAction.CreateEncFsVolume(
+                    id = "encfs-create-${name}",
+                    volumePath = "${file.absolutePath}.encfs",
+                    password = "", // will be prompted by UI
+                )
+            )
+        }
+
+        // Universal "Mount EncFS volume" action
+        // (available for .encfs directories or EncFS volume files).
+        val isEncFs = ext == "encfs" || (file.isDirectory && File("${file.absolutePath}/.encfs6.xml").exists())
+        if (isEncFs) {
+            actions.add(
+                FileAction.MountEncFsVolume(
+                    id = "encfs-mount-${name}",
+                    volumePath = file.absolutePath,
+                    password = "", // will be prompted by UI
+                    mountPoint = "${file.parentFile?.absolutePath}/${file.nameWithoutExtension}_mount",
+                )
+            )
+        }
+
+        // Universal "Unmount EncFS volume" action
+        // (available for mounted EncFS volumes).
+        // In a real implementation, we'd check if the path is a mounted EncFS volume.
+        // For now, offer unmount for directories that look like mount points.
+        if (file.isDirectory && file.name.endsWith("_mount")) {
+            actions.add(
+                FileAction.UnmountEncFsVolume(
+                    id = "encfs-unmount-${name}",
+                    mountPoint = file.absolutePath,
+                )
+            )
+        }
 
         // PHASE 110 — append a malware scan
         // action to every list of extension-

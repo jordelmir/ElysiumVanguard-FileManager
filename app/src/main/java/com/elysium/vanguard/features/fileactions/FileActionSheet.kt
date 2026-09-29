@@ -22,7 +22,10 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DiscFull
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.InstallDesktop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
@@ -235,4 +238,8 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
     is FileAction.CreateSymlink -> Icons.Filled.ContentCopy to Color(0xFF64B5F6)
     is FileAction.ChangePermissions -> Icons.Filled.Settings to Color(0xFFFFB74D)
     is FileAction.ChangeOwnership -> Icons.Filled.Person to Color(0xFFA1887F)
+    // PHASE 112 — EncFS actions
+    is FileAction.MountEncFsVolume -> Icons.Filled.FolderOpen to Color(0xFF64B5F6)
+    is FileAction.UnmountEncFsVolume -> Icons.Filled.Lock to Color(0xFF81C784)
+    is FileAction.CreateEncFsVolume -> Icons.Filled.Lock to Color(0xFF64B5F6)
 }

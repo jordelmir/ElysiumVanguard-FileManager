@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.features.filemanager.FileManagerRepository
 import com.elysium.vanguard.core.encryption.EncryptedVault
+import com.elysium.vanguard.core.encryption.EncFsVolume
 import com.elysium.vanguard.core.fileactions.FileAction
 import com.elysium.vanguard.core.fileactions.FileActionContext
 import com.elysium.vanguard.core.fileactions.FileActionContext.LinuxDistroTarget
@@ -75,6 +76,8 @@ class FileActionViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(FileActionUiState())
     val state: StateFlow<FileActionUiState> = _state.asStateFlow()
+
+    private val mountedEncFsVolumes = mutableMapOf<String, EncFsVolume>()
 
     fun openActionSheet(file: File) {
         val context = buildContext()
@@ -374,6 +377,61 @@ class FileActionViewModel @Inject constructor(
                         message = "chown failed: ${e.message}"
                     )
                 }
+            }
+            is FileAction.MountEncFsVolume -> {
+                // Unlock (mount) an EncFS volume: verify the
+                // password against the volume's verifier file
+                // and register it as open for this session.
+                try {
+                    val volume = EncFsVolume.open(
+                        File(action.volumePath),
+                        action.password.toCharArray(),
+                    )
+                    if (volume != null) {
+                        mountedEncFsVolumes[action.mountPoint] = volume
+                        FileActionOutcome.Success(
+                            message = "Opened EncFS volume ${File(action.volumePath).name} (${volume.listFiles().size} file(s))"
+                        )
+                    } else {
+                        FileActionOutcome.Failure(
+                            message = "Failed to open EncFS volume (missing .encfs6.xml or wrong password)"
+                        )
+                    }
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "Mount failed: ${e.message}"
+                    )
+                }
+            }
+            is FileAction.UnmountEncFsVolume -> {
+                // Close an EncFS volume opened in this session.
+                val closed = mountedEncFsVolumes.remove(action.mountPoint)
+                if (closed != null) {
+                    FileActionOutcome.Success(
+                        message = "Unmounted EncFS volume at ${action.mountPoint}"
+                    )
+                } else {
+                    FileActionOutcome.Failure(
+                        message = "No unlocked EncFS volume at ${action.mountPoint}"
+                    )
+                }
+            }
+            is FileAction.CreateEncFsVolume -> {
+                // Create a new EncFS volume directory
+                // (.encfs6.xml config + verifier + encrypted files).
+                try {
+                    EncFsVolume.create(File(action.volumePath), action.password.toCharArray())
+                    FileActionOutcome.Success(
+                        message = "Created EncFS volume at ${action.volumePath}"
+                    )
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "Create failed: ${e.message}"
+                    )
+                }
+            }
+            else -> {
+                FileActionOutcome.Failure(message = "Unknown action type: ${action.javaClass.simpleName}")
             }
         }
 

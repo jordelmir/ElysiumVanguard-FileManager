@@ -84,25 +84,39 @@ class FileActionViewModelTest {
         val state = vm.state.value
         assertTrue("sheet should be visible", state.sheetVisible)
         assertEquals(deb, state.targetFile)
-        // PHASE 110 — InstallDebPackage + ScanForMalware.
-        assertEquals(2, state.actions.size)
+        // PHASE 110/112 — InstallDebPackage + the four universal
+        // actions (encrypt / chmod / chown / symlink) +
+        // ScanForMalware = 6.
+        assertEquals(6, state.actions.size)
         assertTrue(state.actions.first() is FileAction.InstallDebPackage)
+        assertTrue(state.actions.any { it is FileAction.EncryptFile })
+        assertTrue(state.actions.any { it is FileAction.ScanForMalware })
     }
 
     @Test
-    fun `openActionSheet with a txt file offers nothing`() {
+    fun `openActionSheet with a txt file offers only universal actions`() {
         val env = FakeEnvironment()
         val vm = buildViewModel(env)
         vm.openActionSheet(File("readme.txt"))
-        assertTrue(vm.state.value.actions.isEmpty())
+        val actions = vm.state.value.actions
+        // PHASE 112 — no extension match, but the four universal
+        // actions + ScanForMalware are always offered.
+        assertEquals(5, actions.size)
+        assertTrue(actions.none { it is FileAction.InstallDebPackage })
+        assertTrue(actions.any { it is FileAction.EncryptFile })
+        assertTrue(actions.any { it is FileAction.ChangePermissions })
+        assertTrue(actions.any { it is FileAction.CreateSymlink })
+        assertTrue(actions.any { it is FileAction.ScanForMalware })
     }
 
     @Test
-    fun `openActionSheet with no installed distros offers nothing for deb`() {
+    fun `openActionSheet with no installed distros offers no install action for deb`() {
         val env = FakeEnvironment(installedDistros = emptyList())
         val vm = buildViewModel(env)
         vm.openActionSheet(File("test.deb"))
-        assertTrue(vm.state.value.actions.isEmpty())
+        val actions = vm.state.value.actions
+        assertTrue(actions.none { it is FileAction.InstallDebPackage })
+        assertTrue(actions.any { it is FileAction.EncryptFile })
     }
 
     @Test

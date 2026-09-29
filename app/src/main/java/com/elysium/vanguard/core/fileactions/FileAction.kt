@@ -120,6 +120,45 @@ sealed class FileAction {
     }
 
     /**
+     * Mount an EncFS volume.
+     */
+    data class MountEncFsVolume(
+        override val id: String,
+        val volumePath: String,
+        val password: String,
+        val mountPoint: String,
+    ) : FileAction() {
+        override val label: String = "Mount EncFS volume"
+        override val description: String = "Mount encrypted EncFS volume at $mountPoint"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
+     * Unmount an EncFS volume.
+     */
+    data class UnmountEncFsVolume(
+        override val id: String,
+        val mountPoint: String,
+    ) : FileAction() {
+        override val label: String = "Unmount EncFS volume"
+        override val description: String = "Unmount EncFS volume at $mountPoint"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
+     * Create a new EncFS volume.
+     */
+    data class CreateEncFsVolume(
+        override val id: String,
+        val volumePath: String,
+        val password: String,
+    ) : FileAction() {
+        override val label: String = "Create EncFS volume"
+        override val description: String = "Create new encrypted EncFS volume at $volumePath"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
      * Install a Debian package (`.deb`) inside
      * a Linux distro using `apt` / `dpkg`.
      */

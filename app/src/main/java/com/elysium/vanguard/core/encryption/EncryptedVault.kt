@@ -1,21 +1,16 @@
 package com.elysium.vanguard.core.encryption
 
-import com.google.crypto.tink.Aead
-import com.google.crypto.tink.BinaryKeysetReader
-import com.google.crypto.tink.BinaryKeysetWriter
-import com.google.crypto.tink.CleartextKeysetHandle
-import com.google.crypto.tink.KeysetHandle
-import com.google.crypto.tink.aead.AeadConfig
-import com.google.crypto.tink.aead.AeadKeyTemplates
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.security.SecureRandom
-import java.security.spec.KeySpec
 import java.util.Arrays
+import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Encrypted Vault — AES-256-GCM encrypted container with password-based key derivation.
@@ -24,21 +19,19 @@ import javax.crypto.spec.PBEKeySpec
  * ```
  * offset  size  field
  * ------  ----  --------------------------------------------------------
- *   0       8   magic  = "ELYSVLT" (ASCII + null)
- *   8       1   version = 0x01
- *   9      16   salt (for PBKDF2)
- *  25      12   nonce (for GCM)
- *  37       *   ciphertext (encrypted with AES-256-GCM)
+ *   0       7   magic  = "ELYSVLT" (ASCII)
+ *   7       1   version = 0x01
+ *   8      16   salt (for PBKDF2)
+ *  24      12   nonce (for GCM)
+ *  36       *   ciphertext + 16-byte GCM tag
  * ```
  *
  * Key derivation: PBKDF2-HMAC-SHA256, 100,000 iterations, 256-bit key.
- * This is compatible with standard crypto libraries and resistant to brute force.
+ * The derived key encrypts the payload directly (JCA `AES/GCM/NoPadding`),
+ * so encrypt and decrypt are exact inverses: same password → same key →
+ * successful roundtrip; wrong password → AEAD tag mismatch → exception.
  */
 class EncryptedVault {
-
-    init {
-        AeadConfig.register()
-    }
 
     companion object {
         private val MAGIC = "ELYSVLT".toByteArray(Charsets.UTF_8)
@@ -48,6 +41,8 @@ class EncryptedVault {
         private const val TAG_SIZE = 16
         private const val PBKDF2_ITERATIONS = 100_000
         private const val KEY_SIZE = 256
+        private const val GCM_TAG_BITS = TAG_SIZE * 8
+        private const val CIPHER = "AES/GCM/NoPadding"
 
         /**
          * Derive a 256-bit AES key from password using PBKDF2-HMAC-SHA256.
@@ -59,18 +54,18 @@ class EncryptedVault {
         }
 
         /**
-         * Create a new encrypted container from plaintext using password.
+         * Create an encrypted container from plaintext using a password.
+         * The salt is random per container, so the same password produces
+         * a different key (and different ciphertext) every time.
          */
         fun encrypt(password: CharArray, plaintext: ByteArray): ByteArray {
             val salt = ByteArray(SALT_SIZE).also { SecureRandom().nextBytes(it) }
             val key = deriveKey(password, salt)
-
-            val keyHandle = KeysetHandle.generateNew(AeadKeyTemplates.AES256_GCM)
-            // Replace the generated key with our derived key
-            val aead = keyHandle.getPrimitive(Aead::class.java)
-
             val nonce = ByteArray(NONCE_SIZE).also { SecureRandom().nextBytes(it) }
-            val ciphertext = aead.encrypt(plaintext, nonce)
+
+            val cipher = Cipher.getInstance(CIPHER)
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
+            val ciphertext = cipher.doFinal(plaintext)
 
             val out = ByteArrayOutputStream()
             DataOutputStream(out).use { dos ->
@@ -84,7 +79,7 @@ class EncryptedVault {
         }
 
         /**
-         * Decrypt a container using password. Returns plaintext or throws on failure.
+         * Decrypt a container using a password. Returns plaintext or throws on failure.
          */
         fun decrypt(password: CharArray, container: ByteArray): ByteArray {
             if (container.size < MIN_CONTAINER_SIZE) {
@@ -117,34 +112,17 @@ class EncryptedVault {
             dis.readFully(ciphertext)
 
             val key = deriveKey(password, salt)
-
-            // We need to recreate the keyset with our derived key
-            // Since Tink doesn't directly support arbitrary key material for AES256_GCM,
-            // we use the standard AEAD with the derived key by creating a raw keyset
-            val keyHandle = createKeyHandleFromRawKey(key)
-            val aead = keyHandle.getPrimitive(Aead::class.java)
-
             return try {
-                aead.decrypt(ciphertext, nonce)
+                val cipher = Cipher.getInstance(CIPHER)
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
+                cipher.doFinal(ciphertext)
             } catch (e: Exception) {
                 throw EncryptedVaultException("Decryption failed: wrong password or corrupted data", e)
             }
         }
 
-        private fun createKeyHandleFromRawKey(key: ByteArray): KeysetHandle {
-            val baos = ByteArrayOutputStream()
-            val dos = DataOutputStream(baos)
-            dos.writeInt(AeadKeyTemplates.AES256_GCM.toString().hashCode()) // Key type ID
-            dos.writeInt(key.size)
-            dos.write(key)
-            dos.flush()
-
-            val bais = ByteArrayInputStream(baos.toByteArray())
-            return CleartextKeysetHandle.read(BinaryKeysetReader.withInputStream(bais))
-        }
-
-        private const val HEADER_SIZE = 8 + 1 + SALT_SIZE + NONCE_SIZE
-        private const val MIN_CONTAINER_SIZE = HEADER_SIZE + TAG_SIZE
+        private val HEADER_SIZE = MAGIC.size + 1 + SALT_SIZE + NONCE_SIZE
+        private val MIN_CONTAINER_SIZE = HEADER_SIZE + TAG_SIZE
     }
 }
 
