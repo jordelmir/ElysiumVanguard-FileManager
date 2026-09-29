@@ -79,6 +79,7 @@ fun DashboardScreen(
     onNavigateToCommandCore: (() -> Unit)? = null,
     onNavigateToLocalAgent: (() -> Unit)? = null,
     onNavigateToDesktop: (() -> Unit)? = null,
+    onNavigateToTasks: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var showColorDialog by remember { mutableStateOf(false) }
@@ -156,6 +157,16 @@ fun DashboardScreen(
             neonColor = gPrimary,
             onClick = onNavigateToWorkspaces ?: {},
             gradientBg = moduleSurface(gPrimary)
+        ),
+        // Scheduled tasks / auto-tasks: recurring trash purges and
+        // folder syncs managed by WorkManager.
+        PortalItem(
+            title = "TASKS",
+            subtitle = "SCHEDULE · COPY · PURGE",
+            icon = Icons.Default.Schedule,
+            neonColor = gSecondary,
+            onClick = onNavigateToTasks ?: {},
+            gradientBg = moduleSurface(gSecondary)
         ),
         // PHASE 10.5 — Elysium Word. The full Word clone: font,
         // typography, spacing, alignment, lists, headings, etc.

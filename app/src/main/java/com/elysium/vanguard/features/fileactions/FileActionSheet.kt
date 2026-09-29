@@ -240,6 +240,7 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
     is FileAction.ChangeOwnership -> Icons.Filled.Person to Color(0xFFA1887F)
     // PHASE 112 — EncFS actions
     is FileAction.MountEncFsVolume -> Icons.Filled.FolderOpen to Color(0xFF64B5F6)
+    is FileAction.OpenEncFsVolume -> Icons.Filled.FolderOpen to Color(0xFF81C784)
     is FileAction.UnmountEncFsVolume -> Icons.Filled.Lock to Color(0xFF81C784)
     is FileAction.CreateEncFsVolume -> Icons.Filled.Lock to Color(0xFF64B5F6)
 }

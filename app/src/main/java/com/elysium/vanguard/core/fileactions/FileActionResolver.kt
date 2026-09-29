@@ -291,31 +291,37 @@ object FileActionResolver {
             )
         }
 
-        // Universal "Mount EncFS volume" action
-        // (available for .encfs directories or EncFS volume files).
+        // Universal EncFS actions. For a volume that is already unlocked
+        // in this session (mounted), offer direct open + unmount; otherwise
+        // offer the password-gated mount.
         val isEncFs = ext == "encfs" || (file.isDirectory && File("${file.absolutePath}/.encfs6.xml").exists())
         if (isEncFs) {
-            actions.add(
-                FileAction.MountEncFsVolume(
-                    id = "encfs-mount-${name}",
-                    volumePath = file.absolutePath,
-                    password = "", // will be prompted by UI
-                    mountPoint = "${file.parentFile?.absolutePath}/${file.nameWithoutExtension}_mount",
+            val isMounted = context.mountedEncFsPaths.any {
+                it == file.absolutePath || File(it).canonicalPath == file.canonicalPath
+            }
+            if (isMounted) {
+                actions.add(
+                    FileAction.OpenEncFsVolume(
+                        id = "encfs-open-$name",
+                        volumePath = file.absolutePath,
+                    )
                 )
-            )
-        }
-
-        // Universal "Unmount EncFS volume" action
-        // (available for mounted EncFS volumes).
-        // In a real implementation, we'd check if the path is a mounted EncFS volume.
-        // For now, offer unmount for directories that look like mount points.
-        if (file.isDirectory && file.name.endsWith("_mount")) {
-            actions.add(
-                FileAction.UnmountEncFsVolume(
-                    id = "encfs-unmount-${name}",
-                    mountPoint = file.absolutePath,
+                actions.add(
+                    FileAction.UnmountEncFsVolume(
+                        id = "encfs-unmount-$name",
+                        mountPoint = file.absolutePath,
+                    )
                 )
-            )
+            } else {
+                actions.add(
+                    FileAction.MountEncFsVolume(
+                        id = "encfs-mount-${name}",
+                        volumePath = file.absolutePath,
+                        password = "", // will be prompted by UI
+                        mountPoint = "${file.parentFile?.absolutePath}/${file.nameWithoutExtension}_mount",
+                    )
+                )
+            }
         }
 
         // PHASE 110 — append a malware scan

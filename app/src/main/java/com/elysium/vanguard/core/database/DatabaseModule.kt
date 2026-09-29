@@ -29,7 +29,8 @@ object DatabaseModule {
                 TitanDatabase.MIGRATION_4_5,
                 TitanDatabase.MIGRATION_5_6,
                 TitanDatabase.MIGRATION_6_7,
-                TitanDatabase.MIGRATION_7_8
+                TitanDatabase.MIGRATION_7_8,
+                TitanDatabase.MIGRATION_8_9
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
@@ -73,5 +74,10 @@ object DatabaseModule {
     @Provides
     fun provideCloudConnectionDao(database: TitanDatabase): CloudConnectionDao {
         return database.cloudConnectionDao()
+    }
+
+    @Provides
+    fun provideScheduledTaskDao(database: TitanDatabase): com.elysium.vanguard.core.tasks.ScheduledTaskDao {
+        return database.scheduledTaskDao()
     }
 }

@@ -1,6 +1,8 @@
 package com.elysium.vanguard.features.fileactions
 
 import android.content.Context
+import com.elysium.vanguard.core.encryption.EncFsVolume
+import com.elysium.vanguard.core.encryption.MountedVolumeRegistry
 import com.elysium.vanguard.core.fileactions.DiskImageFormat
 import com.elysium.vanguard.features.filemanager.FileManagerRepository
 import com.elysium.vanguard.core.fileactions.FileAction
@@ -49,7 +51,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
@@ -62,6 +66,8 @@ import java.io.File
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FileActionViewModelTest {
+
+    @get:Rule val tempFolder = TemporaryFolder()
 
     @Before
     fun setUp() {
@@ -330,6 +336,99 @@ class FileActionViewModelTest {
         )
     }
 
+    @Test
+    fun `execute MountEncFsVolume registers the volume and exposes lastOpenedVolumePath`() = runTest {
+        val dir = tempFolder.newFolder("vol1.encfs")
+        EncFsVolume.create(dir, "secret".toCharArray())
+        val registry = MountedVolumeRegistry()
+        val vm = buildViewModel(FakeEnvironment(), encFsRegistry = registry)
+
+        vm.execute(
+            FileAction.MountEncFsVolume(
+                id = "m1",
+                volumePath = dir.absolutePath,
+                password = "secret",
+                mountPoint = "${dir.absolutePath}_mount",
+            )
+        )
+        advanceUntilIdle()
+
+        val outcome = vm.state.value.lastOutcome
+        assertTrue("mount should succeed, got $outcome", outcome is FileActionOutcome.Success)
+        assertTrue("registry should hold the volume", registry.isMounted(dir.absolutePath))
+        assertEquals(dir.absolutePath, vm.lastOpenedVolumePath.value)
+
+        vm.clearLastOpenedVolumePath()
+        assertNull(vm.lastOpenedVolumePath.value)
+    }
+
+    @Test
+    fun `execute MountEncFsVolume with wrong password fails and registers nothing`() = runTest {
+        val dir = tempFolder.newFolder("vol2.encfs")
+        EncFsVolume.create(dir, "secret".toCharArray())
+        val registry = MountedVolumeRegistry()
+        val vm = buildViewModel(FakeEnvironment(), encFsRegistry = registry)
+
+        vm.execute(
+            FileAction.MountEncFsVolume(
+                id = "m2",
+                volumePath = dir.absolutePath,
+                password = "wrong",
+                mountPoint = "x",
+            )
+        )
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.lastOutcome is FileActionOutcome.Failure)
+        assertTrue(!registry.isMounted(dir.absolutePath))
+        assertNull(vm.lastOpenedVolumePath.value)
+    }
+
+    @Test
+    fun `execute OpenEncFsVolume on an unlocked volume sets lastOpenedVolumePath`() = runTest {
+        val dir = tempFolder.newFolder("vol3.encfs")
+        val volume = EncFsVolume.create(dir, "secret".toCharArray())
+        val registry = MountedVolumeRegistry()
+        registry.mount(dir.absolutePath, volume)
+        val vm = buildViewModel(FakeEnvironment(), encFsRegistry = registry)
+
+        vm.execute(FileAction.OpenEncFsVolume(id = "o1", volumePath = dir.absolutePath))
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.lastOutcome is FileActionOutcome.Success)
+        assertEquals(dir.absolutePath, vm.lastOpenedVolumePath.value)
+    }
+
+    @Test
+    fun `execute OpenEncFsVolume on a locked volume fails`() = runTest {
+        val dir = tempFolder.newFolder("vol4.encfs")
+        EncFsVolume.create(dir, "secret".toCharArray())
+        val registry = MountedVolumeRegistry()
+        val vm = buildViewModel(FakeEnvironment(), encFsRegistry = registry)
+
+        vm.execute(FileAction.OpenEncFsVolume(id = "o2", volumePath = dir.absolutePath))
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.lastOutcome is FileActionOutcome.Failure)
+        assertNull(vm.lastOpenedVolumePath.value)
+    }
+
+    @Test
+    fun `openActionSheet offers Open and Unmount for a mounted volume`() {
+        val dir = tempFolder.newFolder("vol5.encfs")
+        val volume = EncFsVolume.create(dir, "secret".toCharArray())
+        val registry = MountedVolumeRegistry()
+        registry.mount(dir.absolutePath, volume)
+        val vm = buildViewModel(FakeEnvironment(), encFsRegistry = registry)
+
+        vm.openActionSheet(dir)
+        val actions = vm.state.value.actions
+        assertTrue(actions.any { it is FileAction.OpenEncFsVolume })
+        assertTrue(actions.any { it is FileAction.UnmountEncFsVolume })
+        assertTrue("mounted volume should not offer password mount",
+            actions.none { it is FileAction.MountEncFsVolume })
+    }
+
     // --- helpers ---
 
     private fun buildViewModel(
@@ -346,6 +445,7 @@ class FileActionViewModelTest {
         ),
         msiInstallerHandler: MsiInstallerHandler = MsiInstallerHandler(RecordingMsiInstaller()),
         malwareScanHandler: MalwareScanHandler = MalwareScanHandler(RecordingMalwareAnalyzer()),
+        encFsRegistry: MountedVolumeRegistry = MountedVolumeRegistry(),
     ): FileActionViewModel = FileActionViewModel(
         env = env,
         installPackageHandler = InstallPackageHandler(installer),
@@ -357,6 +457,7 @@ class FileActionViewModelTest {
         msiInstallerHandler = msiInstallerHandler,
         malwareScanHandler = malwareScanHandler,
         fileManagerRepository = FakeFileManagerRepository(),
+        encFsRegistry = encFsRegistry,
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(

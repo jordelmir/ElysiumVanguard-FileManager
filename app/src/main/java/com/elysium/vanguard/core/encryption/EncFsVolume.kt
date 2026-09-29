@@ -109,6 +109,21 @@ class EncFsVolume private constructor(
     fun getDecryptedName(encryptedName: String): String = nameMap[encryptedName] ?: encryptedName
 
     /**
+     * Remove an entry from the volume: deletes the encrypted blob and,
+     * when present, forgets its name-map entry. Returns `false` when the
+     * entry does not exist or the delete fails.
+     */
+    fun deleteEntry(encryptedName: String): Boolean {
+        val stored = File(rootDir, encryptedName)
+        if (!stored.isFile) return false
+        if (!stored.delete()) return false
+        if (nameMap.remove(encryptedName) != null) {
+            saveNameMap()
+        }
+        return true
+    }
+
+    /**
      * Deterministic obfuscation: HMAC-SHA256(masterKey, originalName),
      * truncated to 32 hex chars + ".enc". A suffix is appended when the
      * candidate is already used by a *different* original name.

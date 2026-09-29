@@ -237,9 +237,10 @@ interface SmartFolderDao {
         SmartFolderEntity::class,
         CalendarEventEntity::class,
         RecentFileEntity::class,
-        CloudConnectionEntity::class
+        CloudConnectionEntity::class,
+        com.elysium.vanguard.core.tasks.ScheduledTaskEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class TitanDatabase : RoomDatabase() {
@@ -251,6 +252,7 @@ abstract class TitanDatabase : RoomDatabase() {
     abstract fun calendarEventDao(): CalendarEventDao
     abstract fun recentFileDao(): RecentFileDao
     abstract fun cloudConnectionDao(): CloudConnectionDao
+    abstract fun scheduledTaskDao(): com.elysium.vanguard.core.tasks.ScheduledTaskDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -402,6 +404,24 @@ abstract class TitanDatabase : RoomDatabase() {
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_cloud_connections_provider ON cloud_connections(provider)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_cloud_connections_last_used_at ON cloud_connections(last_used_at)")
+            }
+        }
+
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        source_path TEXT NOT NULL,
+                        dest_path TEXT NOT NULL,
+                        interval_hours INTEGER NOT NULL,
+                        daily_hour INTEGER NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
             }
         }
     }

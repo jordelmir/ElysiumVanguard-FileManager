@@ -109,7 +109,8 @@ fun FileManagerScreen(
     onNavigateToSftp: (() -> Unit)? = null,
     onNavigateToDualPane: (() -> Unit)? = null,
     onNavigateToOcr: (() -> Unit)? = null,
-    onNavigateToAutoTag: (() -> Unit)? = null
+    onNavigateToAutoTag: (() -> Unit)? = null,
+    onNavigateToEncFsVolume: ((String) -> Unit)? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var isTerminalMode by remember { mutableStateOf(false) } // Terminal Mode State
@@ -138,6 +139,7 @@ fun FileManagerScreen(
     
     // Operation States
     var fileToRename by remember { mutableStateOf<TitanFile?>(null) }
+    var showBatchRename by remember { mutableStateOf(false) }
     var fileForDetails by remember { mutableStateOf<TitanFile?>(null) }
 
     val context = LocalContext.current
@@ -168,6 +170,17 @@ fun FileManagerScreen(
                 is FileActionOutcome.Failure -> outcome.message
             }
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    // EncFS: after a successful mount (or "Open volume" on an
+    // already-unlocked volume) navigate straight into the volume
+    // browser; the one-shot flow is cleared so a recomposition
+    // doesn't re-navigate.
+    val lastOpenedEncFsPath by actionViewModel.lastOpenedVolumePath.collectAsState()
+    LaunchedEffect(lastOpenedEncFsPath) {
+        lastOpenedEncFsPath?.let { path ->
+            onNavigateToEncFsVolume?.invoke(path)
+            actionViewModel.clearLastOpenedVolumePath()
         }
     }
 
@@ -247,7 +260,8 @@ fun FileManagerScreen(
                         onClear = { viewModel.clearSelection() },
                         onDelete = { viewModel.deleteSelected() },
                         onMove = { viewModel.moveSelected() },
-                        onCopy = { viewModel.copySelected() }
+                        onCopy = { viewModel.copySelected() },
+                        onRename = { showBatchRename = true }
                     )
                 } else {
                     val pendingOp by viewModel.pendingOperation.collectAsState()
@@ -731,6 +745,25 @@ fun FileManagerScreen(
                 )
             }
 
+            if (showBatchRename && selectedFiles.isNotEmpty()) {
+                BatchRenameDialog(
+                    files = selectedFiles.map { java.io.File(it) },
+                    onDismiss = { showBatchRename = false },
+                    onApply = { renamePattern ->
+                        val renamed = viewModel.applyBatchRename(selectedFiles, renamePattern)
+                        android.widget.Toast.makeText(
+                            context,
+                            if (renamed >= 0) "Renamed $renamed file(s)" else "Invalid rename pattern",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        viewModel.clearSelection()
+                        showBatchRename = false
+                    }
+                )
+            } else if (showBatchRename) {
+                showBatchRename = false
+            }
+
             val compressionState by viewModel.compressionProgress.collectAsState()
             val keepScreenOn by viewModel.keepScreenOn.collectAsState()
             val compressionStateValue = compressionState
@@ -1022,7 +1055,8 @@ fun SelectionToolbar(
     onClear: () -> Unit,
     onDelete: () -> Unit,
     onMove: () -> Unit,
-    onCopy: () -> Unit
+    onCopy: () -> Unit,
+    onRename: () -> Unit = {}
 ) {
     val accentColor = SectionColorManager.fileAccent
     Row(
@@ -1058,6 +1092,9 @@ fun SelectionToolbar(
         }
         IconButton(onClick = onMove) {
             Icon(Icons.Default.DriveFileMove, contentDescription = "Move", tint = accentColor)
+        }
+        IconButton(onClick = onRename) {
+            Icon(Icons.Default.Edit, contentDescription = "Batch rename", tint = accentColor)
         }
         IconButton(onClick = onDelete) {
             Icon(Icons.Default.Delete, contentDescription = "Delete", tint = TitanColors.NeonRed)

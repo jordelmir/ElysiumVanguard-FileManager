@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.dualpane
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,12 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -76,6 +81,8 @@ fun DualPaneScreen(
 ) {
     val left by viewModel.left.collectAsState()
     val right by viewModel.right.collectAsState()
+    val leftTabs by viewModel.leftTabs.collectAsState()
+    val rightTabs by viewModel.rightTabs.collectAsState()
     val adaptive = LocalAdaptiveMetrics.current
 
     Scaffold(
@@ -107,6 +114,10 @@ fun DualPaneScreen(
                 .background(Color(0xFF050810))) {
                 Pane(
                     state = left,
+                    tabs = leftTabs,
+                    onTabSelected = { viewModel.switchTab(PaneSide.LEFT, it) },
+                    onTabClosed = { viewModel.closeTab(PaneSide.LEFT, it) },
+                    onNewTab = { viewModel.openTab(PaneSide.LEFT, left.currentDir) },
                     onUp = { viewModel.goUp(PaneSide.LEFT) },
                     onRefresh = { viewModel.refresh(PaneSide.LEFT) },
                     onOpen = { viewModel.open(PaneSide.LEFT, it) },
@@ -117,6 +128,10 @@ fun DualPaneScreen(
                 HorizontalDivider(color = Color(0xFF1A2030), thickness = 1.dp)
                 Pane(
                     state = right,
+                    tabs = rightTabs,
+                    onTabSelected = { viewModel.switchTab(PaneSide.RIGHT, it) },
+                    onTabClosed = { viewModel.closeTab(PaneSide.RIGHT, it) },
+                    onNewTab = { viewModel.openTab(PaneSide.RIGHT, right.currentDir) },
                     onUp = { viewModel.goUp(PaneSide.RIGHT) },
                     onRefresh = { viewModel.refresh(PaneSide.RIGHT) },
                     onOpen = { viewModel.open(PaneSide.RIGHT, it) },
@@ -132,6 +147,10 @@ fun DualPaneScreen(
                 .background(Color(0xFF050810))) {
                 Pane(
                     state = left,
+                    tabs = leftTabs,
+                    onTabSelected = { viewModel.switchTab(PaneSide.LEFT, it) },
+                    onTabClosed = { viewModel.closeTab(PaneSide.LEFT, it) },
+                    onNewTab = { viewModel.openTab(PaneSide.LEFT, left.currentDir) },
                     onUp = { viewModel.goUp(PaneSide.LEFT) },
                     onRefresh = { viewModel.refresh(PaneSide.LEFT) },
                     onOpen = { viewModel.open(PaneSide.LEFT, it) },
@@ -142,6 +161,10 @@ fun DualPaneScreen(
                 VerticalDivider(color = Color(0xFF1A2030), thickness = 1.dp)
                 Pane(
                     state = right,
+                    tabs = rightTabs,
+                    onTabSelected = { viewModel.switchTab(PaneSide.RIGHT, it) },
+                    onTabClosed = { viewModel.closeTab(PaneSide.RIGHT, it) },
+                    onNewTab = { viewModel.openTab(PaneSide.RIGHT, right.currentDir) },
                     onUp = { viewModel.goUp(PaneSide.RIGHT) },
                     onRefresh = { viewModel.refresh(PaneSide.RIGHT) },
                     onOpen = { viewModel.open(PaneSide.RIGHT, it) },
@@ -157,6 +180,10 @@ fun DualPaneScreen(
 @Composable
 private fun Pane(
     state: PaneState,
+    tabs: PaneTabsState,
+    onTabSelected: (Int) -> Unit,
+    onTabClosed: (Int) -> Unit,
+    onNewTab: () -> Unit,
     onUp: () -> Unit,
     onRefresh: () -> Unit,
     onOpen: (File) -> Unit,
@@ -165,6 +192,17 @@ private fun Pane(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
+        // Tab strip: one tab per remembered folder; active tab drives the
+        // pane body below.
+        PaneTabStrip(
+            tabs = tabs,
+            accent = if (isSource) TitanColors.NeonCyan else TitanColors.NeonYellow,
+            onSelected = onTabSelected,
+            onClosed = onTabClosed,
+            onNew = onNewTab,
+        )
+        HorizontalDivider(color = Color(0xFF1A2030))
+
         // Pane header with breadcrumb + actions.
         Row(
             modifier = Modifier
@@ -211,6 +249,71 @@ private fun Pane(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PaneTabStrip(
+    tabs: PaneTabsState,
+    accent: Color,
+    onSelected: (Int) -> Unit,
+    onClosed: (Int) -> Unit,
+    onNew: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .background(Color(0xFF080C16))
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.tabs.forEachIndexed { index, tab ->
+            val isActive = index == tabs.activeIndex
+            Row(
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isActive) accent.copy(alpha = 0.16f) else Color.Transparent)
+                    .border(
+                        width = 1.dp,
+                        color = if (isActive) accent else Color(0xFF1A2030),
+                        shape = RoundedCornerShape(6.dp),
+                    )
+                    .clickable { onSelected(index) }
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tab.dir.name.ifEmpty { tab.dir.absolutePath },
+                    color = if (isActive) accent else Color.White.copy(alpha = 0.55f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 84.dp),
+                )
+                if (tabs.count > 1) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close tab ${index + 1}",
+                        tint = if (isActive) accent else Color.White.copy(alpha = 0.4f),
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clickable { onClosed(index) },
+                    )
+                }
+            }
+        }
+        Icon(
+            Icons.Default.Add,
+            contentDescription = "New tab",
+            tint = accent,
+            modifier = Modifier
+                .size(18.dp)
+                .clickable(onClick = onNew),
+        )
     }
 }
 

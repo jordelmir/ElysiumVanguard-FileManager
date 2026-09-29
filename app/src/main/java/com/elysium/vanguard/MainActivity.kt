@@ -105,7 +105,8 @@ class MainActivity : ComponentActivity() {
                             onNavigateToColors = { navController.navigate("color_customization") },
                             onNavigateToCommandCore = { navController.navigate("command_core") },
                             onNavigateToLocalAgent = { navController.navigate("local_agent") },
-                            onNavigateToDesktop = { navController.navigate("desktop_shell") }
+                            onNavigateToDesktop = { navController.navigate("desktop_shell") },
+                            onNavigateToTasks = { navController.navigate("scheduled_tasks") }
                         )
                     }
                     composable("command_core") {
@@ -141,7 +142,11 @@ class MainActivity : ComponentActivity() {
                             onNavigateToSftp = { navController.navigate("sftp_server") },
                             onNavigateToDualPane = { navController.navigate("dual_pane") },
                             onNavigateToOcr = { navController.navigate("ocr") },
-                            onNavigateToAutoTag = { navController.navigate("auto_tag") }
+                            onNavigateToAutoTag = { navController.navigate("auto_tag") },
+                            onNavigateToEncFsVolume = { path ->
+                                val encoded = URLEncoder.encode(path, StandardCharsets.UTF_8.toString())
+                                navController.navigate("encfs_volume/$encoded")
+                            }
                         )
                     }
                     composable("local_server") {
@@ -344,6 +349,23 @@ class MainActivity : ComponentActivity() {
                                 val encodedName = URLEncoder.encode(name, StandardCharsets.UTF_8.toString())
                                 navController.navigate("metadata/$encodedKey/$encodedName")
                             }
+                        )
+                    }
+                    composable(
+                        route = "encfs_volume/{volumePath}",
+                        arguments = listOf(
+                            navArgument("volumePath") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        @Suppress("UNUSED_VARIABLE")
+                        val unused = backStackEntry.arguments  // Hilt reads volumePath from SavedStateHandle
+                        com.elysium.vanguard.features.encfs.EncFsVolumeScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable("scheduled_tasks") {
+                        com.elysium.vanguard.features.tasks.ScheduledTasksScreen(
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable("trash") {

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.features.filemanager.FileManagerRepository
 import com.elysium.vanguard.core.encryption.EncryptedVault
 import com.elysium.vanguard.core.encryption.EncFsVolume
+import com.elysium.vanguard.core.encryption.MountedVolumeRegistry
 import com.elysium.vanguard.core.fileactions.FileAction
 import com.elysium.vanguard.core.fileactions.FileActionContext
 import com.elysium.vanguard.core.fileactions.FileActionContext.LinuxDistroTarget
@@ -72,12 +73,23 @@ class FileActionViewModel @Inject constructor(
     private val msiInstallerHandler: MsiInstallerHandler,
     private val malwareScanHandler: MalwareScanHandler,
     private val fileManagerRepository: FileManagerRepository,
+    private val encFsRegistry: MountedVolumeRegistry,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
     val state: StateFlow<FileActionUiState> = _state.asStateFlow()
 
-    private val mountedEncFsVolumes = mutableMapOf<String, EncFsVolume>()
+    /**
+     * The volume path the user just unlocked (or re-opened). The file
+     * manager screen observes this to navigate straight into the volume
+     * browser; the screen clears it after navigating.
+     */
+    private val _lastOpenedVolumePath = MutableStateFlow<String?>(null)
+    val lastOpenedVolumePath: StateFlow<String?> = _lastOpenedVolumePath.asStateFlow()
+
+    fun clearLastOpenedVolumePath() {
+        _lastOpenedVolumePath.value = null
+    }
 
     fun openActionSheet(file: File) {
         val context = buildContext()
@@ -388,7 +400,8 @@ class FileActionViewModel @Inject constructor(
                         action.password.toCharArray(),
                     )
                     if (volume != null) {
-                        mountedEncFsVolumes[action.mountPoint] = volume
+                        encFsRegistry.mount(action.volumePath, volume)
+                        _lastOpenedVolumePath.value = action.volumePath
                         FileActionOutcome.Success(
                             message = "Opened EncFS volume ${File(action.volumePath).name} (${volume.listFiles().size} file(s))"
                         )
@@ -405,7 +418,7 @@ class FileActionViewModel @Inject constructor(
             }
             is FileAction.UnmountEncFsVolume -> {
                 // Close an EncFS volume opened in this session.
-                val closed = mountedEncFsVolumes.remove(action.mountPoint)
+                val closed = encFsRegistry.unmount(action.mountPoint)
                 if (closed != null) {
                     FileActionOutcome.Success(
                         message = "Unmounted EncFS volume at ${action.mountPoint}"
@@ -413,6 +426,20 @@ class FileActionViewModel @Inject constructor(
                 } else {
                     FileActionOutcome.Failure(
                         message = "No unlocked EncFS volume at ${action.mountPoint}"
+                    )
+                }
+            }
+            is FileAction.OpenEncFsVolume -> {
+                // Browse an already-unlocked volume: no password needed,
+                // the registry still holds the derived key.
+                if (encFsRegistry.isMounted(action.volumePath)) {
+                    _lastOpenedVolumePath.value = action.volumePath
+                    FileActionOutcome.Success(
+                        message = "Opened EncFS volume ${File(action.volumePath).name}"
+                    )
+                } else {
+                    FileActionOutcome.Failure(
+                        message = "Volume is locked — mount it first"
                     )
                 }
             }
@@ -456,6 +483,7 @@ class FileActionViewModel @Inject constructor(
             windowsVms = vms,
             preferredLinuxDistroId = distros.firstOrNull()?.id,
             preferredWindowsVmId = vms.firstOrNull()?.id,
+            mountedEncFsPaths = encFsRegistry.mountedPaths(),
         )
     }
 

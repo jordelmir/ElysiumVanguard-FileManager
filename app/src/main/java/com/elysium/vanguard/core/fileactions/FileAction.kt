@@ -146,6 +146,20 @@ sealed class FileAction {
     }
 
     /**
+     * Open (browse) an EncFS volume that is already unlocked in this
+     * session. No password prompt — the [com.elysium.vanguard.core.encryption.MountedVolumeRegistry]
+     * still holds the open volume.
+     */
+    data class OpenEncFsVolume(
+        override val id: String,
+        val volumePath: String,
+    ) : FileAction() {
+        override val label: String = "Open EncFS volume"
+        override val description: String = "Browse unlocked EncFS volume at $volumePath"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
      * Create a new EncFS volume.
      */
     data class CreateEncFsVolume(

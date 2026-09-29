@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elysium.vanguard.core.ai.DownloadState
+import com.elysium.vanguard.core.rename.BatchRenameEngine
 import com.elysium.vanguard.core.ai.MediaPipeManager
 import com.elysium.vanguard.core.ai.ModelDownloadManager
 import com.elysium.vanguard.core.trash.TrashRepository
@@ -348,6 +349,25 @@ class FileManagerViewModel @Inject constructor(
             if (repository.renameFile(path, newName)) {
                 loadDirectory(_currentPath.value)
             }
+        }
+    }
+
+    /**
+     * Batch rename (Phase 1.6): plan [paths] with the pure
+     * [BatchRenameEngine] (template **or** regex mode, whichever the
+     * [pattern]'s rule encodes), execute the plan, and reload the current
+     * directory. Returns the number of files renamed, or `-1` when the
+     * pattern itself is invalid (e.g. bad regex).
+     */
+    fun applyBatchRename(paths: Collection<String>, pattern: BatchRenameEngine.Pattern): Int {
+        return try {
+            val engine = BatchRenameEngine()
+            val plan = engine.plan(paths.map { File(it) }, pattern)
+            val renamed = engine.execute(plan)
+            loadDirectory(_currentPath.value)
+            renamed
+        } catch (e: Exception) {
+            -1
         }
     }
 

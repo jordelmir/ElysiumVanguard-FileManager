@@ -2,6 +2,8 @@ package com.elysium.vanguard
 
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
@@ -11,7 +13,22 @@ import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
 @HiltAndroidApp
-class TitanApp : Application(), ImageLoaderFactory {
+class TitanApp : Application(), ImageLoaderFactory, Configuration.Provider {
+
+    /**
+     * Scheduled-task workers ([com.elysium.vanguard.core.tasks.ScheduledTaskWorker]
+     * + the trash auto-purge worker) are `@HiltWorker` classes, so
+     * WorkManager must be built with Hilt's factory. The default
+     * `WorkManagerInitializer` is removed from the manifest so this
+     * configuration is the one that boots WorkManager.
+     */
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     /**
      * PHASE 11.3 — process-wide binder that subscribes the DNS tracker

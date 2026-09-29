@@ -34,7 +34,34 @@ class BatchRenameEngine {
         val startAt: Int = 1,
         val dateFormat: String = "yyyy-MM-dd",
         val uppercaseExt: Boolean = false,
-        val onConflict: ConflictResolution = ConflictResolution.SKIP
+        val onConflict: ConflictResolution = ConflictResolution.SKIP,
+        /**
+         * When set, the regex search/replace runs **instead of** the
+         * placeholder [template]: the rule is applied to the filename stem
+         * (or to the whole filename when
+         * [RegexRule.applyToWholeName] is true) and `{...}` placeholders are
+         * not expanded. Replacement uses Kotlin group syntax: `$1`, `$2`, …
+         */
+        val regex: RegexRule? = null
+    )
+
+    /**
+     * Regex search/replace rule for batch renames.
+     *
+     * - [pattern] — the regular expression (validated when the plan runs;
+     *   an invalid pattern throws [BatchRenameException]).
+     * - [replacement] — the substitution; `$1`, `$2` reference capture
+     *   groups, `$0` the whole match.
+     * - [ignoreCase] — case-insensitive matching.
+     * - [applyToWholeName] — apply to the entire filename (extension
+     *   included) instead of the extension-less stem. Useful for
+     *   extension swaps like `\.jpe?g$` → `.jpg`.
+     */
+    data class RegexRule(
+        val pattern: String,
+        val replacement: String,
+        val ignoreCase: Boolean = false,
+        val applyToWholeName: Boolean = false,
     )
 
     enum class ConflictResolution {
@@ -68,8 +95,23 @@ class BatchRenameEngine {
      * Caller must already have sorted the list if order matters.
      */
     fun plan(files: List<File>, pattern: Pattern, parent: File? = null): Plan {
-        if (pattern.template.isBlank()) {
+        val regexRule = pattern.regex
+        if (regexRule != null) {
+            if (regexRule.pattern.isBlank()) {
+                return Plan(renames = emptyList(), skipped = files, aborted = false)
+            }
+        } else if (pattern.template.isBlank()) {
             return Plan(renames = emptyList(), skipped = files, aborted = false)
+        }
+        val regexCompiled: Regex? = regexRule?.let { rule ->
+            try {
+                Regex(
+                    rule.pattern,
+                    if (rule.ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet(),
+                )
+            } catch (e: IllegalArgumentException) {
+                throw BatchRenameException("Invalid regular expression: ${e.message}")
+            }
         }
 
         val renames = mutableListOf<PlannedRename>()
@@ -95,14 +137,37 @@ class BatchRenameEngine {
             val dateStr = try { dateFormat.format(Date(file.lastModified())) } catch (_: Exception) { "" }
             val sizeStr = formatSize(file.length())
 
-            val newStem = pattern.template
-                .replace("{counter}", counterStr)
-                .replace("{name}", stem)
-                .replace("{date}", dateStr)
-                .replace("{parent}", parentName)
-                .replace("{size}", sizeStr)
+            val finalName = when {
+                regexRule != null && regexCompiled != null && regexRule.applyToWholeName ->
+                    regexCompiled.replace(originalName, regexRule.replacement)
+                regexRule != null && regexCompiled != null -> {
+                    val replaced = regexCompiled.replace(stem, regexRule.replacement)
+                    // A blank stem can't be "rescued" by the extension —
+                    // report "" so the guard below skips the file.
+                    when {
+                        replaced.isBlank() -> ""
+                        finalExt.isNotEmpty() -> "$replaced.$finalExt"
+                        else -> replaced
+                    }
+                }
+                else -> {
+                    val newStem = pattern.template
+                        .replace("{counter}", counterStr)
+                        .replace("{name}", stem)
+                        .replace("{date}", dateStr)
+                        .replace("{parent}", parentName)
+                        .replace("{size}", sizeStr)
+                    if (finalExt.isNotEmpty()) "$newStem.$finalExt" else newStem
+                }
+            }
 
-            val finalName = if (finalExt.isNotEmpty()) "$newStem.$finalExt" else newStem
+            if (finalName.isBlank()) {
+                // A regex can legitimately replace everything with "" —
+                // we can't rename a file to an empty name.
+                skipped += file
+                counter++
+                continue
+            }
             val target = File(resolvedParent, finalName)
 
             // Conflict detection: same name as an existing file we are NOT renaming
@@ -197,3 +262,8 @@ class BatchRenameEngine {
         return if (idx == 0) "${bytes}${units[0]}" else String.format(Locale.US, "%.1f%s", size, units[idx])
     }
 }
+/**
+ * Thrown when a rename plan cannot be computed — currently only for an
+ * invalid regular expression in [BatchRenameEngine.RegexRule].
+ */
+class BatchRenameException(message: String) : Exception(message)

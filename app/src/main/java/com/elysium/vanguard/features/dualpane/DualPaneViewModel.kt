@@ -33,17 +33,46 @@ class DualPaneViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
+    private val defaultRoot: File = context.getExternalFilesDir(null) ?: context.filesDir
+
     private val _left = MutableStateFlow(PaneState())
     val left: StateFlow<PaneState> = _left.asStateFlow()
 
     private val _right = MutableStateFlow(PaneState())
     val right: StateFlow<PaneState> = _right.asStateFlow()
 
+    // Tab stacks per pane: each tab owns its directory; only the active
+    // tab's directory is mirrored into the pane's PaneState above.
+    private val _leftTabs = MutableStateFlow(PaneTabs.initial(defaultRoot))
+    val leftTabs: StateFlow<PaneTabsState> = _leftTabs.asStateFlow()
+
+    private val _rightTabs = MutableStateFlow(PaneTabs.initial(defaultRoot))
+    val rightTabs: StateFlow<PaneTabsState> = _rightTabs.asStateFlow()
+
     init {
         // Default both panes to the app's external files dir.
-        val root = context.getExternalFilesDir(null) ?: context.filesDir
-        open(PaneSide.LEFT, root)
-        open(PaneSide.RIGHT, root)
+        open(PaneSide.LEFT, defaultRoot)
+        open(PaneSide.RIGHT, defaultRoot)
+    }
+
+    fun openTab(side: PaneSide, dir: File) {
+        val flow = tabsOf(side)
+        flow.value = PaneTabs.openTab(flow.value, dir)
+        loadDir(side, dir)
+    }
+
+    fun closeTab(side: PaneSide, index: Int) {
+        val flow = tabsOf(side)
+        val next = PaneTabs.closeTab(flow.value, index) ?: return
+        flow.value = next
+        loadDir(side, next.active.dir)
+    }
+
+    fun switchTab(side: PaneSide, index: Int) {
+        val flow = tabsOf(side)
+        val next = PaneTabs.switchTo(flow.value, index)
+        flow.value = next
+        loadDir(side, next.active.dir)
     }
 
     fun refresh(side: PaneSide) {
@@ -108,8 +137,16 @@ class DualPaneViewModel @Inject constructor(
         PaneSide.RIGHT -> _right
     }
 
+    private fun tabsOf(side: PaneSide): MutableStateFlow<PaneTabsState> = when (side) {
+        PaneSide.LEFT -> _leftTabs
+        PaneSide.RIGHT -> _rightTabs
+    }
+
     private fun loadDir(side: PaneSide, dir: File) {
         val flow = stateOf(side)
+        // Navigation applies to the active tab of this pane.
+        val tabs = tabsOf(side)
+        tabs.value = PaneTabs.updateActiveDir(tabs.value, dir)
         flow.value = flow.value.copy(currentDir = dir, loading = true)
         viewModelScope.launch {
             val entries = withContext(Dispatchers.IO) {

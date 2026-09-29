@@ -32,6 +32,13 @@ data class FileActionContext(
     val gitRemotes: List<String> = emptyList(),
     val knownSmbShares: List<String> = emptyList(),
     val knownWebDavUrls: List<String> = emptyList(),
+    /**
+     * Canonical paths of EncFS volumes that are currently unlocked
+     * (held by the [com.elysium.vanguard.core.encryption.MountedVolumeRegistry]).
+     * Lets the resolver offer "Open" / "Unmount" instead of a password
+     * prompt for volumes the session already holds.
+     */
+    val mountedEncFsPaths: Set<String> = emptySet(),
 ) {
     /**
      * The Linux distros the platform knows about.

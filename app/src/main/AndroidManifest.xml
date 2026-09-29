@@ -70,6 +70,20 @@
             android:exported="false"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
+        <!-- WorkManager: the default androidx.startup initializer is
+             disabled so TitanApp's Configuration.Provider (Hilt worker
+             factory) is what boots WorkManager. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
         <provider android:name="androidx.core.content.FileProvider" android:authorities="com.elysium.vanguard.fileprovider" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
