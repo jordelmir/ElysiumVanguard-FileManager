@@ -36,14 +36,14 @@ class SecurityInstrumentedTest {
 
     @Test
     fun `device_integrity_check_runs_and_reports_app_package_name`() {
-        val checker = DeviceIntegrityChecker(context)
+        val checker = DeviceIntegrityChecker(context, DeviceIntegrityConfig())
         val integrity = checker.check()
         assertEquals(context.packageName, integrity.appPackageName)
     }
 
     @Test
     fun `device_integrity_check_returns_a_signature_digest`() {
-        val checker = DeviceIntegrityChecker(context)
+        val checker = DeviceIntegrityChecker(context, DeviceIntegrityConfig())
         val integrity = checker.check()
         // The signature digest should be non-null on
         // any properly-signed app.
@@ -55,7 +55,7 @@ class SecurityInstrumentedTest {
 
     @Test
     fun `device_integrity_isTrusted_is_consistent_with_failures_list`() {
-        val checker = DeviceIntegrityChecker(context)
+        val checker = DeviceIntegrityChecker(context, DeviceIntegrityConfig())
         val integrity = checker.check()
         if (integrity.isTrusted) {
             assertTrue(
@@ -72,7 +72,7 @@ class SecurityInstrumentedTest {
 
     @Test
     fun `device_integrity_failures_list_contains_right_enum_values`() {
-        val checker = DeviceIntegrityChecker(context)
+        val checker = DeviceIntegrityChecker(context, DeviceIntegrityConfig())
         val integrity = checker.check()
         // The failures list must only contain valid
         // IntegrityFailure values.

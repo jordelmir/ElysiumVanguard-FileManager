@@ -10,6 +10,8 @@ import com.elysium.vanguard.features.desktop.model.DockItem
 import com.elysium.vanguard.features.desktop.model.DockItemKind
 import com.elysium.vanguard.features.desktop.model.WindowBounds
 import com.elysium.vanguard.features.desktop.model.WindowState
+import com.elysium.vanguard.foundry.core.ontology.primitives.Timestamp
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
@@ -40,7 +42,8 @@ class DesktopShellInstrumentedTest {
     @Test
     fun `desktop_shell_renders_with_default_session_state`() {
         val viewModel = DesktopShellViewModel(
-            initialState = sampleState(),
+            initialStateFlow = MutableStateFlow(sampleState()),
+            clock = Timestamp.monotonicWallClock(),
         )
         composeTestRule.setContent {
             DesktopShellScreen(viewModel = viewModel)
@@ -55,7 +58,8 @@ class DesktopShellInstrumentedTest {
     @Test
     fun `open_window_action_updates_the_ui`() {
         val viewModel = DesktopShellViewModel(
-            initialState = sampleState(),
+            initialStateFlow = MutableStateFlow(sampleState()),
+            clock = Timestamp.monotonicWallClock(),
         )
         composeTestRule.setContent {
             DesktopShellScreen(viewModel = viewModel)
