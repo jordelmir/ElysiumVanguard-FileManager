@@ -18,12 +18,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DiscFull
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InstallDesktop
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
@@ -228,4 +231,8 @@ private fun iconFor(action: FileAction): Pair<ImageVector, Color> = when (action
     // PHASE 112 — encryption/decryption actions
     is FileAction.EncryptFile -> Icons.Filled.Shield to Color(0xFF64B5F6)
     is FileAction.DecryptFile -> Icons.Filled.Visibility to Color(0xFF81C784)
+    // PHASE 112 — file operations
+    is FileAction.CreateSymlink -> Icons.Filled.ContentCopy to Color(0xFF64B5F6)
+    is FileAction.ChangePermissions -> Icons.Filled.Settings to Color(0xFFFFB74D)
+    is FileAction.ChangeOwnership -> Icons.Filled.Person to Color(0xFFA1887F)
 }

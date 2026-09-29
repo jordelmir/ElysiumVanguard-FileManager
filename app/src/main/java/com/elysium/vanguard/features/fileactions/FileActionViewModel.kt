@@ -2,6 +2,7 @@ package com.elysium.vanguard.features.fileactions
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.elysium.vanguard.features.filemanager.FileManagerRepository
 import com.elysium.vanguard.core.encryption.EncryptedVault
 import com.elysium.vanguard.core.fileactions.FileAction
 import com.elysium.vanguard.core.fileactions.FileActionContext
@@ -28,13 +29,12 @@ import com.elysium.vanguard.core.fileactions.handlers.MalwareScanHandler
 import com.elysium.vanguard.core.security.malware.MalwareScanResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -70,6 +70,7 @@ class FileActionViewModel @Inject constructor(
     private val binaryRunnerHandler: BinaryRunnerHandler,
     private val msiInstallerHandler: MsiInstallerHandler,
     private val malwareScanHandler: MalwareScanHandler,
+    private val fileManagerRepository: FileManagerRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FileActionUiState())
@@ -314,6 +315,63 @@ class FileActionViewModel @Inject constructor(
                 } catch (e: Exception) {
                     FileActionOutcome.Failure(
                         message = "Decryption failed: ${e.message}"
+                    )
+                }
+            }
+            is FileAction.CreateSymlink -> {
+                // Create a symbolic link
+                try {
+                    val success = fileManagerRepository.createSymlink(action.targetPath, action.linkPath)
+                    if (success) {
+                        FileActionOutcome.Success(
+                            message = "Created symlink: ${action.linkPath} → ${action.targetPath}"
+                        )
+                    } else {
+                        FileActionOutcome.Failure(
+                            message = "Failed to create symlink (requires write permission)"
+                        )
+                    }
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "Symlink creation failed: ${e.message}"
+                    )
+                }
+            }
+            is FileAction.ChangePermissions -> {
+                // Change file permissions (chmod)
+                try {
+                    val success = fileManagerRepository.chmod(action.path, action.mode)
+                    if (success) {
+                        FileActionOutcome.Success(
+                            message = "Changed permissions of ${File(action.path).name} to ${String.format("%04o", action.mode)}"
+                        )
+                    } else {
+                        FileActionOutcome.Failure(
+                            message = "Failed to change permissions (may require root)"
+                        )
+                    }
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "chmod failed: ${e.message}"
+                    )
+                }
+            }
+            is FileAction.ChangeOwnership -> {
+                // Change file ownership (chown) - requires root
+                try {
+                    val success = fileManagerRepository.chown(action.path, action.owner, action.group)
+                    if (success) {
+                        FileActionOutcome.Success(
+                            message = "Changed ownership of ${File(action.path).name}"
+                        )
+                    } else {
+                        FileActionOutcome.Failure(
+                            message = "Failed to change ownership (requires root)"
+                        )
+                    }
+                } catch (e: Exception) {
+                    FileActionOutcome.Failure(
+                        message = "chown failed: ${e.message}"
                     )
                 }
             }

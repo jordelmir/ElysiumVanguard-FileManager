@@ -1,6 +1,8 @@
 package com.elysium.vanguard.features.fileactions
 
+import android.content.Context
 import com.elysium.vanguard.core.fileactions.DiskImageFormat
+import com.elysium.vanguard.features.filemanager.FileManagerRepository
 import com.elysium.vanguard.core.fileactions.FileAction
 import com.elysium.vanguard.core.fileactions.FileActionEnvironment
 import com.elysium.vanguard.core.fileactions.handlers.DiskImageBackend
@@ -340,6 +342,7 @@ class FileActionViewModelTest {
         binaryRunnerHandler = binaryRunnerHandler,
         msiInstallerHandler = msiInstallerHandler,
         malwareScanHandler = malwareScanHandler,
+        fileManagerRepository = FakeFileManagerRepository(),
     )
 
     private fun sampleInstallation(id: String, name: String) = DistroInstallation(
@@ -460,4 +463,12 @@ private class RecordingMalwareAnalyzer(
         calls.add(file)
         return expectedResult
     }
+}
+
+private class FakeFileManagerRepository(
+    context: Context? = null
+) : FileManagerRepository(context) {
+    override fun createSymlink(targetPath: String, linkPath: String): Boolean = true
+    override fun chmod(path: String, mode: Int): Boolean = true
+    override fun chown(path: String, owner: String?, group: String?): Boolean = true
 }

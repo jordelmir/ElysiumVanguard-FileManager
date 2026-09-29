@@ -80,6 +80,46 @@ sealed class FileAction {
     }
 
     /**
+     * Create a symbolic link.
+     */
+    data class CreateSymlink(
+        override val id: String,
+        val targetPath: String,
+        val linkPath: String,
+    ) : FileAction() {
+        override val label: String = "Create symlink"
+        override val description: String = "Create symbolic link to $targetPath"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
+     * Change file permissions (chmod).
+     */
+    data class ChangePermissions(
+        override val id: String,
+        val path: String,
+        val mode: Int,
+    ) : FileAction() {
+        override val label: String = "Change permissions"
+        override val description: String = "Change file permissions to ${String.format("%04o", mode)}"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
+     * Change file ownership (chown).
+     */
+    data class ChangeOwnership(
+        override val id: String,
+        val path: String,
+        val owner: String?,
+        val group: String?,
+    ) : FileAction() {
+        override val label: String = "Change ownership"
+        override val description: String = "Change owner/group"
+        override val targetRuntime: RuntimeKind? = null
+    }
+
+    /**
      * Install a Debian package (`.deb`) inside
      * a Linux distro using `apt` / `dpkg`.
      */

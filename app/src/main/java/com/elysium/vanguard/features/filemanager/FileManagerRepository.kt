@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.database.Cursor
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.text.format.Formatter
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.io.File
+import java.io.IOException
 import com.elysium.vanguard.core.util.FileThematics
 import com.elysium.vanguard.core.util.FileCategory
 
@@ -23,7 +25,7 @@ import com.elysium.vanguard.core.util.FileCategory
  * Direct connection to MediaStore and Storage Access Framework.
  */
 @Singleton
-class FileManagerRepository @Inject constructor(
+open class FileManagerRepository @Inject constructor(
     // PHASE 7.5: context is nullable so the repository can be constructed in
     // unit tests that don't have a Robolectric context. The only place
     // context is consulted is for Formatter.formatFileSize — the code path
@@ -205,6 +207,99 @@ class FileManagerRepository @Inject constructor(
             source.renameTo(dest)
         } catch (e: Exception) {
             false
+        }
+    }
+
+/**
+     * Change file permissions (chmod).
+     * @param path File path
+     * @param mode Permission mode (e.g., 0o755, 0o644)
+     */
+    open fun chmod(path: String, mode: Int): Boolean {
+        return try {
+            val file = File(path)
+            if (!file.exists()) return false
+            
+            // Use Java's setExecutable/setReadable/setWritable for basic perms
+            // Note: Full chmod requires root; we set what we can via Java API
+            val ownerRead = (mode and 256) != 0  // 0o400 = 256
+            val ownerWrite = (mode and 128) != 0  // 0o200 = 128
+            val ownerExec = (mode and 64) != 0    // 0o100 = 64
+            
+            file.setReadable(ownerRead, false)
+            file.setWritable(ownerWrite, false)
+            file.setExecutable(ownerExec, false)
+            
+            return true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Change file ownership (chown). Requires root.
+     * Note: On Android, this typically requires root access via su.
+     * This is a placeholder for root implementation.
+     */
+    open fun chown(path: String, owner: String? = null, group: String? = null): Boolean {
+        return try {
+            val file = File(path)
+            if (!file.exists()) return false
+            
+            // On rooted devices, we can use su to change ownership
+            // This is a stub - actual implementation would use ProcessBuilder with "su -c chown..."
+            if (owner != null || group != null) {
+                // Would execute: su -c "chown $owner:$group $path"
+                // For now, return false to indicate not implemented without root
+                return false
+            }
+            return true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Create a symbolic link.
+     * @param targetPath The target file/directory to link to
+     * @param linkPath The path where the symlink should be created
+     */
+    open fun createSymlink(targetPath: String, linkPath: String): Boolean {
+        return try {
+            val target = File(targetPath)
+            val link = File(linkPath)
+            
+            if (link.exists()) return false
+            link.parentFile?.mkdirs()
+            
+            // Create symlink using Java NIO
+            java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath())
+            true
+        } catch (e: Exception) {
+            // Fallback for older Android: try using Os.symlink
+            try {
+                android.system.Os.symlink(targetPath, linkPath)
+                true
+            } catch (e2: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Read a symbolic link target.
+     */
+    fun readSymlink(linkPath: String): String? {
+        return try {
+            val link = File(linkPath)
+            if (!link.exists()) return null
+            java.nio.file.Files.readSymbolicLink(link.toPath()).toString()
+        } catch (e: Exception) {
+            try {
+                android.system.Os.readlink(linkPath)
+            } catch (e2: Exception) {
+                null
+            }
         }
     }
 

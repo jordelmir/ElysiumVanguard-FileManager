@@ -245,6 +245,37 @@ object FileActionResolver {
             )
         )
 
+        // Universal "Change permissions" (chmod) action
+        // (available for any file). Requires root for system files.
+        actions.add(
+            FileAction.ChangePermissions(
+                id = "chmod-${name}",
+                path = file.absolutePath,
+                mode = 420, // default; UI will prompt (0o644 = 420)
+            )
+        )
+
+        // Universal "Change ownership" (chown) action
+        // (available for any file). Requires root.
+        actions.add(
+            FileAction.ChangeOwnership(
+                id = "chown-${name}",
+                path = file.absolutePath,
+                owner = null, // will be prompted by UI
+                group = null,
+            )
+        )
+
+        // Universal "Create symlink" action
+        // (available for any file/directory).
+        actions.add(
+            FileAction.CreateSymlink(
+                id = "symlink-${name}",
+                targetPath = file.absolutePath,
+                linkPath = "${file.parentFile?.absolutePath}/${file.name}.link",
+            )
+        )
+
         // PHASE 110 — append a malware scan
         // action to every list of extension-
         // matched actions. The scan is a
