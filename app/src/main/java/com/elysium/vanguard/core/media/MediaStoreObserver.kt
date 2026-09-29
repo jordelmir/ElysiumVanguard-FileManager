@@ -86,7 +86,7 @@ class MediaStoreObserver @Inject constructor(
      * (the Android `ContentResolver` is not
      * available on the JVM).
      */
-    @VisibleForTesting
+    @get:VisibleForTesting
     internal val mediaSourceProvider: MediaSourceProvider,
 ) {
 

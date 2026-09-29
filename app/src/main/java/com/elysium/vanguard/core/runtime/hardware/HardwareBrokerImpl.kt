@@ -1,7 +1,9 @@
 package com.elysium.vanguard.core.runtime.hardware
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.camera2.CameraManager
@@ -180,6 +182,11 @@ class HardwareBrokerImpl(
 
     private fun probeBluetooth(): List<HardwareResource> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) return emptyList()
+        // BLUETOOTH_CONNECT is a runtime permission from API 31; without it
+        // both `bondedDevices` and `device.name` throw SecurityException.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) return emptyList()
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
         val bonded = adapter.bondedDevices ?: return emptyList()
         return bonded.map { device ->

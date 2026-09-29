@@ -35,6 +35,13 @@
 
     <!-- System-level capabilities a sovereign file manager needs. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Normal (install-time) permission: haptic feedback in the terminal. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Bluetooth hardware probe (HardwareBrokerImpl): legacy BLUETOOTH up to
+         API 30, runtime BLUETOOTH_CONNECT from API 31 (guarded at the call
+         site before touching bondedDevices/device.name). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

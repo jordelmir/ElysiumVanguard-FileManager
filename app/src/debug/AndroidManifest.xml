@@ -10,16 +10,16 @@
 
         This manifest is a "merge in" manifest: when the
         `debug` build type is assembled, this file is merged
-        with the main manifest. The single difference is
-        `android:debuggable="true"` on the application + activity,
-        which the test runner requires.
+        with the main manifest. It adds the LAUNCHER
+        intent-filter (the main manifest keeps MainActivity
+        filter-less). `android:debuggable` is intentionally
+        omitted — AGP sets it automatically for the debug
+        build type (lint: HardcodedDebugMode).
     -->
     <application
-        android:debuggable="true"
         android:name="com.elysium.vanguard.TitanApp">
         <activity
             android:name="com.elysium.vanguard.MainActivity"
-            android:debuggable="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
