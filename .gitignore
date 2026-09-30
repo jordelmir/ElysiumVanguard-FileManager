@@ -53,3 +53,11 @@ Thumbs.db
 # Allow docs/build (build pipeline documentation)
 !/docs/build/
 !/docs/build/**
+
+# Allow Kotlin packages literally named "build" (the unanchored build/ rule
+# above would otherwise hide them and break CI compilation — KSP/Hilt then
+# reports error.NonExistentClass for every class living in these dirs)
+!app/src/main/java/com/elysium/vanguard/core/runtime/build/
+!app/src/main/java/com/elysium/vanguard/core/runtime/build/**
+!app/src/test/java/com/elysium/vanguard/core/runtime/build/
+!app/src/test/java/com/elysium/vanguard/core/runtime/build/**
