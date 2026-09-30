@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -112,7 +115,10 @@ fun DesktopShellScreen(viewModel: DesktopShellViewModel) {
     // pending path map is read by [PositionedWindow]
     // to render the right initial path for each
     // Files window.
-    val pendingPaths = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    // PHASE 10.4 — remember the map: without it every recomposition created a
+    // fresh empty map, so the LaunchedEffect writes and the PositionedWindow
+    // reads never shared the same instance (lint E: UnrememberedMutableState).
+    val pendingPaths = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
     androidx.compose.runtime.LaunchedEffect(registry) {
         registry.actions.collect { action ->
             when (action) {
@@ -244,6 +250,7 @@ fun DesktopShellContent(
                     ),
                 )
             )
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .onSizeChanged { measuredSize = it },
     ) {
         // Optional ambient light effect: a

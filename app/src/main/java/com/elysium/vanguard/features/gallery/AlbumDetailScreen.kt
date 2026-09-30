@@ -44,7 +44,13 @@ fun AlbumDetailScreen(
             speed = 60L
         )
         
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // PHASE 10.4 — edge-to-edge (targetSdk 37): pad content past
+                // the system bars while MatrixRain stays full-bleed behind it.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+        ) {
             // Header
             Row(
                 modifier = Modifier

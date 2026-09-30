@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +81,8 @@ fun X11DisplayScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            // PHASE 10.4 — edge-to-edge (targetSdk 37): viewport below bars.
+            .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         AndroidView(
             factory = { context ->

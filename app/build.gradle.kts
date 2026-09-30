@@ -11,14 +11,16 @@ kotlin {
 
 android {
     namespace = "com.elysium.vanguard"
-    compileSdk = 34
-    buildToolsVersion = "34.0.0"
+    // PHASE 10.4 — target the current stable platform (Android 17 / API 37,
+    // installed via sdkmanager as platforms/android-37.0).
+    compileSdk = 37
+    buildToolsVersion = "36.0.0"
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.elysium.vanguard"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0-TITAN"
 

@@ -119,7 +119,10 @@ private fun LockedVaultContent(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
-    val state = viewModel.state.value
+    // PHASE 10.4 — collect instead of reading .value in composition so the
+    // vault form actually recomposes when the StateFlow emits (lint E:
+    // StateFlowValueCalledInComposition).
+    val state by viewModel.state.collectAsState()
 
     Column(
         modifier = modifier

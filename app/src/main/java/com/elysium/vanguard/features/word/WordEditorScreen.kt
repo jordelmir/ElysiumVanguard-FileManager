@@ -576,7 +576,10 @@ private fun ColorSwatchRow(viewModel: WordEditorViewModel) {
 @Composable
 private fun FormatPanel(viewModel: WordEditorViewModel) {
     val doc by viewModel.doc.collectAsState()
-    val selectedBlock = doc.blocks.getOrNull(viewModel.selectedBlock.value.let { selectedIndex(it) })
+    // PHASE 10.4 — collect the selection instead of reading .value during
+    // composition (lint E: StateFlowValueCalledInComposition).
+    val selectedBlockIndex by viewModel.selectedBlock.collectAsState()
+    val selectedBlock = doc.blocks.getOrNull(selectedBlockIndex.let { selectedIndex(it) })
     val para = selectedBlock as? WordParagraph
     var lineSpacing by remember { mutableStateOf(para?.format?.lineSpacingMultiplier ?: 1.15f) }
     var spaceBefore by remember { mutableStateOf(para?.format?.spaceBeforePt ?: 0f) }

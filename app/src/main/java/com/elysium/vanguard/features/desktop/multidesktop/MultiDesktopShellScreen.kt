@@ -3,6 +3,9 @@ package com.elysium.vanguard.features.desktop.multidesktop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.zIndex
 import androidx.compose.runtime.Composable
@@ -54,7 +57,9 @@ fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
     // The pendingPaths map is read by [PositionedWindow]
     // inside [DesktopShellContent] to inject the path
     // into the Files body.
-    val pendingPaths = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    // PHASE 10.4 — remember the map: a fresh empty map per recomposition meant
+    // the collector wrote to an orphan instance (lint E: UnrememberedMutableState).
+    val pendingPaths = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
     androidx.compose.runtime.LaunchedEffect(registry) {
         registry.actions.collect { action ->
             when (action) {
@@ -81,7 +86,8 @@ fun MultiDesktopShellScreen(viewModel: MultiDesktopShellViewModel) {
             }
         }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
+    // PHASE 10.4 — targetSdk 37 edge-to-edge: keep the shell below the bars.
+    Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         DesktopShellContent(
             state = active,
             pendingPaths = pendingPaths,
