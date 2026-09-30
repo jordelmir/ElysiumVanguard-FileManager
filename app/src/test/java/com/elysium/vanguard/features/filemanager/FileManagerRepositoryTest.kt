@@ -1,5 +1,6 @@
 package com.elysium.vanguard.features.filemanager
 
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -209,5 +210,35 @@ class FileManagerRepositoryTest {
 
     @Test fun `getFolderSizeRecursive returns 0 for a nonexistent path`() {
         assertEquals(0L, repo.getFolderSizeRecursive(File(tmp.root, "ghost")))
+    }
+
+    // ---- getFiles listing contract (ZArchiver baseline) ----
+
+    /**
+     * PHASE 10.2b — a file manager must list EVERY entry a directory
+     * returns, including dotfiles/dot-directories. This pins down that no
+     * layer of getFiles ever filters "hidden" names.
+     */
+    @Test fun `getFiles lists hidden dotfiles and never filters entries`() = runBlocking {
+        val dir = File(tmp.root, "mixed").apply { mkdirs() }
+        File(dir, ".hidden.txt").writeText("h")
+        File(dir, "visible.txt").writeText("v")
+        File(dir, ".config").mkdirs()
+        File(dir, "Zipped.zip").writeText("z")
+
+        val listed = repo.getFiles(dir.absolutePath).first()
+        val names = listed.map { it.name }.toSet()
+        assertEquals(setOf(".hidden.txt", "visible.txt", ".config", "Zipped.zip"), names)
+
+        // folders sort before files, then alphabetical (stable UX)
+        assertEquals(listOf(".config", ".hidden.txt", "visible.txt", "Zipped.zip"),
+            listed.map { it.name })
+    }
+
+    @Test fun `getFiles on empty directory emits empty list not null`() = runBlocking {
+        val dir = File(tmp.root, "empty").apply { mkdirs() }
+        val listed = repo.getFiles(dir.absolutePath).first()
+        assertNotNull(listed)
+        assertTrue(listed.isEmpty())
     }
 }

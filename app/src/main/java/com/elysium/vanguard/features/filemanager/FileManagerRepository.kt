@@ -88,7 +88,11 @@ open class FileManagerRepository @Inject constructor(
 
     private fun getMimeType(file: File): String {
         val extension = file.extension.lowercase()
-        return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+        // getSingleton() is non-null on device but can come back null under
+        // JVM test stubs — without the safe call the whole listing flow
+        // NPEs and getFiles() silently emits an empty list (PHASE 10.2b).
+        return android.webkit.MimeTypeMap.getSingleton()
+            ?.getMimeTypeFromExtension(extension) ?: "application/octet-stream"
     }
 
     private fun getPermissionsString(file: File): String {

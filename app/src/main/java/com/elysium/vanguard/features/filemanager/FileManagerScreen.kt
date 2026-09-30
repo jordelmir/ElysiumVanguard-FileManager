@@ -203,6 +203,28 @@ fun FileManagerScreen(
             activity.openAllFilesAccessSettings()
         }
     }
+    val requestFullAccessFlow = {
+        if (activity is com.elysium.vanguard.MainActivity) {
+            activity.requestStoragePermissionsThenAccessSettings()
+        } else {
+            openAccessSettings()
+        }
+    }
+
+    // PHASE 10.2b — one-time explanation dialog (ZArchiver-style). The
+    // dismissable banner alone was too easy to miss AND the app never
+    // requested the runtime READ permissions, so fresh installs showed an
+    // empty/half-empty storage. Ask once, chain media permissions + the
+    // All-files-access toggle, remember the answer. The banner stays as a
+    // persistent reminder until the toggle is actually on.
+    val accessPrefs = remember {
+        context.getSharedPreferences("titan_storage_access", android.content.Context.MODE_PRIVATE)
+    }
+    var showAccessDialog by remember {
+        mutableStateOf(
+            needsFullAccess && !accessPrefs.getBoolean("storage_access_prompted", false)
+        )
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -240,6 +262,20 @@ fun FileManagerScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
+    }
+
+    if (showAccessDialog) {
+        StorageAccessDialog(
+            onGrant = {
+                showAccessDialog = false
+                accessPrefs.edit().putBoolean("storage_access_prompted", true).apply()
+                requestFullAccessFlow()
+            },
+            onLater = {
+                showAccessDialog = false
+                accessPrefs.edit().putBoolean("storage_access_prompted", true).apply()
+            }
+        )
     }
 
     Box(modifier = Modifier.fillMaxSize().background(TitanColors.AbsoluteBlack)) {
@@ -598,7 +634,11 @@ fun FileManagerScreen(
                                 if (viewMode == FileViewMode.TACTICAL) {
                                     if (filteredFiles.isEmpty()) {
                                         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                            RadarScanningPlaceholder("NO DATA NODES DETECTED")
+                                            if (needsFullAccess) {
+                                                StorageAccessRequiredPlaceholder(onGrant = requestFullAccessFlow)
+                                            } else {
+                                                RadarScanningPlaceholder("NO DATA NODES DETECTED")
+                                            }
                                         }
                                     } else {
                                         LazyColumn(
@@ -656,7 +696,11 @@ fun FileManagerScreen(
                                     // AESTHETIC MODE (Grid)
                                     if (filteredFiles.isEmpty()) {
                                         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                            RadarScanningPlaceholder("EMPTY DATA CLUSTER")
+                                            if (needsFullAccess) {
+                                                StorageAccessRequiredPlaceholder(onGrant = requestFullAccessFlow)
+                                            } else {
+                                                RadarScanningPlaceholder("EMPTY DATA CLUSTER")
+                                            }
                                         }
                                     } else {
                                         LazyVerticalGrid(
@@ -2554,4 +2598,105 @@ private fun AddStorageChipDialog(
         },
         containerColor = TitanColors.CarbonGray,
     )
+}
+
+/**
+ * PHASE 10.2b — one-time dialog that explains WHY full storage access is
+ * needed (showing every file, including hidden ones, like ZArchiver) and
+ * chains the runtime media permissions + the All-files-access Settings
+ * screen. Shown once per install; the banner remains as a reminder.
+ */
+@Composable
+fun StorageAccessDialog(
+    onGrant: () -> Unit,
+    onLater: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onLater,
+        containerColor = Color(0xFF0C111C),
+        title = {
+            Text(
+                "VER TODOS TUS ARCHIVOS",
+                color = TitanColors.NeonOrange,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+        },
+        text = {
+            Text(
+                "Titan necesita permiso de medios y el interruptor «Acceso a todos los archivos» " +
+                    "para mostrar el almacenamiento completo — incluidos archivos ocultos y carpetas " +
+                    "de otras apps — igual que ZArchiver. Sin él, la lista aparecerá vacía o incompleta.",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 13.sp,
+                lineHeight = 18.sp
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onGrant,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TitanColors.NeonOrange,
+                    contentColor = Color.Black
+                )
+            ) {
+                Text("CONCEDER ACCESO", fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onLater) {
+                Text("AHORA NO", color = Color.White.copy(alpha = 0.5f), fontFamily = FontFamily.Monospace)
+            }
+        }
+    )
+}
+
+/**
+ * PHASE 10.2b — honest empty state: when the directory is empty AND the
+ * All-files-access toggle is off, the truth is "no access", not "no files".
+ * One tap takes the user to the Settings flow instead of showing a fake
+ * empty scan.
+ */
+@Composable
+fun StorageAccessRequiredPlaceholder(onGrant: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Lock,
+            contentDescription = null,
+            tint = TitanColors.NeonOrange,
+            modifier = Modifier.size(46.dp)
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+            "SIN ACCESO AL ALMACENAMIENTO",
+            color = TitanColors.NeonOrange,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            letterSpacing = 0.8.sp,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "No es que no haya archivos: el sistema los está ocultando. Concede «Acceso a todos los archivos» para ver TODO, incluidos los ocultos.",
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(18.dp))
+        Button(
+            onClick = onGrant,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = TitanColors.NeonOrange,
+                contentColor = Color.Black
+            )
+        ) {
+            Text("CONCEDER ACCESO", fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+        }
+    }
 }

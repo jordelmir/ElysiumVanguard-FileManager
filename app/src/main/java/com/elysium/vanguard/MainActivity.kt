@@ -42,6 +42,15 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    // PHASE 10.2b — the manifest declares READ_EXTERNAL_STORAGE/READ_MEDIA_*
+    // but the app NEVER requested them at runtime (granted=false on every
+    // fresh install), which is why listings were empty/partial until the
+    // user manually flipped "All files access". This launcher asks for the
+    // media READ permissions first, then deep-links to the All-files-access
+    // toggle: together they give a file manager complete visibility
+    // (ZArchiver baseline).
+    private lateinit var storagePermissionsLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
+
     /**
      * PHASE 8.3 — Hilt-injected SAF tree manager. Kept for OPTIONAL advanced
      * use (the user can still grant a scoped tree from Settings → Advanced),
@@ -52,6 +61,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        storagePermissionsLauncher = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+        ) {
+            // Regardless of the media-permission outcome, the OS-level
+            // "All files access" toggle is the real file-manager switch —
+            // always continue into that Settings screen.
+            openAllFilesAccessSettings()
+        }
 
         // PHASE 10.2: no more SAF picker prompt. The app launches into the
         // dashboard / file manager immediately. If Android 11+ is hiding
@@ -761,10 +779,41 @@ class MainActivity : ComponentActivity() {
 
 
     /**
-     * PHASE 10.2 — the only "restriction" left is the OS-level All-files-access
-     * toggle on Android 11+. We deep-link the user straight to that screen
-     * so they can flip it on in one tap. No SAF picker, no first-launch
-     * dialog, no permission prompt.
+     * PHASE 10.2b — request the runtime READ permissions the manifest
+     * declares (they were never requested on a fresh install) and chain
+     * into [openAllFilesAccessSettings] so the user lands on the one
+     * toggle that makes the file manager see every file.
+     */
+    fun requestStoragePermissionsThenAccessSettings() {
+        val wanted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                android.Manifest.permission.READ_MEDIA_IMAGES,
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO,
+            )
+        } else {
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            )
+        }
+        val missing = wanted.filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            openAllFilesAccessSettings()
+        } else {
+            storagePermissionsLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    /**
+     * PHASE 10.2 — Android 11+ raw /sdcard listing needs the OS-level
+     * All-files-access toggle: without it `listFiles()` shows directories
+     * but every file comes back unreadable (the "hidden files" bug).
+     * We deep-link the user straight to that screen so they can flip it
+     * on in one tap; [requestStoragePermissionsThenAccessSettings] chains
+     * the runtime media permissions in front of it when they are missing.
      *
      * `Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` is documented
      * (API 30+) and works on every device we ship to. If the OEM hid the
